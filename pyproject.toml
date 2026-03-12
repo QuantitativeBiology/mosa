@@ -27,7 +27,7 @@ plot = [
 ]
 dev = [
     "pytest>=8.0",
-    "mosa[plot]",
+    "generative-multi-omics-data-integration-library[plot]",
 ]
 
 [project.scripts]
