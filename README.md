@@ -10,7 +10,6 @@ MOSA is a conditional variational autoencoder for integrating multiple omic data
 - Feature-level missing data handling
 - Macro (group-balanced) reconstruction loss
 - KL warmup scheduling
-- Diagnostic plotting and clustering metrics (UMAP, Calinski-Harabasz, Davies-Bouldin)
 
 ## Quick start
 
