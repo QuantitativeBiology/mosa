@@ -106,6 +106,8 @@ class MOSAConfig:
     samplesheet_path: str = ""
     mutations_path: str = ""
     output_dir: str = "outputs"
+    inference: bool = False
+    target_batch: str = ""
     use_tissue_conditional: bool = True
     use_mutations_conditional: bool = False
     n_batches: int = 0

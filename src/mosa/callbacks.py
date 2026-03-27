@@ -15,10 +15,14 @@ class SaveLatentAndReconCallback(pl.Callback):
 
     Creates the following files inside ``output_dir``:
 
-    - ``data/latent.csv`` — joint latent z for the training split
-    - ``data/recon_{omic}.csv`` — reconstructed omic for the training split
-    - ``inference/latent.csv`` — joint latent z for the validation split
-    - ``inference/recon_{omic}.csv`` — reconstructed omic for the validation split
+    - ``train/latent.csv`` — joint latent z for the training split
+    - ``train/recon_{omic}.csv`` — reconstructed omic for the training split
+    - ``val/latent.csv`` — joint latent z for the validation split
+    - ``val/recon_{omic}.csv`` — reconstructed omic for the validation split
+    - ``full/latent.csv`` — joint latent z for all samples with original conditionals
+    - ``full/recon_{omic}.csv`` — reconstructed omic for all samples with original conditionals
+    - ``inference/latent.csv`` — corrected latent z for all samples with forced target batch
+    - ``inference/recon_{omic}.csv`` — corrected reconstructions with forced target batch
     """
 
     def __init__(self, output_dir: str | Path):
@@ -26,19 +30,54 @@ class SaveLatentAndReconCallback(pl.Callback):
         self.output_dir = Path(output_dir)
 
     def on_fit_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-        """Run inference on train and val splits and save results to CSV."""
+        """Save train/val/full outputs and optional corrected inference outputs."""
         logger.debug("Saving latent representations and reconstructions to %s", self.output_dir)
         datamodule = trainer.datamodule
 
         self._save_split(
             pl_module,
-            datamodule.train_dataloader(),
-            self.output_dir / "data",
+            datamodule.train_eval_dataloader(),
+            self.output_dir / "train",
             datamodule,
         )
+
         val_loader = datamodule.val_dataloader()
         if val_loader is not None:
-            self._save_split(pl_module, val_loader, self.output_dir / "inference", datamodule)
+            self._save_split(pl_module, val_loader, self.output_dir / "val", datamodule)
+
+        full_loader = datamodule.full_dataloader()
+        self._save_split(pl_module, full_loader, self.output_dir / "full", datamodule)
+
+        if datamodule.config.inference:
+            target_idx, target_name = self._resolve_target_batch(datamodule)
+            self._save_split(
+                pl_module,
+                full_loader,
+                self.output_dir / "inference",
+                datamodule,
+                force_source_id=target_idx,
+            )
+            logger.debug(
+                "Saved corrected inference outputs with target model_type='%s' (index=%d)",
+                target_name,
+                target_idx,
+            )
+
+    def _resolve_target_batch(self, datamodule) -> tuple[int, str]:
+        """Resolve target model_type for corrected inference."""
+        categories = list(datamodule.batch_categories)
+        if not categories:
+            raise RuntimeError("batch_categories are not available for corrected inference")
+
+        target = datamodule.config.target_batch.strip()
+        if target:
+            if target not in categories:
+                raise ValueError(
+                    f"target_batch '{target}' not found in available model_type categories: {categories}"
+                )
+            return categories.index(target), target
+
+        return 0, categories[0]
 
     def _inverse_transform(self, omic: str, recon, datamodule) -> tuple:
         """Map reconstructions back to original omic scale when scaler is available."""
@@ -47,10 +86,18 @@ class SaveLatentAndReconCallback(pl.Callback):
             return recon, False
         return scaler.inverse_transform(recon), True
 
-    def _save_split(self, model, loader, out_dir: Path, datamodule) -> None:
+    def _save_split(
+        self,
+        model,
+        loader,
+        out_dir: Path,
+        datamodule,
+        force_source_id: int | None = None,
+    ) -> None:
         """Run model.predict() on a dataloader and write CSV files."""
         out_dir.mkdir(parents=True, exist_ok=True)
-        results = model.predict(loader)
+        n_batches = len(datamodule.batch_categories) if force_source_id is not None else None
+        results = model.predict(loader, force_source_id=force_source_id, n_batches=n_batches)
 
         pd.DataFrame(results["z"], index=results["sample_names"]).to_csv(out_dir / "latent.csv")
         logger.debug("Saved latent %s to %s", results["z"].shape, out_dir / "latent.csv")

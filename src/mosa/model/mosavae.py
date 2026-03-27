@@ -299,7 +299,12 @@ class MOSAVAE(pl.LightningModule):
         )
 
     @torch.no_grad()
-    def predict(self, loader: torch.utils.data.DataLoader) -> dict:
+    def predict(
+        self,
+        loader: torch.utils.data.DataLoader,
+        force_source_id: int | None = None,
+        n_batches: int | None = None,
+    ) -> dict:
         """Run inference on a dataloader and collect results.
 
         Returns
@@ -317,6 +322,21 @@ class MOSAVAE(pl.LightningModule):
 
         for batch in loader:
             batch = batch.to(self.device)
+
+            if force_source_id is not None:
+                if n_batches is None or n_batches <= 0:
+                    raise ValueError("n_batches must be provided when force_source_id is used")
+                if force_source_id < 0 or force_source_id >= n_batches:
+                    raise ValueError(
+                        f"force_source_id={force_source_id} out of range for n_batches={n_batches}"
+                    )
+
+                # Conditionals start with one-hot model_type block.
+                conditionals = batch.conditionals.clone()
+                conditionals[:, :n_batches] = 0.0
+                conditionals[:, force_source_id] = 1.0
+                batch.conditionals = conditionals
+
             out = self.forward(batch)
 
             all_z.append(out["z"].cpu())
