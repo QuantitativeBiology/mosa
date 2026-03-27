@@ -13,6 +13,5 @@ __pycache__/
 *.egg-info/
 
 # Data and Logs (Careful: only if you don't want to take your outputs to GitHub)
-#*.log
-#data/
-#outputs/
+*.log
+outputs/
