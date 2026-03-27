@@ -28,12 +28,26 @@ class SaveLatentAndReconCallback(pl.Callback):
     def on_fit_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Run inference on train and val splits and save results to CSV."""
         logger.debug("Saving latent representations and reconstructions to %s", self.output_dir)
-        self._save_split(pl_module, trainer.datamodule.train_dataloader(), self.output_dir / "data")
-        val_loader = trainer.datamodule.val_dataloader()
-        if val_loader is not None:
-            self._save_split(pl_module, val_loader, self.output_dir / "inference")
+        datamodule = trainer.datamodule
 
-    def _save_split(self, model, loader, out_dir: Path) -> None:
+        self._save_split(
+            pl_module,
+            datamodule.train_dataloader(),
+            self.output_dir / "data",
+            datamodule,
+        )
+        val_loader = datamodule.val_dataloader()
+        if val_loader is not None:
+            self._save_split(pl_module, val_loader, self.output_dir / "inference", datamodule)
+
+    def _inverse_transform(self, omic: str, recon, datamodule) -> tuple:
+        """Map reconstructions back to original omic scale when scaler is available."""
+        scaler = getattr(datamodule, "scalers", {}).get(omic)
+        if scaler is None:
+            return recon, False
+        return scaler.inverse_transform(recon), True
+
+    def _save_split(self, model, loader, out_dir: Path, datamodule) -> None:
         """Run model.predict() on a dataloader and write CSV files."""
         out_dir.mkdir(parents=True, exist_ok=True)
         results = model.predict(loader)
@@ -41,7 +55,21 @@ class SaveLatentAndReconCallback(pl.Callback):
         pd.DataFrame(results["z"], index=results["sample_names"]).to_csv(out_dir / "latent.csv")
         logger.debug("Saved latent %s to %s", results["z"].shape, out_dir / "latent.csv")
 
+        feature_names = getattr(datamodule, "feature_names", {})
         for omic, recon in results["x_hat"].items():
+            recon_out, was_inversed = self._inverse_transform(omic, recon, datamodule)
+            cols = feature_names.get(omic)
+            if cols is not None and len(cols) == recon_out.shape[1]:
+                df = pd.DataFrame(recon_out, index=results["sample_names"], columns=cols)
+            else:
+                df = pd.DataFrame(recon_out, index=results["sample_names"])
+
             path = out_dir / f"recon_{omic}.csv"
-            pd.DataFrame(recon, index=results["sample_names"]).to_csv(path)
-            logger.debug("Saved recon '%s' %s to %s", omic, recon.shape, path)
+            df.to_csv(path)
+            logger.debug(
+                "Saved recon '%s' %s to %s (inverse_transform=%s)",
+                omic,
+                recon_out.shape,
+                path,
+                was_inversed,
+            )
