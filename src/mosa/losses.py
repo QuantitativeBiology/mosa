@@ -27,8 +27,10 @@ def reconstruction_loss(
     group : Tensor [B] or None
         Group labels for balanced loss.
     sample_weights : Tensor [B] or None
+        Optional per-sample weights used only when ``loss_type='mean'``.
     loss_type : str
-        "mean" for standard masked MSE, "macro" for group-balanced.
+        ``"mean"`` for sample-weighted masked MSE,
+        ``"macro"`` for group-balanced masked MSE.
 
     Returns
     -------
@@ -50,9 +52,6 @@ def reconstruction_loss(
         n_present = feature_mask.sum(dim=1).clamp(min=1)  # [B]
         per_sample = mse_masked.sum(dim=1) / n_present  # [B]
 
-        if sample_weights is not None:
-            per_sample = per_sample * sample_weights
-
         if loss_type == "macro" and group is not None:
             sample_mask = feature_mask.any(dim=1)
             if not sample_mask.any():
@@ -73,6 +72,8 @@ def reconstruction_loss(
             if group_losses:
                 omic_losses[omic] = torch.stack(group_losses).mean()
         else:
+            if sample_weights is not None:
+                per_sample = per_sample * sample_weights
             omic_losses[omic] = per_sample.mean()
 
     if not omic_losses:
