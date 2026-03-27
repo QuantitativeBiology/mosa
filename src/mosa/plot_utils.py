@@ -530,10 +530,17 @@ def _load_data_files(output_dir, views, samplesheet_file):
     output_dir = Path(output_dir)
     data = {"omics": {}, "samplesheet": _load_samplesheet(samplesheet_file)}
 
-    for key, subdir in [("z", "data"), ("z_inf", "inference")]:
-        path = output_dir / subdir / "latent.csv"
-        if path.exists():
-            data[key] = pd.read_csv(path, index_col=0)
+    # Prefer full pass latents when available; fallback to train split latents.
+    z_full_path = output_dir / "full" / "latent.csv"
+    z_train_path = output_dir / "train" / "latent.csv"
+    if z_full_path.exists():
+        data["z"] = pd.read_csv(z_full_path, index_col=0)
+    elif z_train_path.exists():
+        data["z"] = pd.read_csv(z_train_path, index_col=0)
+
+    z_inf_path = output_dir / "inference" / "latent.csv"
+    if z_inf_path.exists():
+        data["z_inf"] = pd.read_csv(z_inf_path, index_col=0)
 
     for name, view_cfg in views.items():
         omic_data = {}
@@ -542,8 +549,11 @@ def _load_data_files(output_dir, views, samplesheet_file):
         if input_path.exists():
             omic_data["input"] = pd.read_csv(input_path, index_col=0).T
 
-        recon_train_path = output_dir / "data" / f"recon_{name}.csv"
-        if recon_train_path.exists():
+        recon_full_path = output_dir / "full" / f"recon_{name}.csv"
+        recon_train_path = output_dir / "train" / f"recon_{name}.csv"
+        if recon_full_path.exists():
+            omic_data["recon"] = pd.read_csv(recon_full_path, index_col=0)
+        elif recon_train_path.exists():
             omic_data["recon"] = pd.read_csv(recon_train_path, index_col=0)
 
         recon_inf_path = output_dir / "inference" / f"recon_{name}.csv"
