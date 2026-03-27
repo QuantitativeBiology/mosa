@@ -112,12 +112,25 @@ Training progress is printed to the terminal. When it finishes, MOSA saves the f
 ```
 outputs/my_experiment/
   lightning_logs/          # training metrics (loss curves)
-  data/
+  train/
     latent.csv             # latent representations (training samples)
     recon_transcriptomics.csv  # reconstructions (training samples)
-  inference/
+  val/
     latent.csv             # latent representations (validation samples)
     recon_transcriptomics.csv  # reconstructions (validation samples)
+  full/
+    latent.csv             # latent representations (all samples, original conditionals)
+    recon_transcriptomics.csv  # reconstructions (all samples, original conditionals)
+  inference/               # only if inference: true
+    latent.csv             # corrected latent representations (all samples)
+    recon_transcriptomics.csv  # corrected reconstructions (all samples)
+```
+
+To enable corrected inference (target batch forcing):
+
+```yaml
+inference: true
+target_batch: Tumor    # optional; empty uses first available model_type
 ```
 
 ## Generating plots

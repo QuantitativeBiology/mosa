@@ -97,15 +97,29 @@ trainer:
 # ──────────────────────────────────────────────────────────────────
 
 # Root directory for all saved artefacts.
+#
+# Optional corrected inference (mvae_adv-style):
+#   inference: true  -> run corrected inference by forcing all samples to one model_type
+#   target_batch: ""  -> if empty, first model_type category is used
+#                        otherwise set to one existing model_type value
+#
 # After training the following files are written:
 #
 #   <output_dir>/
 #     mosa-<epoch>-<val_loss>.ckpt        – model checkpoints (top-k by val/loss)
-#     data/
+#     train/
 #       latent.csv                        – joint latent z for the training split
 #       recon_<omic>.csv                  – reconstructed features for the training split
-#     inference/
+#     val/
 #       latent.csv                        – joint latent z for the validation split
 #       recon_<omic>.csv                  – reconstructed features for the validation split
+#     full/
+#       latent.csv                        – joint latent z for all samples (original conditionals)
+#       recon_<omic>.csv                  – reconstructed features for all samples (original conditionals)
+#     inference/                           – only when inference: true
+#       latent.csv                        – corrected latent z for all samples
+#       recon_<omic>.csv                  – corrected reconstructed features for all samples
 
 output_dir: outputs
+inference: false
+target_batch: ""

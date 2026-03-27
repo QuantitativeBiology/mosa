@@ -213,7 +213,14 @@ trainer:
 
 ```yaml
 output_dir: outputs/my_experiment
+inference: false
+target_batch: ""
 ```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `inference` | `false` | If `true`, runs corrected inference by forcing all samples to one target `model_type` conditional and saves results under `inference/`. |
+| `target_batch` | `""` | Target `model_type` for corrected inference. If empty, uses the first available `model_type` category. |
 
 After training, this directory contains:
 
@@ -221,12 +228,18 @@ After training, this directory contains:
 outputs/my_experiment/
   lightning_logs/version_0/
     metrics.csv                       # all logged metrics per epoch
-  data/
+  train/
     latent.csv                        # latent z for training samples
     recon_<view>.csv                  # reconstructed features (training)
-  inference/
+  val/
     latent.csv                        # latent z for validation samples
     recon_<view>.csv                  # reconstructed features (validation)
+  full/
+    latent.csv                        # latent z for all samples (original conditionals)
+    recon_<view>.csv                  # reconstructed features for all samples (original conditionals)
+  inference/
+    latent.csv                        # corrected latent z for all samples (forced target model_type)
+    recon_<view>.csv                  # corrected reconstructed features (forced target model_type)
   mosa-<epoch>-<val_loss>.ckpt       # model checkpoints (if val enabled)
 ```
 
