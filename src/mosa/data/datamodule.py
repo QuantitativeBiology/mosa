@@ -77,6 +77,7 @@ class MOSADataModule(pl.LightningDataModule):
         self.tissue_categories: list[str] = []
         self.train_dataset: MOSADataset | None = None
         self.val_dataset: MOSADataset | None = None
+        self.full_dataset: MOSADataset | None = None
         self.class_weights: np.ndarray | None = None
 
     def setup(self, stage: str | None = None) -> None:
@@ -126,19 +127,22 @@ class MOSADataModule(pl.LightningDataModule):
             categories=sorted(samplesheet["model_type"].unique()),
             ordered=True,
         )
-        label_codes = np.asarray(model_type_cats.codes, dtype=np.intp)
+        batch_codes = np.asarray(model_type_cats.codes, dtype=np.intp)
 
         if self.config.test_size > 0:
             train_idx, val_idx = train_test_split(
                 np.arange(len(common_samples)),
                 test_size=self.config.test_size,
                 random_state=self.config.random_seed,
-                stratify=label_codes,
+                stratify=batch_codes,
             )
         else:
             train_idx = np.arange(len(common_samples))
             val_idx = np.array([], dtype=int)
         logger.debug("  train=%d, val=%d", len(train_idx), len(val_idx))
+
+        # Full loader
+        all_idx = np.arange(len(common_samples))
 
         # 6. Build masks, fit scalers (train only), transform
         logger.debug("Building masks and fitting scalers")
@@ -189,16 +193,16 @@ class MOSADataModule(pl.LightningDataModule):
         logger.debug("  conditionals shape: %s", conditionals.shape)
 
         # Source IDs (integer model_type index for discriminator/loss)
-        source_ids = label_codes
+        source_ids = batch_codes
 
         # 8. Class weights (inverse-frequency balancing)
-        unique_classes = np.unique(label_codes)
-        n_samples = len(label_codes)
+        unique_classes = np.unique(batch_codes)
+        n_samples = len(batch_codes)
         n_classes = len(unique_classes)
         class_weights = np.zeros(n_classes, dtype=np.float64)
         for i, cls in enumerate(unique_classes):
-            class_weights[i] = n_samples / (n_classes * np.sum(label_codes == cls))
-        sample_weights = class_weights[label_codes].astype(np.float32)
+            class_weights[i] = n_samples / (n_classes * np.sum(batch_codes == cls))
+        sample_weights = class_weights[batch_codes].astype(np.float32)
         self.class_weights = class_weights.astype(np.float32)
 
         # 9. Update config dims from loaded data
@@ -235,6 +239,17 @@ class MOSADataModule(pl.LightningDataModule):
                 omic_names=omic_names,
             )
 
+        self.full_dataset = MOSADataset(
+            omics_data={k: v[all_idx] for k, v in omics_all.items()},
+            masks={k: v[all_idx] for k, v in masks_all.items()},
+            conditionals=conditionals[all_idx],
+            tissue_labels=tissue_labels[all_idx],
+            source_ids=source_ids[all_idx],
+            sample_weights=sample_weights[all_idx],
+            sample_names=[common_samples[i] for i in all_idx],
+            omic_names=omic_names,
+        )
+
     def train_dataloader(self) -> DataLoader:
         """Return a DataLoader for the training split."""
         return DataLoader(
@@ -245,12 +260,40 @@ class MOSADataModule(pl.LightningDataModule):
             num_workers=self.config.trainer.num_workers,
         )
 
+    def train_eval_dataloader(self) -> DataLoader:
+        """Return a deterministic DataLoader for the training split.
+        Used for exporting train-set predictions without sample reordering.
+        """
+        if self.train_dataset is None:
+            raise RuntimeError("train_dataset is not initialized")
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.config.batch_size,
+            shuffle=False,
+            collate_fn=collate_fn,
+            num_workers=self.config.trainer.num_workers,
+        )
+
     def val_dataloader(self) -> DataLoader | None:
         """Return a DataLoader for the validation split, or None if no validation set."""
         if self.val_dataset is None:
             return None
         return DataLoader(
             self.val_dataset,
+            batch_size=self.config.batch_size,
+            shuffle=False,
+            collate_fn=collate_fn,
+            num_workers=self.config.trainer.num_workers,
+        )
+
+    def full_dataloader(self) -> DataLoader:
+        """Return a deterministic DataLoader with all available samples.
+        """
+        if self.full_dataset is None:
+            raise RuntimeError("full_dataset is not initialized")
+
+        return DataLoader(
+            self.full_dataset,
             batch_size=self.config.batch_size,
             shuffle=False,
             collate_fn=collate_fn,
