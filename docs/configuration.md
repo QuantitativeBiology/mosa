@@ -4,26 +4,25 @@ All experiment parameters are defined in a single YAML config file. This page do
 
 ## Minimal config
 
-The shortest valid config defines one view and a samplesheet:
+The shortest valid config defines one view and points to a MuData file:
 
 ```yaml
+data_path: data/data.h5mu
+
 views:
   gexp:
-    path: data/gexp.csv
-
-samplesheet_path: data/samplesheet.csv
+    hidden_layer_dims: [512, 256]
 ```
 
 Everything else uses sensible defaults. The sections below document what those defaults are and when you might want to change them.
 
 ## Views
 
-Each entry under `views:` defines one omic modality. The key (e.g., `gexp`) becomes the view name used in output filenames and logs.
+Each entry under `views:` defines one omic modality. The key (e.g., `gexp`) must match a modality name in the MuData file.
 
 ```yaml
 views:
   gexp:
-    path: data/gexp.csv              # (required) path to CSV, features x samples
     hidden_layer_dims: [512, 256]     # encoder/decoder MLP layer sizes
     loss_type: mean                   # "mean" or "macro"
     dropout_p: 0.1                    # dropout rate in encoder/decoder
@@ -32,14 +31,13 @@ views:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `path` | (required) | Path to the omic CSV file. Format: features as rows, samples as columns. |
 | `hidden_layer_dims` | `[512, 256]` | Sizes of hidden layers in the encoder and decoder MLPs. The **last value** also determines the per-view embedding dimension before the joint latent bottleneck. |
 | `loss_type` | `"mean"` | `"mean"`: standard MSE averaged over present features. `"macro"`: class-balanced MSE where each model_type contributes equally regardless of sample count. |
 | `dropout_p` | `0.1` | Dropout probability applied in encoder and decoder layers. Must be in [0, 1). |
 | `discrete` | `false` | If `true`, skips z-score normalization for this view (useful for integer/count data). |
 
 **Auto-set fields** (leave at 0):
-- `input_dim`: Set automatically from the number of features in the CSV.
+- `input_dim`: Set automatically from the number of features in the MuData modality.
 - `output_dim`: Set automatically to match `input_dim`. Only override if you want the decoder to output a different dimensionality.
 
 ### Adding multiple views
@@ -47,21 +45,18 @@ views:
 ```yaml
 views:
   gexp:
-    path: data/gexp.csv
     hidden_layer_dims: [256, 128]
     loss_type: macro
 
   meth:
-    path: data/meth.csv
     hidden_layer_dims: [256, 128]
     loss_type: macro
 
   proteomics:
-    path: data/proteomics.csv
     hidden_layer_dims: [512, 256]
 ```
 
-You can define as many views as needed. MOSA builds a separate encoder and decoder for each.
+View names must match modality names in your MuData file. MOSA builds a separate encoder and decoder for each.
 
 ## Fusion method
 
@@ -81,30 +76,19 @@ joint_latent_dim: 64        # dimensionality of the shared latent space
 
 ## Conditionals
 
-Conditional vectors are concatenated to both encoder and decoder inputs. They provide the model with metadata about each sample.
+Metadata from the MuData `.obs` is automatically converted to conditional vectors:
+- `model_type` — always one-hot encoded
+- `tissue` — one-hot encoded if column exists
+- `mutation_*` columns — included if present
+
+Configure which to use:
 
 ```yaml
-samplesheet_path: data/samplesheet.csv   # (required) sample metadata
-use_tissue_conditional: true              # include tissue one-hot encoding
-use_mutations_conditional: false          # include binary mutation features
-mutations_path: ""                        # path to mutations CSV (if above is true)
+# tissue conditional is on by default; set false to exclude it
+# mutations are included if mutation_* columns exist in .obs
 ```
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `samplesheet_path` | `""` | Path to the samplesheet CSV. Must contain `model_id`, `model_type`, and `tissue` columns. |
-| `use_tissue_conditional` | `true` | One-hot encode the `tissue` column and include it in the conditional vector. |
-| `use_mutations_conditional` | `false` | Append binary mutation features to the conditional vector. |
-| `mutations_path` | `""` | Path to the mutations CSV. Required when `use_mutations_conditional` is `true`. |
-
-The `conditional_dim` and `n_batches` fields are computed automatically and should be left at 0.
-
-**How conditionals are built:**
-
-The conditional vector for each sample is the concatenation of:
-1. Model type one-hot encoding (always included)
-2. Tissue one-hot encoding (if `use_tissue_conditional: true`)
-3. Mutation binary features (if `use_mutations_conditional: true`)
+The `conditional_dim` is computed automatically from the MuData file.
 
 ## Loss weights
 
@@ -162,18 +146,25 @@ lr_gamma: 0.5                # multiplicative decay factor
 | `lr_step_size` | `100` | Epochs between StepLR decay steps. |
 | `lr_gamma` | `0.5` | Factor to multiply the learning rate at each step. |
 
-## Training
+## Data & Training
 
 ```yaml
+data_path: data/data.h5mu        # path to MuData file (.h5mu or .zarr)
+mask_layer_name: mask            # layer name in .layers for per-feature masks
+scaler_sample_frac: 1.0          # fraction of training data to fit scaler on
+
 num_epochs: 200
 batch_size: 64
-test_size: 0.1               # validation split fraction
-view_dropout_prob: 0.2        # probability of dropping an entire view during training
+test_size: 0.1                   # validation split fraction
+view_dropout_prob: 0.2           # probability of dropping an entire view during training
 random_seed: 42
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| `data_path` | `""` | Path to MuData file (.h5mu for eager loading or .zarr for lazy loading). |
+| `mask_layer_name` | `"mask"` | Layer name in MuData `.layers` containing per-feature boolean masks. |
+| `scaler_sample_frac` | `1.0` | Fraction of training data to fit StandardScaler on (e.g., 0.5 for large datasets to speed up scaler fitting). |
 | `num_epochs` | `200` | Maximum number of training epochs. |
 | `batch_size` | `64` | Number of samples per training batch. |
 | `test_size` | `0.1` | Fraction of data held out for validation. Set to `0` to use all data for training (disables early stopping and validation). |
@@ -187,7 +178,7 @@ Hardware and Lightning-specific settings. Nested under `trainer:`.
 ```yaml
 trainer:
   accelerator: auto           # auto | cpu | gpu | mps
-  devices: auto               # auto | integer
+  devices: auto               # auto | integer (for multi-GPU)
   precision: "32"             # "32" | "16-mixed" | "bf16-mixed"
   gradient_clip_val: 0.0      # max gradient norm (0 = disabled)
   accumulate_grad_batches: 1  # gradient accumulation steps
@@ -199,15 +190,17 @@ trainer:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `accelerator` | `"auto"` | Hardware backend. `"auto"` picks the best available. Use `"gpu"` to force GPU or `"mps"` for Apple Silicon. |
-| `devices` | `"auto"` | Number of devices. `"auto"` uses one device. Set to an integer for multi-device. |
-| `precision` | `"32"` | Floating-point precision. `"16-mixed"` or `"bf16-mixed"` for faster training with mixed precision. |
-| `gradient_clip_val` | `0.0` | Maximum gradient norm. Set > 0 to prevent gradient explosion. |
-| `accumulate_grad_batches` | `1` | Number of batches to accumulate before updating weights. Increase to simulate a larger batch size without more GPU memory. |
-| `log_every_n_steps` | `50` | How often (in training steps) to write metrics. |
-| `early_stopping_patience` | `20` | Stop training after this many epochs without improvement in `val/loss`. Only active when `test_size > 0`. |
-| `checkpoint_top_k` | `3` | Number of best model checkpoints to keep on disk. |
-| `num_workers` | `0` | Parallel data-loading workers. `0` uses the main process. Set to 4-8 for large datasets. |
+| `accelerator` | `"auto"` | `"auto"` picks GPU/MPS/CPU automatically. Use `"gpu"` to force GPU, `"mps"` for Apple Silicon. |
+| `devices` | `"auto"` | `"auto"` uses one device. Set to `2`, `4`, etc. for multi-GPU Distributed Data Parallel (DDP). |
+| `precision` | `"32"` | `"32"` for float32. `"16-mixed"` or `"bf16-mixed"` for faster mixed-precision training. |
+| `gradient_clip_val` | `0.0` | Max gradient norm. Set > 0 to prevent gradient explosion. |
+| `accumulate_grad_batches` | `1` | Simulate larger batches by accumulating gradients over N batches before updating. |
+| `log_every_n_steps` | `50` | How often (in training steps) to log metrics. |
+| `early_stopping_patience` | `20` | Stop after this many epochs without `val/loss` improvement. Only when `test_size > 0`. |
+| `checkpoint_top_k` | `3` | Keep the N best model checkpoints. |
+| `num_workers` | `0` | Parallel data-loading workers. `0` = main process. Set to 4-8 for large datasets or multi-GPU. |
+
+**Multi-GPU note**: Set `devices` to an integer (e.g., 4) to enable Distributed Data Parallel. For `.zarr` format with `num_workers > 0`, each worker reads independently (recommended for large data).
 
 ## Output
 

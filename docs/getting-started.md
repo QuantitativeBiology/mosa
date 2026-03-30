@@ -32,68 +32,54 @@ mosa --help
 
 ## Preparing your data
 
-MOSA expects two types of input files:
+### Step 1: Gather CSVs
 
-### Samplesheet (required)
+You need:
+- Samplesheet with columns: `model_id`, `model_type`, `tissue`
+- One omic CSV per modality (features × samples format)
+- Mutations CSV (optional, binary features × samples)
 
-A CSV file with sample metadata. It **must** contain these columns:
-
-| Column | Description |
-|--------|-------------|
-| `model_id` | Unique sample identifier (e.g., `ACH-000001`) |
-| `model_type` | Sample category used for batch correction (e.g., `Cell Line`, `Tumor`, `Organoid`) |
-| `tissue` | Tissue of origin (e.g., `Lung`, `Skin`) |
-
-Example:
-
+Example samplesheet:
 ```
-,model_id,model_type,tissue
-0,ACH-000001,Cell Line,Lung
-1,ACH-000002,Cell Line,Skin
-2,TCGA-A1-A0SO,Tumor,Breast
+model_id,model_type,tissue
+ACH-000001,Cell Line,Lung
+ACH-000002,Cell Line,Skin
+TCGA-A1-A0SO,Tumor,Breast
 ```
 
-### Omic data files (one per view)
-
-Each omic modality is a CSV file in **features x samples** format (features as rows, samples as columns). MOSA transposes these automatically at load time.
-
-Example (`transcriptomics.csv`):
-
-```
-,ACH-000001,ACH-000002,TCGA-A1-A0SO
-GENE_A,12.3,8.1,15.2
-GENE_B,0.5,1.2,0.8
-GENE_C,7.8,NaN,6.1
-```
-
-- Missing values (`NaN`) are handled automatically: MOSA builds per-sample feature masks and imputes missing values with zero after z-score normalization.
-- Samples that appear in the samplesheet but not in an omic file (or vice versa) are aligned automatically. Only samples present in **all** files are used.
-
-### Mutations file (optional)
-
-If you want to include mutation status as a conditional input, provide a CSV in the same features x samples format, where features are gene names and values are binary (0/1).
-
-## Writing a config file
-
-All experiment settings live in a single YAML file. Copy the template and edit it:
+### Step 2: Convert to MuData
 
 ```bash
-cp configs/example.yaml configs/my_experiment.yaml
+mosa convert \
+  --samplesheet data/samplesheet.csv \
+  --view gexp_voom:data/gexp.csv \
+  --view meth_combat:data/meth.csv \
+  --output data.h5mu \
+  [--mutations data/mutations.csv]
 ```
 
-At minimum, you need to set:
+For large datasets (> 10 GB), use `.zarr` for lazy loading:
+```bash
+mosa convert ... --output data.zarr --format zarr
+```
+
+This handles NaN imputation and creates masks automatically.
+
+### Step 3: Write config
 
 ```yaml
-views:
-  transcriptomics:
-    path: data/transcriptomics.csv    # your omic CSV
-    hidden_layer_dims: [512, 256]     # encoder/decoder layer sizes
+data_path: data/data.h5mu  # or data.zarr
 
-samplesheet_path: data/samplesheet.csv
+views:
+  gexp_voom:
+    hidden_layer_dims: [512, 256]
+  meth_combat:
+    hidden_layer_dims: [512, 256]
+
 output_dir: outputs/my_experiment
 ```
 
-You can add as many views as you like. See [Configuration Reference](configuration.md) for all available options.
+See [Configuration Reference](configuration.md) for all options. No need to specify `samplesheet_path` or `mutations_path`—they're in the MuData file.
 
 ## Training
 

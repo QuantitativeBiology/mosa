@@ -10,12 +10,13 @@ MOSA is a conditional Variational Autoencoder (VAE) that integrates multiple omi
 
 ```
 src/mosa/
-  cli.py                  # Entry point: mosa train / mosa plot
+  cli.py                  # Entry point: mosa train / mosa plot / mosa convert
   config.py               # MOSAConfig dataclass
-  utils.py                
+  utils.py
   losses.py               # Loss functions
   callbacks.py            # Saves latent + reconstructions after training
   plot_utils.py           # Plotting and metrics
+  convert.py              # CSV → MuData conversion
 
   model/
     mosavae.py            # MOSAVAE (LightningModule) — the main model
@@ -26,7 +27,7 @@ src/mosa/
     mlp.py                # Shared MLP building block
 
   data/
-    datamodule.py         # MOSADataModule + MOSADataset
+    datamodule.py         # MuDataDataModule + MOSADataset + LazyZarrDataset
     batch.py              # MOSABatch dataclass + collate_fn
 ```
 
@@ -141,21 +142,31 @@ The detachment in Phase 1 is critical: it trains the discriminator on the curren
 - **Discriminator optimizer**: Separate Adam optimizer over discriminator parameters. Learning rate set by `adv_learning_rate`.
 - **LR scheduling**: Optional StepLR applied to both optimizers at epoch boundaries.
 
+### Multi-GPU training
+
+When `trainer.devices > 1`, PyTorch Lightning enables Distributed Data Parallel (DDP):
+- Gradients synchronized across GPUs at each step
+- Data sharded across devices (each GPU processes a subset of batches)
+- `sync_batchnorm` automatically enabled for correct batch statistics across GPUs
+- SaveLatentAndReconCallback guarded with `is_global_zero` to prevent duplicate writes
+
+Recommended: use `.zarr` format with `num_workers > 0` so each worker independently streams its batches from disk, avoiding memory bloat.
+
 ## Data pipeline
 
-The data pipeline is handled by `MOSADataModule`, which orchestrates loading, alignment, splitting, and preprocessing.
+See [Data Pipeline & Batching](data-pipeline.md) for the full explanation of how data flows from MuData files through preprocessing, splitting, batching, and into the model.
 
-### Pipeline stages
+Quick summary: `MuDataDataModule.setup()` handles loading, alignment, splitting, preprocessing, and batch construction. Key steps:
 
-1. **Load CSVs**: Each view CSV is read and transposed from features x samples to samples x features format. Data is assumed to be already feature-engineered.
-2. **Load samplesheet**: Read metadata CSV, index by `model_id`.
-3. **Align samples**: Find the intersection of samples across all views, samplesheet, and (optionally) mutations. Only common samples are used.
-4. **Train/val split**: Stratified by `model_type` to preserve class proportions.
-5. **Build masks**: Boolean arrays marking which features are present (not NaN) per sample per view.
-6. **Fit scaler**: A `StandardScaler` is fit on **training data only** (to avoid data leakage). For each feature: `z = (x - mean) / std`. Views marked `discrete: true` in the config skip scaling.
-7. **Transform and impute**: Apply z-score normalization, then replace remaining NaN values with 0 (which represents the mean in scaled space).
-8. **Build conditionals**: One-hot encode model_type (always), tissue (optional), and mutations (optional). Concatenate into a single conditional vector per sample.
-9. **Compute class weights**: Inverse-frequency weighting so rare model types receive higher loss weight.
+1. Load MuData file (.h5mu or .zarr)
+2. Extract modalities, handle missing data
+3. Build conditionals from .obs (model_type, tissue, mutations)
+4. Train/val split (stratified by model_type)
+5. Fit scalers on training data only
+6. Compute class weights for imbalanced data
+7. Create MOSADataset (eager) or LazyZarrDataset (lazy)
+
+DataLoader + collate_fn produce MOSABatch objects ready for the model.
 
 ## Callbacks and outputs
 
