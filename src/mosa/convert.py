@@ -24,14 +24,16 @@ def csv_to_mudata(
     view_specs: list[tuple[str, str]],
     output_path: str,
     mutations_path: str | None = None,
+    format: str = "h5mu",
 ) -> None:
-    """Convert CSV dataset to MuData (.h5mu) format.
+    """Convert CSV dataset to MuData (.h5mu or .zarr) format.
 
     Args:
         samplesheet_path: Path to samplesheet CSV (must contain model_id, model_type, tissue).
         view_specs: List of (view_name, csv_path) tuples. CSVs are features x samples.
-        output_path: Path to save the MuData file (.h5mu).
+        output_path: Path to save the MuData file.
         mutations_path: Optional path to mutations CSV (features x samples, binary).
+        format: Output format, "h5mu" or "zarr".
     """
     import anndata
 
@@ -43,6 +45,9 @@ def csv_to_mudata(
     # 1. Load samplesheet
     logger.debug("Loading samplesheet from %s", samplesheet_path)
     samplesheet = pd.read_csv(samplesheet_path).set_index("model_id")
+    # Drop any unnamed index-artifact columns (e.g. 'Unnamed: 0') that appear
+    # when the source CSV was written with df.to_csv() without index=False.
+    samplesheet = samplesheet.loc[:, ~samplesheet.columns.str.match(r"^Unnamed")]
 
     # 2. Load view CSVs (features x samples) and transpose to samples x features
     logger.debug("Loading view CSVs")
@@ -81,7 +86,7 @@ def csv_to_mudata(
 
     for view_name, df in omics.items():
         X = df.values.astype(np.float32)
-        mask = np.ones_like(X, dtype=bool)
+        mask = ~np.isnan(X)  # True where data is present, False where missing
 
         var_df = pd.DataFrame(index=df.columns)
 
@@ -109,7 +114,10 @@ def csv_to_mudata(
     output_path_obj = Path(output_path)
     output_path_obj.parent.mkdir(parents=True, exist_ok=True)
 
-    logger.info("Saving MuData to %s", output_path)
-    mdata.write(str(output_path_obj))
+    logger.info("Saving MuData (%s) to %s", format, output_path)
+    if format == "zarr":
+        mdata.write_zarr(str(output_path_obj))
+    else:
+        mdata.write(str(output_path_obj))
     logger.info("Conversion complete: %d samples, %d modalities",
                 len(common_samples), len(adatas))

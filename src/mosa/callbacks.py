@@ -31,6 +31,8 @@ class SaveLatentAndReconCallback(pl.Callback):
 
     def on_fit_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Save train/val/full outputs and optional corrected inference outputs."""
+        if not trainer.is_global_zero:
+            return
         logger.debug("Saving latent representations and reconstructions to %s", self.output_dir)
         datamodule = trainer.datamodule
 

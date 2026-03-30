@@ -32,7 +32,7 @@ def _train(args):
     from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 
     from mosa.callbacks import SaveLatentAndReconCallback
-    from mosa.data.mudata_datamodule import MuDataDataModule
+    from mosa.data.datamodule import MuDataDataModule
     from mosa.model.mosavae import MOSAVAE
     from mosa.utils import load_config, seed_everything
 
@@ -93,6 +93,8 @@ def _train(args):
             ),
         )
 
+    use_sync_bn = isinstance(tc.devices, int) and tc.devices > 1
+
     trainer_kwargs = dict(
         max_epochs=config.num_epochs,
         callbacks=callbacks,
@@ -103,6 +105,7 @@ def _train(args):
         gradient_clip_val=tc.gradient_clip_val,
         accumulate_grad_batches=tc.accumulate_grad_batches,
         log_every_n_steps=tc.log_every_n_steps,
+        sync_batchnorm=use_sync_bn,
     )
     if not has_val:
         trainer_kwargs["limit_val_batches"] = 0
@@ -152,6 +155,7 @@ def _convert(args):
         view_specs=view_specs,
         output_path=args.output,
         mutations_path=args.mutations,
+        format=args.format,
     )
     print(f"MuData file saved to {args.output}")
 
@@ -194,7 +198,11 @@ def main():
         "--mutations", default=None,
         help="Path to mutations CSV (features x samples, binary). Columns become mutation_* conditionals.",
     )
-    convert_parser.add_argument("--output", required=True, help="Output .h5mu file path")
+    convert_parser.add_argument("--output", required=True, help="Output file path (.h5mu or .zarr)")
+    convert_parser.add_argument(
+        "--format", choices=["h5mu", "zarr"], default="h5mu",
+        help="Output format (default: h5mu)",
+    )
     convert_parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
 
     args = parser.parse_args()

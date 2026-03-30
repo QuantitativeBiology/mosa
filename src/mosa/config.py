@@ -104,6 +104,7 @@ class MOSAConfig:
     random_seed: int = 42
     data_path: str = ""                     # path to .h5mu/.zarr file
     mask_layer_name: str = "mask"           # layer name for per-feature masks
+    scaler_sample_frac: float = 1.0         # fraction of training data for fitting StandardScaler
     output_dir: str = "outputs"
     inference: bool = False
     target_batch: str = ""
@@ -114,7 +115,7 @@ class MOSAConfig:
         for name in (
             "kl_weight", "kl_weight_final", "contrastive_weight", "adv_weight",
             "learning_rate", "adv_learning_rate", "lr_gamma", "view_dropout_prob",
-            "test_size",
+            "test_size", "scaler_sample_frac",
         ):
             val = getattr(self, name)
             if not isinstance(val, float):
@@ -148,6 +149,10 @@ class MOSAConfig:
                 f"adv_learning_rate must be positive when adv_weight > 0, "
                 f"got {self.adv_learning_rate}"
             )
+        if not 0.0 < self.scaler_sample_frac <= 1.0:
+            raise ValueError(
+                f"scaler_sample_frac must be in (0.0, 1.0], got {self.scaler_sample_frac}"
+            )
 
         # --- Cross-field validation ---
         if self.fusion_method == "poe" and self.views:
@@ -178,7 +183,7 @@ class MOSAConfig:
         # Check MuData file exists
         if not self.data_path:
             errors.append("data_path is required but not set")
-        elif not Path(self.data_path).is_file():
+        elif not (Path(self.data_path).is_file() or Path(self.data_path).is_dir()):
             errors.append(f"data_path not found: {self.data_path}")
 
         if not self.views:

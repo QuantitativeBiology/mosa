@@ -204,6 +204,7 @@ class MOSAVAE(pl.LightningModule):
         disc_loss_val = torch.tensor(0.0, device=self.device)
 
         if self.discriminator is not None and opt_disc is not None:
+            self.toggle_optimizer(opt_disc)
             disc_pred = self.discriminator(out["z"].detach())
             disc_loss_val = adversarial_loss(
                 disc_pred, batch.source_ids, self.class_weights
@@ -211,6 +212,7 @@ class MOSAVAE(pl.LightningModule):
             opt_disc.zero_grad()
             self.manual_backward(disc_loss_val)
             opt_disc.step()
+            self.untoggle_optimizer(opt_disc)
 
             # Phase 2: adversarial component for VAE (fool discriminator)
             adv_pred = self.discriminator(out["z"])
@@ -226,9 +228,11 @@ class MOSAVAE(pl.LightningModule):
             - self.config.adv_weight * adv_loss_val
         )
 
+        self.toggle_optimizer(opt_vae)
         opt_vae.zero_grad()
         self.manual_backward(total)
         opt_vae.step()
+        self.untoggle_optimizer(opt_vae)
 
         # Logging
         self.log("train/loss", total, prog_bar=True)
