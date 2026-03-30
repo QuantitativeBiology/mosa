@@ -32,7 +32,7 @@ def _train(args):
     from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 
     from mosa.callbacks import SaveLatentAndReconCallback
-    from mosa.data.datamodule import MOSADataModule
+    from mosa.data.mudata_datamodule import MuDataDataModule
     from mosa.model.mosavae import MOSAVAE
     from mosa.utils import load_config, seed_everything
 
@@ -49,7 +49,7 @@ def _train(args):
 
     # Data
     logger.debug("Setting up data module")
-    datamodule = MOSADataModule(config)
+    datamodule = MuDataDataModule(config)
     datamodule.setup()
     logger.debug("Data module ready — train=%d, val=%d",
                  len(datamodule.train_dataset) if datamodule.train_dataset else 0,
@@ -129,6 +129,33 @@ def _plot(args):
     print(f"Plots saved to {plots_dir}")
 
 
+def _convert(args):
+    """Convert CSV dataset to MuData (.h5mu) format."""
+    from mosa.convert import csv_to_mudata
+
+    # Parse --view name:path pairs
+    view_specs = []
+    for spec in args.view:
+        if ":" not in spec:
+            raise ValueError(
+                f"Invalid --view format: '{spec}'. Expected 'name:path' "
+                f"(e.g. 'gexp_voom:data/gexp_voom.csv')"
+            )
+        name, path = spec.split(":", 1)
+        view_specs.append((name, path))
+
+    logger.debug("Converting CSV dataset to MuData format")
+    logger.debug("Output file: %s", args.output)
+
+    csv_to_mudata(
+        samplesheet_path=args.samplesheet,
+        view_specs=view_specs,
+        output_path=args.output,
+        mutations_path=args.mutations,
+    )
+    print(f"MuData file saved to {args.output}")
+
+
 def main():
     """CLI entry point. Dispatches to ``train`` or ``plot`` subcommands."""
     parser = argparse.ArgumentParser(
@@ -150,6 +177,25 @@ def main():
         help="Path to training output directory (defaults to output_dir in config)",
     )
     plot_parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
+    
+    # --- convert ---
+    convert_parser = subparsers.add_parser(
+        "convert", help="Convert CSV dataset to MuData (.h5mu)",
+    )
+    convert_parser.add_argument(
+        "--samplesheet", required=True,
+        help="Path to samplesheet CSV (must contain model_id, model_type, tissue columns)",
+    )
+    convert_parser.add_argument(
+        "--view", required=True, action="append",
+        help="View spec as 'name:path' (e.g. 'gexp_voom:data/gexp_voom.csv'). Repeat for each modality.",
+    )
+    convert_parser.add_argument(
+        "--mutations", default=None,
+        help="Path to mutations CSV (features x samples, binary). Columns become mutation_* conditionals.",
+    )
+    convert_parser.add_argument("--output", required=True, help="Output .h5mu file path")
+    convert_parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
 
     args = parser.parse_args()
     _setup_logging(args.debug)
@@ -158,6 +204,8 @@ def main():
         _train(args)
     elif args.command == "plot":
         _plot(args)
+    elif args.command == "convert":
+        _convert(args)
 
 
 if __name__ == "__main__":

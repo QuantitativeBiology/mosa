@@ -17,6 +17,8 @@ dependencies = [
     "scipy>=1.17.1",
     "PyYAML>=6.0.3",
     "tqdm>=4.67.3",
+    "mudata>=0.3",
+    "anndata>=0.10",
 ]
 
 [project.optional-dependencies]

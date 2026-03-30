@@ -525,10 +525,19 @@ def _compute_all_clustering_metrics(data, views, samplesheet):
 # Data loading
 # ---------------------------------------------------------------------------
 
-def _load_data_files(output_dir, views, samplesheet_file):
-    """Load all data files needed for plotting: latents, reconstructions, inputs."""
+def _load_data_files(output_dir, views, data_path):
+    """Load all data files needed for plotting: latents, reconstructions, inputs.
+
+    Samplesheet and input data are extracted from the MuData file at *data_path*.
+    """
+    import mudata
+    from scipy.sparse import issparse
+
     output_dir = Path(output_dir)
-    data = {"omics": {}, "samplesheet": _load_samplesheet(samplesheet_file)}
+
+    # Load samplesheet from MuData .obs
+    mdata = mudata.read(data_path)
+    data = {"omics": {}, "samplesheet": mdata.obs}
 
     # Prefer full pass latents when available; fallback to train split latents.
     z_full_path = output_dir / "full" / "latent.csv"
@@ -542,12 +551,17 @@ def _load_data_files(output_dir, views, samplesheet_file):
     if z_inf_path.exists():
         data["z_inf"] = pd.read_csv(z_inf_path, index_col=0)
 
-    for name, view_cfg in views.items():
+    for name in views:
         omic_data = {}
 
-        input_path = Path(view_cfg.path)
-        if input_path.exists():
-            omic_data["input"] = pd.read_csv(input_path, index_col=0).T
+        # Load input data from MuData modality
+        if name in mdata.mod:
+            X = mdata.mod[name].X
+            if issparse(X):
+                X = X.toarray()
+            omic_data["input"] = pd.DataFrame(
+                X, index=mdata.mod[name].obs_names, columns=mdata.mod[name].var_names,
+            )
 
         recon_full_path = output_dir / "full" / f"recon_{name}.csv"
         recon_train_path = output_dir / "train" / f"recon_{name}.csv"
@@ -629,7 +643,7 @@ def generate_all_plots(output_dir, config, palette=None, pca_components=50):
     output_dir = Path(output_dir)
     plots_dir = output_dir / "plots"
 
-    data = _load_data_files(output_dir, config.views, config.samplesheet_path)
+    data = _load_data_files(output_dir, config.views, config.data_path)
 
     _generate_umap_plots(data, config.views, plots_dir, palette, pca_components)
     _generate_loss_plots(output_dir, config.views, plots_dir)

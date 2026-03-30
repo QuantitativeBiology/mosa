@@ -1,13 +1,25 @@
 # MOSA example configuration
-# Copy this file, adjust the paths, and add or remove views to match your dataset.
+# Copy this file, adjust the data_path, and add or remove views to match your dataset.
+#
+# To convert existing CSVs to MuData format:
+#   mosa convert --samplesheet data/samplesheet.csv \
+#                --view transcriptomics:data/transcriptomics.csv \
+#                --view methylation:data/methylation.csv \
+#                --output data/dataset.h5mu
 
 # ──────────────────────────────────────────────────────────────────
-# DATA
+# DATA (MuData format)
 # ──────────────────────────────────────────────────────────────────
+
+# Path to MuData file (.h5mu or .zarr format)
+data_path: data/dataset.h5mu
+
+# Layer name containing per-feature masks (required)
+mask_layer_name: mask
 
 # Each entry under `views` defines one omic modality.
+# The view name must match a modality name in the MuData file (.mod keys)
 #
-#   path              – CSV file (features × samples); transposed at load time
 #   input_dim         – set automatically after loading; leave 0
 #   output_dim        – reconstruction target dim; 0 mirrors input_dim
 #   hidden_layer_dims – encoder/decoder layer sizes; the last value is the
@@ -19,7 +31,6 @@
 
 views:
   transcriptomics:
-    path: data/transcriptomics.csv
     input_dim: 0
     output_dim: 0
     hidden_layer_dims: [512, 256]
@@ -27,9 +38,8 @@ views:
     dropout_p: 0.1
     discrete: false
 
-  # Add more views here, e.g.:
+  # Add more views here, matching modality names in MuData file:
   # methylation:
-  #   path: data/methylation.csv
   #   input_dim: 0
   #   output_dim: 0
   #   hidden_layer_dims: [512, 256]
@@ -37,14 +47,11 @@ views:
   #   dropout_p: 0.1
   #   discrete: false
 
-# Sample metadata CSV — must contain columns: model_id, model_type, tissue
-samplesheet_path: data/samplesheet.csv
-
 # Conditional vectors are concatenated to encoder and decoder inputs.
-# They are built from the samplesheet and optionally a mutations file.
-use_tissue_conditional: true        # one-hot encode the tissue column
-use_mutations_conditional: false    # append binary mutation features
-mutations_path: ""                  # path to mutations CSV; ignored when use_mutations_conditional is false
+# They are built automatically from .obs columns in the MuData file:
+# - model_type column: always included (batch correction)
+# - tissue column: always included if present
+# - mutation_* columns: always included if present (columns prefixed "mutation_")
 conditional_dim: 0                  # set automatically after loading; leave 0
 
 # ──────────────────────────────────────────────────────────────────
