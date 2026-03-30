@@ -8,11 +8,7 @@ from mosa.model.mlp import MLP
 
 
 class ViewDropout(nn.Module):
-    """Zeros the entire input tensor during training with probability ``p``.
-
-    Used to simulate missing views, forcing the model to learn useful
-    representations even when some omic modalities are absent.
-    """
+    """Randomly zeros the input tensor during training with probability ``p``."""
 
     def __init__(self, p: float = 0.5):
         super().__init__()
@@ -27,11 +23,10 @@ class ViewDropout(nn.Module):
 
 
 class OmicEncoder(nn.Module):
-    """Per-view encoder that maps omic features + conditionals to an embedding.
+    """Maps omic features and conditionals to a per-view embedding.
 
-    Architecture: ``[input_dim + cond_dim] -> hidden_dims -> view_latent_dim``,
-    with BatchNorm, PReLU activation, and dropout at each hidden layer.
-    Optionally applies ViewDropout to the input.
+    Architecture: ``[input_dim + cond_dim] -> hidden_dims -> view_latent_dim``
+    with BatchNorm, PReLU, and dropout at each hidden layer.
     """
 
     def __init__(

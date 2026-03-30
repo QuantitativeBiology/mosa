@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class MOSADataset(Dataset):
-    """Stores per-sample tensors for a single data split (train or val)."""
+    """In-memory dataset with per-sample tensors for a single split."""
 
     def __init__(
         self,
@@ -60,7 +60,7 @@ class MOSADataset(Dataset):
 
 
 class LazyZarrDataset(Dataset):
-    """Lazily reads samples from a MuData zarr store. Each worker opens its own handle."""
+    """Lazy-loading dataset from MuData zarr store; each worker opens its own handle."""
 
     def __init__(
         self,
@@ -131,12 +131,10 @@ class LazyZarrDataset(Dataset):
 
 
 class MuDataDataModule(pl.LightningDataModule):
-    """Data module for loading MuData (*.h5mu/*.zarr) format.
+    """Loads MuData (h5mu or zarr) format with in-memory or lazy strategies.
 
-    Supports two loading strategies:
-    - **h5mu**: loads all data into memory.
-    - **zarr**: reads only metadata at setup time; sample data is read
-      lazily per-batch via :class:`LazyZarrDataset`.
+    - h5mu: all data loaded into memory.
+    - zarr: metadata at setup, samples loaded lazily per batch.
     """
 
     def __init__(self, config: MOSAConfig):
@@ -198,10 +196,13 @@ class MuDataDataModule(pl.LightningDataModule):
     def _process_obs(
         self, obs_df: pd.DataFrame, n_samples: int,
     ) -> dict:
-        """Build conditionals, split indices, class weights from an obs DataFrame.
+        """Process obs metadata into conditionals, labels, weights, and splits.
 
-        Returns a dict with keys: conditionals, tissue_labels, source_ids,
-        sample_weights, train_idx, val_idx, label_codes.
+        Returns
+        -------
+        dict
+            Keys: conditionals, tissue_labels, source_ids, sample_weights,
+            train_idx, val_idx, label_codes.
         """
         # Batch (model_type)
         if "model_type" not in obs_df.columns:
@@ -372,7 +373,8 @@ class MuDataDataModule(pl.LightningDataModule):
             omic_names=list(self.config.views.keys()),
         )
 
-    def _verify_mudata_structure(self, mdata) -> None:
+    def _verify_mudata_structure(self, mdata: object) -> None:
+        """Validate MuData structure has required columns and views."""
         if "model_type" not in mdata.obs.columns:
             raise ValueError(
                 f"MuData .obs missing 'model_type' column. "

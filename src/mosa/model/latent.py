@@ -19,10 +19,10 @@ def register_latent(name: str):
 
 
 class BaseLatentSpace(ABC, nn.Module):
-    """Base class for all fusion-based latent spaces.
+    """Abstract base for latent space fusion methods.
 
-    Subclasses must implement ``_build`` and ``forward``.
-    Use ``BaseLatentSpace.create(method, ...)`` to instantiate.
+    Subclasses implement _build and forward.
+    Instantiate via BaseLatentSpace.create(method, ...).
     """
 
     def __init__(self, view_dims: dict[str, int], latent_dim: int):
@@ -62,10 +62,7 @@ class BaseLatentSpace(ABC, nn.Module):
 
 @register_latent("concat")
 class ConcatLatentSpace(BaseLatentSpace):
-    """Concatenation-based Gaussian latent space.
-
-    Concatenates per-view embeddings, projects to mu/logvar, reparameterizes.
-    """
+    """Concatenates view embeddings and projects to Gaussian posterior."""
 
     def _build(self) -> None:
         concat_dim = sum(self.view_dims.values())
@@ -87,11 +84,10 @@ class ConcatLatentSpace(BaseLatentSpace):
 
 @register_latent("poe")
 class PoELatentSpace(BaseLatentSpace):
-    """Product of Experts Gaussian latent space.
+    """Product of Experts: fuses per-view Gaussians via precision-weighted averaging.
 
-    Each view produces its own mu/logvar via a shared projection head.
-    The per-view posteriors are fused with an isotropic N(0, I) prior using
-    precision-weighted averaging.
+    Each view projects to mu/logvar through a shared head, then combined
+    with an isotropic N(0, I) prior.
     """
 
     EPS = 1e-8

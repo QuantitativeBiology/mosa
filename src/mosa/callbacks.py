@@ -11,18 +11,13 @@ logger = logging.getLogger(__name__)
 
 
 class SaveLatentAndReconCallback(pl.Callback):
-    """Save latent representations and reconstructions to CSV at the end of training.
+    """Save latent and reconstruction outputs to CSV after training.
 
-    Creates the following files inside ``output_dir``:
-
-    - ``train/latent.csv`` — joint latent z for the training split
-    - ``train/recon_{omic}.csv`` — reconstructed omic for the training split
-    - ``val/latent.csv`` — joint latent z for the validation split
-    - ``val/recon_{omic}.csv`` — reconstructed omic for the validation split
-    - ``full/latent.csv`` — joint latent z for all samples with original conditionals
-    - ``full/recon_{omic}.csv`` — reconstructed omic for all samples with original conditionals
-    - ``inference/latent.csv`` — corrected latent z for all samples with forced target batch
-    - ``inference/recon_{omic}.csv`` — corrected reconstructions with forced target batch
+    Files created in output_dir:
+    - train/latent.csv, train/recon_{omic}.csv
+    - val/latent.csv, val/recon_{omic}.csv
+    - full/latent.csv, full/recon_{omic}.csv (all samples with original conditionals)
+    - inference/latent.csv, inference/recon_{omic}.csv (optional, with forced target batch)
     """
 
     def __init__(self, output_dir: str | Path):
@@ -30,7 +25,7 @@ class SaveLatentAndReconCallback(pl.Callback):
         self.output_dir = Path(output_dir)
 
     def on_fit_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-        """Save train/val/full outputs and optional corrected inference outputs."""
+        """Run inference on splits and save latent/reconstruction CSVs."""
         if not trainer.is_global_zero:
             return
         logger.debug("Saving latent representations and reconstructions to %s", self.output_dir)
@@ -66,7 +61,7 @@ class SaveLatentAndReconCallback(pl.Callback):
             )
 
     def _resolve_target_batch(self, datamodule) -> tuple[int, str]:
-        """Resolve target model_type for corrected inference."""
+        """Find target model_type index from config or use first category."""
         categories = list(datamodule.batch_categories)
         if not categories:
             raise RuntimeError("batch_categories are not available for corrected inference")
@@ -82,7 +77,7 @@ class SaveLatentAndReconCallback(pl.Callback):
         return 0, categories[0]
 
     def _inverse_transform(self, omic: str, recon, datamodule) -> tuple:
-        """Map reconstructions back to original omic scale when scaler is available."""
+        """Inverse-scale reconstructions if a scaler exists."""
         scaler = getattr(datamodule, "scalers", {}).get(omic)
         if scaler is None:
             return recon, False
@@ -96,7 +91,7 @@ class SaveLatentAndReconCallback(pl.Callback):
         datamodule,
         force_source_id: int | None = None,
     ) -> None:
-        """Run model.predict() on a dataloader and write CSV files."""
+        """Predict on dataloader and save latent/reconstruction CSVs."""
         out_dir.mkdir(parents=True, exist_ok=True)
         n_batches = len(datamodule.batch_categories) if force_source_id is not None else None
         results = model.predict(loader, force_source_id=force_source_id, n_batches=n_batches)

@@ -7,8 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 def _setup_logging(debug: bool):
-    """Configure logging verbosity. Debug mode enables detailed MOSA logs
-    while keeping noisy third-party loggers at WARNING/INFO level."""
+    """Configure logging: debug enables detailed logs, suppressess noisy third-party loggers."""
     if debug:
         logging.basicConfig(
             level=logging.DEBUG,
@@ -26,7 +25,7 @@ def _setup_logging(debug: bool):
 
 
 def _train(args):
-    """Load config, build data module and model, then run the training loop."""
+    """Load config, build datamodule and model, and run training."""
     import pytorch_lightning as pl
     import torch
     from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint

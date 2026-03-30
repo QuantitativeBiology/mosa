@@ -17,25 +17,29 @@ def reconstruction_loss(
     sample_weights: Tensor | None = None,
     loss_type: str = "mean",
 ) -> tuple[Tensor, dict]:
-    """Feature-masked reconstruction loss.
+    """Masked reconstruction loss across omics.
 
     Parameters
     ----------
     x_hat : dict of Tensor [B, D]
+        Reconstructed values.
     x : dict of Tensor [B, D]
+        Target values.
     mask : dict of bool Tensor [B, D]
+        Feature presence masks.
     group : Tensor [B] or None
-        Group labels for balanced loss.
+        Group labels for macro loss averaging.
     sample_weights : Tensor [B] or None
-        Optional per-sample weights used only when ``loss_type='mean'``.
+        Per-sample weights (used only in mean loss).
     loss_type : str
-        ``"mean"`` for sample-weighted masked MSE,
-        ``"macro"`` for group-balanced masked MSE.
+        "mean" for sample-weighted MSE, "macro" for group-balanced MSE.
 
     Returns
     -------
-    loss : scalar Tensor
-    metrics : dict with per-omic losses
+    loss : Tensor
+        Scalar loss.
+    metrics : dict
+        Per-omic and per-group losses.
     """
     device = next(iter(x.values())).device
     omic_losses = {}
@@ -86,7 +90,7 @@ def reconstruction_loss(
 
 
 def kl_divergence(mu: Tensor, logvar: Tensor) -> Tensor:
-    """KL divergence to N(0, I) using torch.distributions."""
+    """KL divergence from posterior to standard normal."""
     std = torch.exp(0.5 * logvar) + 1e-4
     posterior = Normal(mu, std)
     prior = Normal(torch.zeros_like(mu), torch.ones_like(std))
@@ -94,7 +98,10 @@ def kl_divergence(mu: Tensor, logvar: Tensor) -> Tensor:
 
 
 def contrastive_loss(mu: Tensor, labels: Tensor) -> Tensor:
-    """Contrastive loss on joint embeddings using pytorch_metric_learning."""
+    """Contrastive loss on latent embeddings.
+
+    Converts one-hot labels to indices if needed.
+    """
     from pytorch_metric_learning import losses as pml_losses
     from pytorch_metric_learning.distances import CosineSimilarity
 

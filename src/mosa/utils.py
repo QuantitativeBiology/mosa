@@ -20,7 +20,7 @@ def seed_everything(seed: int) -> None:
 
 
 def load_config(yaml_path: str | Path) -> MOSAConfig:
-    """Parse a YAML config file and return a MOSAConfig."""
+    """Load and parse a YAML configuration file."""
     yaml_path = Path(yaml_path)
     with open(yaml_path) as f:
         raw = yaml.safe_load(f)
@@ -38,5 +38,5 @@ def load_config(yaml_path: str | Path) -> MOSAConfig:
 
 
 def tensors_to_numpy(t: Tensor) -> np.ndarray:
-    """Detach a tensor, move to CPU, and convert to numpy."""
+    """Convert tensor to numpy array on CPU."""
     return t.detach().cpu().numpy()

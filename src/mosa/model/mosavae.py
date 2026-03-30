@@ -39,11 +39,10 @@ def _kl_weight_for_epoch(epoch: int, config: MOSAConfig) -> float:
 
 
 class MOSAVAE(pl.LightningModule):
-    """Multi-Omic Structured Autoencoder with optional adversarial training.
+    """Variational autoencoder for multi-omic data with optional adversarial training.
 
-    Uses manual optimization for the two-phase adversarial update:
-    first the discriminator is trained on detached z, then the VAE is
-    updated with the combined reconstruction + KL + adversarial loss.
+    Uses manual optimization: discriminator is updated first on detached z,
+    then VAE parameters are updated with reconstruction, KL, and adversarial losses.
     """
 
     def __init__(self, config: MOSAConfig):
@@ -106,15 +105,19 @@ class MOSAVAE(pl.LightningModule):
         self.model_type_names: list[str] | None = None
 
     def forward(self, batch: MOSABatch) -> dict:
-        """Run the full encode -> fuse -> decode pipeline.
+        """Encode, fuse, and decode in one forward pass.
 
         Returns
         -------
         dict with keys:
-            ``x_hat``: dict[str, Tensor] — per-view reconstructions [B, D_view]
-            ``z``: Tensor [B, joint_latent_dim] — sampled latent vector
-            ``mu``: Tensor [B, joint_latent_dim] — posterior mean
-            ``logvar``: Tensor [B, joint_latent_dim] — posterior log-variance
+            x_hat : dict of Tensor [B, D_view]
+                Per-view reconstructions.
+            z : Tensor [B, joint_latent_dim]
+                Sampled latent vector.
+            mu : Tensor [B, joint_latent_dim]
+                Posterior mean.
+            logvar : Tensor [B, joint_latent_dim]
+                Posterior log-variance.
         """
         B = next(iter(batch.encoder_inputs.values())).shape[0]
         device = next(iter(batch.encoder_inputs.values())).device
@@ -153,9 +156,12 @@ class MOSAVAE(pl.LightningModule):
         return _kl_weight_for_epoch(self.current_epoch, self.config)
 
     def _compute_losses(self, batch: MOSABatch, out: dict) -> dict:
-        """Compute all loss components: reconstruction, KL, contrastive.
+        """Compute reconstruction, KL, and contrastive loss components.
 
-        Returns a dict with keys ``recon``, ``kl``, ``contrastive``, ``recon_metrics``.
+        Returns
+        -------
+        dict
+            Keys: recon, kl, contrastive, recon_metrics.
         """
         recon_loss, recon_metrics = reconstruction_loss(
             x_hat=out["x_hat"],
@@ -309,14 +315,21 @@ class MOSAVAE(pl.LightningModule):
         force_source_id: int | None = None,
         n_batches: int | None = None,
     ) -> dict:
-        """Run inference on a dataloader and collect results.
+        """Inference on a dataloader.
+
+        Parameters
+        ----------
+        loader : DataLoader
+            Data to infer on.
+        force_source_id : int or None
+            If set, override batch one-hot with this source ID.
+        n_batches : int or None
+            Total number of batches (required if force_source_id is set).
 
         Returns
         -------
-        dict with keys:
-            ``z``: np.ndarray [N, latent_dim]
-            ``x_hat``: dict[str, np.ndarray] — per-omic reconstructions [N, D]
-            ``sample_names``: list[str]
+        dict
+            Keys: z [N, latent_dim], x_hat (per-omic [N, D]), sample_names.
         """
         self.eval()
 

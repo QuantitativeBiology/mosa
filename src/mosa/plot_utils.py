@@ -78,7 +78,7 @@ _UMAP_LAYERS = [
 
 
 def configure_plot_style():
-    """Set matplotlib rcParams for publication-quality figures."""
+    """Apply matplotlib styling for publication-ready figures."""
     plt.rcParams.update({
         "figure.figsize": [2.5, 2.5],
         "figure.dpi": 300,
@@ -107,18 +107,19 @@ def configure_plot_style():
 
 def compute_umap_embedding(df, n_neighbors=25, min_dist=0.25, metric="euclidean",
                            n_components=2, random_state=42, pca_components=None):
-    """Compute a UMAP embedding, optionally with PCA pre-reduction.
+    """Compute UMAP embedding with optional PCA pre-reduction.
 
     Parameters
     ----------
     df : DataFrame or array-like
-        Input data (samples x features).
+        Data matrix (samples x features).
     pca_components : int or None
-        If set, reduce to this many PCA components before UMAP.
+        Optional PCA reduction before UMAP.
 
     Returns
     -------
-    DataFrame with columns UMAP1, UMAP2, ..., indexed like the input.
+    DataFrame
+        Embedding with columns UMAP1, UMAP2, etc.
     """
     X = df.values if isinstance(df, pd.DataFrame) else np.asarray(df)
     index = df.index if isinstance(df, pd.DataFrame) else None
@@ -136,14 +137,14 @@ def compute_umap_embedding(df, n_neighbors=25, min_dist=0.25, metric="euclidean"
 
 
 def plot_umap(plot_df, palette, title=None):
-    """Create a UMAP scatter plot colored by tissue and shaped by model_type.
+    """Plot UMAP embedding colored by tissue, shaped by model_type.
 
     Parameters
     ----------
     plot_df : DataFrame
-        Must contain columns: UMAP1, UMAP2, tissue, model_type.
+        Must have columns: UMAP1, UMAP2, tissue, model_type.
     palette : dict
-        Mapping of tissue/model_type names to colors.
+        Color mapping for tissues and model types.
     title : str or None
         Plot title.
 
@@ -211,7 +212,7 @@ def plot_umap(plot_df, palette, title=None):
 # ---------------------------------------------------------------------------
 
 def _load_samplesheet(path):
-    """Load a samplesheet CSV, setting model_id as the index."""
+    """Load samplesheet CSV with model_id as index."""
     ss = pd.read_csv(path, index_col=0)
     if "model_id" in ss.columns:
         ss = ss.set_index("model_id")
@@ -219,7 +220,7 @@ def _load_samplesheet(path):
 
 
 def _align_to_samplesheet(df, samplesheet):
-    """Restrict both DataFrames to their shared sample indices."""
+    """Keep only samples present in both DataFrames."""
     common = df.index.intersection(samplesheet.index)
     if common.empty:
         return df, samplesheet
@@ -227,7 +228,7 @@ def _align_to_samplesheet(df, samplesheet):
 
 
 def _save_fig(fig, out_path):
-    """Save a figure to disk and close it."""
+    """Save figure and close it."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         fig.tight_layout()
@@ -242,9 +243,12 @@ def _save_fig(fig, out_path):
 # ---------------------------------------------------------------------------
 
 def _load_lightning_metrics(output_dir):
-    """Load metrics.csv from the latest Lightning log version.
+    """Load metrics from latest Lightning log version.
 
-    Returns a dict mapping metric name to a DataFrame with columns [epoch, value].
+    Returns
+    -------
+    dict
+        Metric name -> DataFrame with columns [epoch, value].
     """
     log_dir = Path(output_dir) / "lightning_logs"
     if not log_dir.exists():
@@ -269,7 +273,7 @@ def _load_lightning_metrics(output_dir):
 
 
 def _plot_single_loss(metric_df, title, out_path, color):
-    """Plot a single loss metric over epochs."""
+    """Plot loss metric over epochs."""
     fig, ax = plt.subplots(figsize=(3, 2))
     ax.plot(metric_df["epoch"], metric_df["value"], color=color, linewidth=2)
     ax.set_xlabel("epoch")
@@ -279,7 +283,7 @@ def _plot_single_loss(metric_df, title, out_path, color):
 
 
 def _plot_composite_loss(metrics, out_path):
-    """Plot the total VAE loss with its individual components overlaid."""
+    """Plot total loss with component breakdown."""
     total = metrics.get("train/loss")
     if total is None:
         return
@@ -306,7 +310,7 @@ def _plot_composite_loss(metrics, out_path):
 
 
 def _plot_omic_mse(metrics, omic, out_path):
-    """Plot per-omic MSE with total, train/val, and per-model_type breakdown."""
+    """Plot per-omic MSE loss with train/val and per-model-type breakdown."""
     cmap = plt.get_cmap("tab20")
 
     total_key = f"train/recon_{omic}"
@@ -348,7 +352,7 @@ def _plot_omic_mse(metrics, omic, out_path):
 
 
 def _generate_loss_plots(output_dir, views, plots_dir):
-    """Generate all loss curve plots from Lightning metrics."""
+    """Generate loss curve plots from Lightning metrics."""
     metrics = _load_lightning_metrics(output_dir)
     if not metrics:
         return
@@ -375,7 +379,7 @@ def _generate_loss_plots(output_dir, views, plots_dir):
 # ---------------------------------------------------------------------------
 
 def _scatter_with_identity(ax, x, y, **scatter_kw):
-    """Plot a scatter with a y=x identity reference line."""
+    """Plot scatter with y=x identity line."""
     ax.scatter(x, y, **scatter_kw)
     lo = min(x.min(), y.min())
     hi = max(x.max(), y.max())
@@ -383,7 +387,7 @@ def _scatter_with_identity(ax, x, y, **scatter_kw):
 
 
 def _plot_sample_scatter(plot_df, out_path, xlabel, ylabel):
-    """Scatter of per-sample means (input vs reconstruction), colored by model_type."""
+    """Scatter of per-sample means, colored by model type."""
     fig, ax = plt.subplots(figsize=(3, 3))
     for model_type, group in plot_df.groupby("model_type"):
         _scatter_with_identity(ax, group["input_mean"], group["recon_mean"],
@@ -395,7 +399,7 @@ def _plot_sample_scatter(plot_df, out_path, xlabel, ylabel):
 
 
 def _plot_feature_scatter(plot_df, out_path, xlabel, ylabel):
-    """Scatter of per-feature means (input vs reconstruction)."""
+    """Scatter of per-feature means."""
     fig, ax = plt.subplots(figsize=(3, 3))
     _scatter_with_identity(ax, plot_df["input_mean"], plot_df["recon_mean"],
                            alpha=0.5, s=10, color="steelblue")
@@ -406,7 +410,7 @@ def _plot_feature_scatter(plot_df, out_path, xlabel, ylabel):
 
 
 def _generate_reconstruction_plots(data, views, plots_dir):
-    """Generate input vs reconstruction scatter plots for all views."""
+    """Generate input vs reconstruction scatter plots."""
     samplesheet = data["samplesheet"]
 
     for name in views:
@@ -467,7 +471,7 @@ def _generate_reconstruction_plots(data, views, plots_dir):
 # ---------------------------------------------------------------------------
 
 def _compute_clustering_metrics(X, labels, dataset_name, label_type):
-    """Compute Calinski-Harabasz and Davies-Bouldin scores for a dataset."""
+    """Compute Calinski-Harabasz and Davies-Bouldin scores."""
     n_unique = len(np.unique(labels))
     if n_unique < 2:
         return {"dataset": dataset_name, "label_type": label_type,
@@ -483,7 +487,7 @@ def _compute_clustering_metrics(X, labels, dataset_name, label_type):
 
 
 def _try_compute_metrics(df, labels_series, dataset_name, label_type):
-    """Compute clustering metrics if the DataFrame has enough aligned data."""
+    """Compute clustering metrics if data is available and aligned."""
     if df is None or (hasattr(df, "empty") and df.empty):
         return None
     aligned = df.loc[df.index.intersection(labels_series.index)]
@@ -497,7 +501,7 @@ def _try_compute_metrics(df, labels_series, dataset_name, label_type):
 
 
 def _compute_all_clustering_metrics(data, views, samplesheet):
-    """Compute clustering metrics across all datasets and label types."""
+    """Compute clustering metrics for all datasets and label types."""
     label_cols = [c for c in ("tissue", "model_type") if c in samplesheet.columns]
     rows = []
 
@@ -526,9 +530,9 @@ def _compute_all_clustering_metrics(data, views, samplesheet):
 # ---------------------------------------------------------------------------
 
 def _load_data_files(output_dir, views, data_path):
-    """Load all data files needed for plotting: latents, reconstructions, inputs.
+    """Load latents, reconstructions, and inputs for plotting.
 
-    Samplesheet and input data are extracted from the MuData file at *data_path*.
+    Samplesheet and input data are from the MuData file at data_path.
     """
     import mudata
     from scipy.sparse import issparse
@@ -584,7 +588,7 @@ def _load_data_files(output_dir, views, data_path):
 # ---------------------------------------------------------------------------
 
 def _make_umap_plot(df, samplesheet, palette, title, out_path, pca_components):
-    """Compute UMAP embedding and save a colored scatter plot."""
+    """Compute UMAP and save scatter plot."""
     df, ss = _align_to_samplesheet(df, samplesheet)
     pca_comp = pca_components if df.shape[1] > pca_components else None
     embedding = compute_umap_embedding(df, pca_components=pca_comp)
@@ -594,7 +598,7 @@ def _make_umap_plot(df, samplesheet, palette, title, out_path, pca_components):
 
 
 def _generate_umap_plots(data, views, plots_dir, palette, pca_components):
-    """Generate UMAP plots for latent space and per-view reconstructions."""
+    """Generate UMAP plots for latent and per-view reconstructions."""
     samplesheet = data["samplesheet"]
 
     if "z" in data:
@@ -620,23 +624,23 @@ def _generate_umap_plots(data, views, plots_dir, palette, pca_components):
 # ---------------------------------------------------------------------------
 
 def generate_all_plots(output_dir, config, palette=None, pca_components=50):
-    """Generate all diagnostic plots and clustering metrics.
+    """Generate diagnostic plots and clustering metrics.
 
     Parameters
     ----------
     output_dir : str or Path
-        Root output directory containing training artefacts.
+        Root output directory with training artifacts.
     config : MOSAConfig
-        Experiment configuration (used for view paths and samplesheet).
+        Experiment configuration.
     palette : dict or None
-        Tissue/model_type color palette. Defaults to DEFAULT_PALETTE.
+        Color mapping for tissues/model types. Defaults to DEFAULT_PALETTE.
     pca_components : int
-        Number of PCA components for dimensionality reduction before UMAP
-        on high-dimensional reconstruction data.
+        PCA dimensions before UMAP.
 
     Returns
     -------
-    Path to the plots directory.
+    Path
+        Path to plots directory.
     """
     configure_plot_style()
     palette = palette or DEFAULT_PALETTE

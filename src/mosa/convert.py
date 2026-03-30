@@ -26,14 +26,20 @@ def csv_to_mudata(
     mutations_path: str | None = None,
     format: str = "h5mu",
 ) -> None:
-    """Convert CSV dataset to MuData (.h5mu or .zarr) format.
+    """Convert CSV tables to MuData format.
 
-    Args:
-        samplesheet_path: Path to samplesheet CSV (must contain model_id, model_type, tissue).
-        view_specs: List of (view_name, csv_path) tuples. CSVs are features x samples.
-        output_path: Path to save the MuData file.
-        mutations_path: Optional path to mutations CSV (features x samples, binary).
-        format: Output format, "h5mu" or "zarr".
+    Parameters
+    ----------
+    samplesheet_path : str
+        Path to samplesheet CSV (requires model_id, model_type, tissue).
+    view_specs : list of tuple
+        (view_name, csv_path) tuples; CSVs are features x samples.
+    output_path : str
+        Output path for MuData file.
+    mutations_path : str or None
+        Optional mutations CSV (features x samples, binary).
+    format : str
+        Output format: "h5mu" or "zarr".
     """
     import anndata
 
