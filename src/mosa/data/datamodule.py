@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import torch
 import zarr
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import ConcatDataset, DataLoader, Dataset
 
 import pytorch_lightning as pl
 from sklearn.model_selection import train_test_split
@@ -171,11 +171,41 @@ class MuDataDataModule(pl.LightningDataModule):
             pin_memory=True,
         )
 
-    def val_dataloader(self) -> DataLoader:
+    def val_dataloader(self) -> DataLoader | None:
         if self.val_dataset is None:
-            raise RuntimeError("Call setup() before requesting dataloaders")
+            return None
         return DataLoader(
             self.val_dataset,
+            batch_size=self.config.batch_size,
+            shuffle=False,
+            num_workers=self.config.trainer.num_workers,
+            collate_fn=collate_fn,
+            pin_memory=True,
+        )
+
+    def train_eval_dataloader(self) -> DataLoader:
+        """Non-shuffled train dataloader for deterministic inference after training."""
+        if self.train_dataset is None:
+            raise RuntimeError("Call setup() before requesting dataloaders")
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.config.batch_size,
+            shuffle=False,
+            num_workers=self.config.trainer.num_workers,
+            collate_fn=collate_fn,
+            pin_memory=True,
+        )
+
+    def full_dataloader(self) -> DataLoader:
+        """DataLoader over all samples (train + val) in a fixed order."""
+        if self.train_dataset is None:
+            raise RuntimeError("Call setup() before requesting dataloaders")
+        if self.val_dataset is not None:
+            dataset = ConcatDataset([self.train_dataset, self.val_dataset])
+        else:
+            dataset = self.train_dataset
+        return DataLoader(
+            dataset,
             batch_size=self.config.batch_size,
             shuffle=False,
             num_workers=self.config.trainer.num_workers,
