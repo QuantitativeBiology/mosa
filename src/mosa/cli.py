@@ -19,6 +19,7 @@ def _setup_logging(debug: bool):
         logging.getLogger("matplotlib").setLevel(logging.WARNING)
         logging.getLogger("numba").setLevel(logging.WARNING)
         logging.getLogger("fsspec").setLevel(logging.WARNING)
+        logging.getLogger("numcodecs").setLevel(logging.WARNING)
         logger.debug("Debug logging enabled")
     else:
         logging.basicConfig(level=logging.WARNING)

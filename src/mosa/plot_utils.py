@@ -154,6 +154,9 @@ def plot_umap(plot_df, palette, title=None):
     """
     fig, ax = plt.subplots()
 
+    # Build complete sizes mapping for all model types
+    sizes = {layer["model_type"]: layer["size"] for layer in _UMAP_LAYERS}
+
     for layer in _UMAP_LAYERS:
         subset = plot_df[plot_df["model_type"] == layer["model_type"]]
         if subset.empty:
@@ -162,7 +165,7 @@ def plot_umap(plot_df, palette, title=None):
             data=subset, x="UMAP1", y="UMAP2",
             hue="tissue", palette=palette,
             style="model_type", markers=layer["marker"],
-            size="model_type", sizes={layer["model_type"]: layer["size"]},
+            size="model_type", sizes=sizes,
             alpha=layer["alpha"], zorder=layer["zorder"],
             linewidth=layer["linewidth"], legend=False, ax=ax,
         )
