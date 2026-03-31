@@ -82,8 +82,10 @@ class MaskedBatchNorm1d(nn.Module):
                 self.weight, self.bias, False, 0.0, self.eps,
             )
 
-        # Fast path: no mask or every sample present.
-        if mask is None or mask.all():
+        # Fast path: no mask at all — standard batch norm.
+        # When a mask IS provided, always take the masked-stats path below
+        # so that every DDP rank executes the same all_reduce collective.
+        if mask is None:
             return nn.functional.batch_norm(
                 x,
                 self.running_mean if self.track_running_stats else None,

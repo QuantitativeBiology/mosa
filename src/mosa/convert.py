@@ -58,33 +58,39 @@ def csv_to_mudata(
     # 2. Load view CSVs (features x samples) and transpose to samples x features
     logger.debug("Loading view CSVs")
     omics: dict[str, pd.DataFrame] = {}
+    view_sample_sets: dict[str, set[str]] = {}
     for view_name, csv_path in view_specs:
         df = pd.read_csv(csv_path, index_col=0).T.astype(float)
         omics[view_name] = df
+        view_sample_sets[view_name] = set(df.index)
         logger.debug("  view '%s': %d samples x %d features", view_name, *df.shape)
 
-    # 3. Find common samples across all views and samplesheet
-    common = set(samplesheet.index)
-    for df in omics.values():
-        common &= set(df.index)
+    # 3. Union of samples across views, intersected with samplesheet (need metadata)
+    all_view_samples: set[str] = set()
+    for s in view_sample_sets.values():
+        all_view_samples |= s
+    common = all_view_samples & set(samplesheet.index)
 
     mutations_df = None
     if mutations_path:
         mutations_df = pd.read_csv(mutations_path, index_col=0).T
-        common &= set(mutations_df.index)
 
     common_samples = sorted(common)
-    logger.debug("Common samples: %d", len(common_samples))
+    logger.debug("Union samples (with samplesheet metadata): %d", len(common_samples))
+    for view_name, ss in view_sample_sets.items():
+        n_present = len(ss & set(common_samples))
+        logger.debug("  view '%s': %d / %d samples present",
+                      view_name, n_present, len(common_samples))
 
     if not common_samples:
-        raise ValueError("No common samples found across samplesheet and view CSVs")
+        raise ValueError("No samples found in samplesheet that appear in any view CSV")
 
-    # 4. Align all data to common samples
+    # 4. Align all data to common samples (reindex fills missing with NaN)
     samplesheet = samplesheet.loc[common_samples]
     for name in omics:
-        omics[name] = omics[name].loc[common_samples]
+        omics[name] = omics[name].reindex(common_samples)
     if mutations_df is not None:
-        mutations_df = mutations_df.loc[common_samples]
+        mutations_df = mutations_df.reindex(common_samples).fillna(0)
 
     # 5. Create AnnData objects per modality (without .obs to avoid prefix conflicts)
     logger.debug("Creating AnnData objects")
@@ -93,6 +99,7 @@ def csv_to_mudata(
     for view_name, df in omics.items():
         X = df.values.astype(np.float32)
         mask = ~np.isnan(X)  # True where data is present, False where missing
+        X = np.nan_to_num(X, nan=0.0)
 
         var_df = pd.DataFrame(index=df.columns)
 
@@ -104,9 +111,16 @@ def csv_to_mudata(
 
         adatas[view_name] = adata
 
-    # 6. Create MuData and set global .obs
+    # 6. Create MuData and set global .obs with per-view presence indicators
     logger.debug("Creating MuData object")
     mdata = MuData(adatas)
+
+    for view_name in omics:
+        presence = np.array(
+            [s in view_sample_sets[view_name] for s in common_samples],
+            dtype=bool,
+        )
+        mdata.obsm[view_name] = presence
 
     # Set the global .obs to the samplesheet (same for all modalities)
     mdata.obs = samplesheet.copy()
