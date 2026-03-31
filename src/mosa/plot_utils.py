@@ -164,7 +164,7 @@ def plot_umap(plot_df, palette, title=None):
         scatter_kw = dict(
             data=subset, x="UMAP1", y="UMAP2",
             hue="tissue", palette=palette,
-            style="model_type", markers=layer["marker"],
+            style="model_type", markers={layer["model_type"]: layer["marker"]},
             size="model_type", sizes=sizes,
             alpha=layer["alpha"], zorder=layer["zorder"],
             linewidth=layer["linewidth"], legend=False, ax=ax,
