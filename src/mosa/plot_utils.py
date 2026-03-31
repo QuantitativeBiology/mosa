@@ -211,6 +211,15 @@ def plot_umap(plot_df, palette, title=None):
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _try_read(parquet_path, csv_path):
+    """Try reading parquet first, fall back to CSV."""
+    if Path(parquet_path).exists():
+        return pd.read_parquet(parquet_path)
+    elif Path(csv_path).exists():
+        return pd.read_csv(csv_path, index_col=0)
+    return None
+
+
 def _load_samplesheet(path):
     """Load samplesheet CSV with model_id as index."""
     ss = pd.read_csv(path, index_col=0)
@@ -544,16 +553,22 @@ def _load_data_files(output_dir, views, data_path):
     data = {"omics": {}, "samplesheet": mdata.obs}
 
     # Prefer full pass latents when available; fallback to train split latents.
-    z_full_path = output_dir / "full" / "latent.csv"
-    z_train_path = output_dir / "train" / "latent.csv"
-    if z_full_path.exists():
-        data["z"] = pd.read_csv(z_full_path, index_col=0)
-    elif z_train_path.exists():
-        data["z"] = pd.read_csv(z_train_path, index_col=0)
+    z_full_pq = output_dir / "full" / "latent.parquet"
+    z_full_csv = output_dir / "full" / "latent.csv"
+    z_train_pq = output_dir / "train" / "latent.parquet"
+    z_train_csv = output_dir / "train" / "latent.csv"
 
-    z_inf_path = output_dir / "inference" / "latent.csv"
-    if z_inf_path.exists():
-        data["z_inf"] = pd.read_csv(z_inf_path, index_col=0)
+    z_data = _try_read(z_full_pq, z_full_csv)
+    if z_data is None:
+        z_data = _try_read(z_train_pq, z_train_csv)
+    if z_data is not None:
+        data["z"] = z_data
+
+    z_inf_pq = output_dir / "inference" / "latent.parquet"
+    z_inf_csv = output_dir / "inference" / "latent.csv"
+    z_inf_data = _try_read(z_inf_pq, z_inf_csv)
+    if z_inf_data is not None:
+        data["z_inf"] = z_inf_data
 
     for name in views:
         omic_data = {}
@@ -567,16 +582,22 @@ def _load_data_files(output_dir, views, data_path):
                 X, index=mdata.mod[name].obs_names, columns=mdata.mod[name].var_names,
             )
 
-        recon_full_path = output_dir / "full" / f"recon_{name}.csv"
-        recon_train_path = output_dir / "train" / f"recon_{name}.csv"
-        if recon_full_path.exists():
-            omic_data["recon"] = pd.read_csv(recon_full_path, index_col=0)
-        elif recon_train_path.exists():
-            omic_data["recon"] = pd.read_csv(recon_train_path, index_col=0)
+        recon_full_pq = output_dir / "full" / f"recon_{name}.parquet"
+        recon_full_csv = output_dir / "full" / f"recon_{name}.csv"
+        recon_train_pq = output_dir / "train" / f"recon_{name}.parquet"
+        recon_train_csv = output_dir / "train" / f"recon_{name}.csv"
 
-        recon_inf_path = output_dir / "inference" / f"recon_{name}.csv"
-        if recon_inf_path.exists():
-            omic_data["recon_inf"] = pd.read_csv(recon_inf_path, index_col=0)
+        recon_data = _try_read(recon_full_pq, recon_full_csv)
+        if recon_data is None:
+            recon_data = _try_read(recon_train_pq, recon_train_csv)
+        if recon_data is not None:
+            omic_data["recon"] = recon_data
+
+        recon_inf_pq = output_dir / "inference" / f"recon_{name}.parquet"
+        recon_inf_csv = output_dir / "inference" / f"recon_{name}.csv"
+        recon_inf_data = _try_read(recon_inf_pq, recon_inf_csv)
+        if recon_inf_data is not None:
+            omic_data["recon_inf"] = recon_inf_data
 
         data["omics"][name] = omic_data
 

@@ -11,13 +11,13 @@ logger = logging.getLogger(__name__)
 
 
 class SaveLatentAndReconCallback(pl.Callback):
-    """Save latent and reconstruction outputs to CSV after training.
+    """Save latent and reconstruction outputs to Parquet after training.
 
     Files created in output_dir:
-    - train/latent.csv, train/recon_{omic}.csv
-    - val/latent.csv, val/recon_{omic}.csv
-    - full/latent.csv, full/recon_{omic}.csv (all samples with original conditionals)
-    - inference/latent.csv, inference/recon_{omic}.csv (optional, with forced target batch)
+    - train/latent.parquet, train/recon_{omic}.parquet
+    - val/latent.parquet, val/recon_{omic}.parquet
+    - full/latent.parquet, full/recon_{omic}.parquet (all samples with original conditionals)
+    - inference/latent.parquet, inference/recon_{omic}.parquet (optional, with forced target batch)
     """
 
     def __init__(self, output_dir: str | Path):
@@ -91,13 +91,13 @@ class SaveLatentAndReconCallback(pl.Callback):
         datamodule,
         force_source_id: int | None = None,
     ) -> None:
-        """Predict on dataloader and save latent/reconstruction CSVs."""
+        """Predict on dataloader and save latent/reconstruction to parquet files."""
         out_dir.mkdir(parents=True, exist_ok=True)
         n_batches = len(datamodule.batch_categories) if force_source_id is not None else None
         results = model.predict(loader, force_source_id=force_source_id, n_batches=n_batches)
 
-        pd.DataFrame(results["z"], index=results["sample_names"]).to_csv(out_dir / "latent.csv")
-        logger.debug("Saved latent %s to %s", results["z"].shape, out_dir / "latent.csv")
+        pd.DataFrame(results["z"], index=results["sample_names"]).to_parquet(out_dir / "latent.parquet")
+        logger.debug("Saved latent %s to %s", results["z"].shape, out_dir / "latent.parquet")
 
         feature_names = getattr(datamodule, "feature_names", {})
         for omic, recon in results["x_hat"].items():
@@ -108,8 +108,8 @@ class SaveLatentAndReconCallback(pl.Callback):
             else:
                 df = pd.DataFrame(recon_out, index=results["sample_names"])
 
-            path = out_dir / f"recon_{omic}.csv"
-            df.to_csv(path)
+            path = out_dir / f"recon_{omic}.parquet"
+            df.to_parquet(path)
             logger.debug(
                 "Saved recon '%s' %s to %s (inverse_transform=%s)",
                 omic,
