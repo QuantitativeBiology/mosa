@@ -3,6 +3,7 @@
 Generates UMAP visualizations, loss curves, reconstruction scatter plots,
 and clustering quality metrics from training outputs.
 """
+import logging
 import warnings
 from pathlib import Path
 
@@ -15,6 +16,8 @@ from matplotlib.lines import Line2D
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import calinski_harabasz_score, davies_bouldin_score
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_PALETTE = {
     "Lung": "#007fff",
@@ -154,8 +157,9 @@ def plot_umap(plot_df, palette, title=None):
     """
     fig, ax = plt.subplots()
 
-    # Build complete sizes mapping for all model types
+    # Build complete mappings for all model types
     sizes = {layer["model_type"]: layer["size"] for layer in _UMAP_LAYERS}
+    markers = {layer["model_type"]: layer["marker"] for layer in _UMAP_LAYERS}
 
     for layer in _UMAP_LAYERS:
         subset = plot_df[plot_df["model_type"] == layer["model_type"]]
@@ -164,7 +168,7 @@ def plot_umap(plot_df, palette, title=None):
         scatter_kw = dict(
             data=subset, x="UMAP1", y="UMAP2",
             hue="tissue", palette=palette,
-            style="model_type", markers={layer["model_type"]: layer["marker"]},
+            style="model_type", markers=markers,
             size="model_type", sizes=sizes,
             alpha=layer["alpha"], zorder=layer["zorder"],
             linewidth=layer["linewidth"], legend=False, ax=ax,
@@ -242,12 +246,12 @@ def _align_to_samplesheet(df, samplesheet):
 def _save_fig(fig, out_path):
     """Save figure and close it."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
         fig.tight_layout()
-    except UserWarning:
-        pass
     fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
+    logger.debug("Saved plot: %s", out_path)
 
 
 # ---------------------------------------------------------------------------
@@ -613,6 +617,7 @@ def _load_data_files(output_dir, views, data_path):
 
 def _make_umap_plot(df, samplesheet, palette, title, out_path, pca_components):
     """Compute UMAP and save scatter plot."""
+    logger.debug("Computing UMAP: %s (%d samples x %d features)", title, *df.shape)
     df, ss = _align_to_samplesheet(df, samplesheet)
     pca_comp = pca_components if df.shape[1] > pca_components else None
     embedding = compute_umap_embedding(df, pca_components=pca_comp)
@@ -671,10 +676,14 @@ def generate_all_plots(output_dir, config, palette=None, pca_components=50):
     output_dir = Path(output_dir)
     plots_dir = output_dir / "plots"
 
+    logger.debug("Loading data files")
     data = _load_data_files(output_dir, config.views, config.data_path)
 
+    logger.debug("Generating UMAP plots")
     _generate_umap_plots(data, config.views, plots_dir, palette, pca_components)
+    logger.debug("Generating loss plots")
     _generate_loss_plots(output_dir, config.views, plots_dir)
+    logger.debug("Generating reconstruction plots")
     _generate_reconstruction_plots(data, config.views, plots_dir)
 
     metrics_rows = _compute_all_clustering_metrics(data, config.views, data["samplesheet"])
