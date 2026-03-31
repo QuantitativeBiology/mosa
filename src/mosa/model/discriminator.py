@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from mosa.model.mlp import MLP
+from mosa.model.layers import MLP
 
 
 class Discriminator(nn.Module):

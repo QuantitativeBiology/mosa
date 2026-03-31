@@ -93,8 +93,6 @@ def _train(args):
             ),
         )
 
-    use_sync_bn = isinstance(tc.devices, int) and tc.devices > 1
-
     trainer_kwargs = dict(
         max_epochs=config.num_epochs,
         callbacks=callbacks,
@@ -105,7 +103,6 @@ def _train(args):
         gradient_clip_val=tc.gradient_clip_val,
         accumulate_grad_batches=tc.accumulate_grad_batches,
         log_every_n_steps=tc.log_every_n_steps,
-        sync_batchnorm=use_sync_bn,
     )
     if not has_val:
         trainer_kwargs["limit_val_batches"] = 0

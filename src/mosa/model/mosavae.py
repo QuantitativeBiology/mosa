@@ -119,27 +119,19 @@ class MOSAVAE(pl.LightningModule):
             logvar : Tensor [B, joint_latent_dim]
                 Posterior log-variance.
         """
-        B = next(iter(batch.encoder_inputs.values())).shape[0]
-        device = next(iter(batch.encoder_inputs.values())).device
-
-        # Encode each view, zeroing embeddings for absent samples
+        # Encode full batch per view so every DDP rank executes the same ops.
+        # Mask ensures only present samples contribute to batch-norm statistics.
         view_embeddings = {}
         sample_masks = {}
         for name in self.view_order:
             x = batch.encoder_inputs[name]
-            latent_dim = self.view_latent_dims[name]
 
             sample_mask = batch.missing_masks[name].any(dim=1)
             sample_masks[name] = sample_mask
 
-            if sample_mask.any():
-                emb_full = torch.zeros(B, latent_dim, device=device)
-                emb_full[sample_mask] = self.encoders[name](
-                    x[sample_mask], batch.conditionals[sample_mask]
-                )
-                view_embeddings[name] = emb_full
-            else:
-                view_embeddings[name] = torch.zeros(B, latent_dim, device=device)
+            emb = self.encoders[name](x, batch.conditionals, mask=sample_mask)
+            emb[~sample_mask] = 0.0
+            view_embeddings[name] = emb
 
         # Fuse view embeddings into joint latent space
         mu, logvar, z = self.latent_space(view_embeddings, self.view_order, sample_masks)

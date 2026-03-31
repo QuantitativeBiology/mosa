@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 import torch
 import torch.nn as nn
 
-from mosa.model.mlp import MLP
+from mosa.model.layers import MLP
 
 _REGISTRY: dict[str, type] = {}
 
@@ -111,8 +111,10 @@ class PoELatentSpace(BaseLatentSpace):
             bn_eps=0.001,
         )
 
-    def _project_view(self, embedding: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        stats = self.shared_head(embedding)
+    def _project_view(
+        self, embedding: torch.Tensor, mask: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        stats = self.shared_head(embedding, mask=mask)
         return stats.split(self.latent_dim, dim=1)
 
     def forward(
@@ -129,13 +131,14 @@ class PoELatentSpace(BaseLatentSpace):
         mu_precision_sum = torch.zeros(B, self.latent_dim, device=device)
 
         for name in view_order:
-            mu_v, logvar_v = self._project_view(view_embeddings[name])
+            view_mask = sample_masks.get(name) if sample_masks is not None else None
+            mu_v, logvar_v = self._project_view(view_embeddings[name], mask=view_mask)
             precision_v = torch.exp(-logvar_v)
 
-            if sample_masks is not None and name in sample_masks:
-                mask = sample_masks[name].unsqueeze(1)  # [B, 1]
-                precision_v = precision_v * mask
-                mu_v = mu_v * mask
+            if view_mask is not None:
+                mask_f = view_mask.unsqueeze(1)  # [B, 1]
+                precision_v = precision_v * mask_f
+                mu_v = mu_v * mask_f
 
             precision_sum = precision_sum + precision_v
             mu_precision_sum = mu_precision_sum + mu_v * precision_v
