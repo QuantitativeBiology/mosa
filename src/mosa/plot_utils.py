@@ -130,10 +130,12 @@ def compute_umap_embedding(df, n_neighbors=25, min_dist=0.25, metric="euclidean"
     if pca_components is not None:
         X = PCA(n_components=pca_components).fit_transform(X)
 
-    embedding = umap.UMAP(
-        n_neighbors=n_neighbors, min_dist=min_dist,
-        metric=metric, n_components=n_components, random_state=random_state,
-    ).fit_transform(X)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        embedding = umap.UMAP(
+            n_neighbors=n_neighbors, min_dist=min_dist,
+            metric=metric, n_components=n_components, random_state=random_state,
+        ).fit_transform(X)
 
     return pd.DataFrame(embedding, index=index,
                         columns=[f"UMAP{i+1}" for i in range(n_components)])
