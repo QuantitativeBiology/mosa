@@ -30,6 +30,7 @@ def _train(args):
     import pytorch_lightning as pl
     import torch
     from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
+    from pytorch_lightning.strategies import DDPStrategy
 
     from mosa.callbacks import SaveLatentAndReconCallback
     from mosa.data.datamodule import MuDataDataModule
@@ -93,7 +94,7 @@ def _train(args):
             ),
         )
 
-    use_sync_bn = isinstance(tc.devices, int) and tc.devices > 1
+    use_multi_gpu = isinstance(tc.devices, int) and tc.devices > 1
     trainer_kwargs = dict(
         max_epochs=config.num_epochs,
         callbacks=callbacks,
@@ -104,8 +105,10 @@ def _train(args):
         gradient_clip_val=tc.gradient_clip_val,
         accumulate_grad_batches=tc.accumulate_grad_batches,
         log_every_n_steps=tc.log_every_n_steps,
-        sync_batchnorm=use_sync_bn,
+        sync_batchnorm=use_multi_gpu,
     )
+    if use_multi_gpu:
+        trainer_kwargs["strategy"] = DDPStrategy(find_unused_parameters=True)
     if not has_val:
         trainer_kwargs["limit_val_batches"] = 0
         trainer_kwargs["num_sanity_val_steps"] = 0
