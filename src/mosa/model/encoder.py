@@ -55,7 +55,6 @@ class OmicEncoder(nn.Module):
         self,
         x: torch.Tensor,
         conditionals: torch.Tensor,
-        mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Encode omic features with conditional metadata.
 
@@ -65,10 +64,6 @@ class OmicEncoder(nn.Module):
             Omic feature values for this view.
         conditionals : Tensor [B, cond_dim]
             Conditional metadata (model_type, tissue, mutations).
-        mask : Tensor [B], optional
-            Boolean — ``True`` for samples present in this view.  Passed
-            through to batch-norm layers so statistics are computed from
-            present samples only.
 
         Returns
         -------
@@ -78,4 +73,4 @@ class OmicEncoder(nn.Module):
         if self.view_dropout is not None:
             x = self.view_dropout(x)
         h = torch.cat([x, conditionals], dim=1)
-        return self.net(h, mask=mask)
+        return self.net(h)

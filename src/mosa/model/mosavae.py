@@ -120,7 +120,8 @@ class MOSAVAE(pl.LightningModule):
                 Posterior log-variance.
         """
         # Encode full batch per view so every DDP rank executes the same ops.
-        # Mask ensures only present samples contribute to batch-norm statistics.
+        # Missing samples have zero inputs and produce zero-ish embeddings;
+        # their reconstruction loss is masked out downstream.
         view_embeddings = {}
         sample_masks = {}
         for name in self.view_order:
@@ -129,7 +130,7 @@ class MOSAVAE(pl.LightningModule):
             sample_mask = batch.missing_masks[name].any(dim=1)
             sample_masks[name] = sample_mask
 
-            emb = self.encoders[name](x, batch.conditionals, mask=sample_mask)
+            emb = self.encoders[name](x, batch.conditionals)
             emb[~sample_mask] = 0.0
             view_embeddings[name] = emb
 
@@ -202,7 +203,6 @@ class MOSAVAE(pl.LightningModule):
         disc_loss_val = torch.tensor(0.0, device=self.device)
 
         if self.discriminator is not None and opt_disc is not None:
-            self.toggle_optimizer(opt_disc)
             disc_pred = self.discriminator(out["z"].detach())
             disc_loss_val = adversarial_loss(
                 disc_pred, batch.source_ids, self.class_weights
@@ -210,7 +210,6 @@ class MOSAVAE(pl.LightningModule):
             opt_disc.zero_grad()
             self.manual_backward(disc_loss_val)
             opt_disc.step()
-            self.untoggle_optimizer(opt_disc)
 
             # Phase 2: adversarial component for VAE (fool discriminator)
             adv_pred = self.discriminator(out["z"])
@@ -226,11 +225,9 @@ class MOSAVAE(pl.LightningModule):
             - self.config.adv_weight * adv_loss_val
         )
 
-        self.toggle_optimizer(opt_vae)
         opt_vae.zero_grad()
         self.manual_backward(total)
         opt_vae.step()
-        self.untoggle_optimizer(opt_vae)
 
         # Logging
         self.log("train/loss", total, prog_bar=True)

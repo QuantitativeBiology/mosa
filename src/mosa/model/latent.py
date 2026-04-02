@@ -112,9 +112,9 @@ class PoELatentSpace(BaseLatentSpace):
         )
 
     def _project_view(
-        self, embedding: torch.Tensor, mask: torch.Tensor | None = None,
+        self, embedding: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        stats = self.shared_head(embedding, mask=mask)
+        stats = self.shared_head(embedding)
         return stats.split(self.latent_dim, dim=1)
 
     def forward(
@@ -132,7 +132,7 @@ class PoELatentSpace(BaseLatentSpace):
 
         for name in view_order:
             view_mask = sample_masks.get(name) if sample_masks is not None else None
-            mu_v, logvar_v = self._project_view(view_embeddings[name], mask=view_mask)
+            mu_v, logvar_v = self._project_view(view_embeddings[name])
             precision_v = torch.exp(-logvar_v)
 
             if view_mask is not None:
