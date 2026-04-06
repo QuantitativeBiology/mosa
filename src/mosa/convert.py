@@ -19,8 +19,8 @@ from mudata import MuData
 logger = logging.getLogger(__name__)
 
 
-def _dearrow_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Convert Arrow-backed string columns/index to object dtype for anndata compatibility."""
+def _dearrow_df(df: pd.DataFrame) -> None:
+    """Convert Arrow-backed string columns/index to object dtype in-place."""
     if hasattr(df.index, "dtype") and pd.api.types.is_string_dtype(df.index):
         df.index = df.index.astype(object)
     if hasattr(df.columns, "dtype") and pd.api.types.is_string_dtype(df.columns):
@@ -28,7 +28,19 @@ def _dearrow_df(df: pd.DataFrame) -> pd.DataFrame:
     for col in df.columns:
         if pd.api.types.is_string_dtype(df[col]):
             df[col] = df[col].astype(object)
-    return df
+
+
+def _dearrow_mudata(mdata: MuData) -> None:
+    """Strip Arrow-backed string types from all DataFrames in a MuData.
+
+    MuData.update() can (re-)introduce ArrowStringArray types that anndata
+    cannot serialise to zarr/h5.  Call this once before writing.
+    """
+    _dearrow_df(mdata.obs)
+    _dearrow_df(mdata.var)
+    for mod in mdata.mod.values():
+        _dearrow_df(mod.obs)
+        _dearrow_df(mod.var)
 
 
 def csv_to_mudata(
@@ -66,15 +78,13 @@ def csv_to_mudata(
     # Drop any unnamed index-artifact columns (e.g. 'Unnamed: 0') that appear
     # when the source CSV was written with df.to_csv() without index=False.
     samplesheet = samplesheet.loc[:, ~samplesheet.columns.str.match(r"^Unnamed")]
-    # Convert Arrow-backed string types to object dtype so anndata can serialize them
-    samplesheet = _dearrow_df(samplesheet)
 
     # 2. Load view CSVs (features x samples) and transpose to samples x features
     logger.debug("Loading view CSVs")
     omics: dict[str, pd.DataFrame] = {}
     view_sample_sets: dict[str, set[str]] = {}
     for view_name, csv_path in view_specs:
-        df = _dearrow_df(pd.read_csv(csv_path, index_col=0).T).astype(float)
+        df = pd.read_csv(csv_path, index_col=0).T.astype(float)
         omics[view_name] = df
         view_sample_sets[view_name] = set(df.index)
         logger.debug("  view '%s': %d samples x %d features", view_name, *df.shape)
@@ -87,7 +97,7 @@ def csv_to_mudata(
 
     mutations_df = None
     if mutations_path:
-        mutations_df = _dearrow_df(pd.read_csv(mutations_path, index_col=0).T)
+        mutations_df = pd.read_csv(mutations_path, index_col=0).T
 
     common_samples = sorted(common)
     logger.debug("Union samples (with samplesheet metadata): %d", len(common_samples))
@@ -144,6 +154,8 @@ def csv_to_mudata(
         mutations_df = mutations_df.add_prefix("mutation_")
         for col in mutations_df.columns:
             mdata.obs[col] = mutations_df[col].values
+
+    _dearrow_mudata(mdata)
 
     output_path_obj = Path(output_path)
     output_path_obj.parent.mkdir(parents=True, exist_ok=True)
