@@ -23,6 +23,8 @@ def _setup_logging(debug: bool):
         logging.getLogger("fsspec").setLevel(logging.WARNING)
         logging.getLogger("numcodecs").setLevel(logging.WARNING)
         logging.getLogger("h5py").setLevel(logging.WARNING)
+        logging.getLogger("zarr").setLevel(logging.WARNING)
+        logging.getLogger("asyncio").setLevel(logging.WARNING)
 
         # Suppress noisy third-party warnings
         warnings.filterwarnings("ignore", category=FutureWarning, module="mudata")
@@ -47,9 +49,9 @@ def _train(args):
     torch.set_float32_matmul_precision("high")
     torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(False)
 
-    # In DDP each GPU process re-runs this function; silence setup logs on non-zero ranks.
+    # In DDP each GPU process re-runs this function; silence all logs on non-zero ranks.
     if int(os.environ.get("LOCAL_RANK", 0)) != 0:
-        logger.setLevel(logging.WARNING)
+        logging.getLogger("mosa").setLevel(logging.WARNING)
 
     config = load_config(args.config)
     config.validate_paths()
