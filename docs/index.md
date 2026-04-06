@@ -1,16 +1,20 @@
 # MOSA Documentation
 
-MOSA (Multi-Omic Synthetic Augmentation) is a configurable VAE for integrating multiple omic data sources into a shared latent space. It is part of the Generative Multi-Omics Data Integration Library.
+MOSA (Multi-Omic Synthetic Augmentation) is a configurable VAE for integrating multiple omic data sources into a shared latent space.
 
 ## Guides
 
-| Guide | Audience | Contents |
-|-------|----------|----------|
-| [Getting Started](getting-started.md) | All users | Installation, data preparation, running your first experiment |
-| [Configuration Reference](configuration.md) | All users | Every YAML config option with defaults and examples |
-| [Architecture Guide](architecture.md) | Users who want to understand or modify the model | Model structure, forward pass, training loop, data pipeline |
-| [Plotting Guide](plotting.md) | Users who want to understand or customize plots | Data sources, how to edit plots, how to add new ones |
-| [Developer Guide](developing.md) | Users who want to extend MOSA | Adding fusion methods, losses, and new models |
+[Getting Started](getting-started.md) covers installation, data preparation, and running your first experiment.
+
+[Configuration Reference](configuration.md) documents every YAML config option with defaults and examples.
+
+[Architecture Guide](architecture.md) explains the model structure, forward pass, training loop, and data pipeline.
+
+[Data Pipeline](data-pipeline.md) details how data flows from MuData files to GPU-ready batches.
+
+[Plotting Guide](plotting.md) covers plot data sources, customization, and how to add new plots.
+
+[Developer Guide](developing.md) explains how to extend MOSA with new fusion methods, losses, and models.
 
 ## Quick reference
 
