@@ -182,6 +182,12 @@ class MOSAVAE(pl.LightningModule):
             "recon_metrics": recon_metrics,
         }
 
+    def transfer_batch_to_device(self, batch, device, dataloader_idx):
+        """Ensure MOSABatch is moved to the correct device."""
+        if isinstance(batch, MOSABatch):
+            return batch.to(device)
+        return super().transfer_batch_to_device(batch, device, dataloader_idx)
+
     def training_step(self, batch: MOSABatch, batch_idx: int):
         """Two-phase training step: discriminator update, then VAE update."""
         optimizers = self.optimizers()
