@@ -99,16 +99,25 @@ class LazyZarrDataset(Dataset):
         return self.__getitems__([idx])[0]
 
     def __getitems__(self, indices: list[int]) -> list[dict]:
-        """Batched read: one zarr slice per view for the whole batch."""
+        """Batched read: one zarr slice per view for the whole batch.
+
+        Indices are sorted before the zarr read so the I/O is sequential
+        (contiguous chunks).  Within-batch order is irrelevant for SGD, so
+        the returned list follows the sorted order directly.
+        """
         store = self._get_store()
-        real_indices = self.indices[indices]
+
+        # Sort for contiguous zarr I/O
+        order = np.argsort(self.indices[indices])
+        sorted_indices = [indices[i] for i in order]
+        sorted_real = self.indices[sorted_indices]
 
         # Single vectorised zarr read per view
         all_X: dict[str, np.ndarray] = {}
         all_masks: dict[str, np.ndarray] = {}
         for name in self.view_names:
-            X_batch = store[f"mod/{name}/X"][real_indices].astype(np.float32)
-            mask_batch = store[f"mod/{name}/layers/{self.mask_layer_name}"][real_indices].astype(bool)
+            X_batch = store[f"mod/{name}/X"][sorted_real].astype(np.float32)
+            mask_batch = store[f"mod/{name}/layers/{self.mask_layer_name}"][sorted_real].astype(bool)
 
             scaler = self.scalers.get(name)
             if scaler is not None:
@@ -119,7 +128,7 @@ class LazyZarrDataset(Dataset):
             all_masks[name] = mask_batch
 
         results = []
-        for i, idx in enumerate(indices):
+        for i, idx in enumerate(sorted_indices):
             t_views = {name: torch.from_numpy(all_X[name][i]) for name in self.view_names}
             results.append({
                 "encoder_inputs": t_views,
@@ -161,6 +170,18 @@ class MuDataDataModule(pl.LightningDataModule):
         else:
             self._setup_h5mu()
 
+    def _loader_kwargs(self) -> dict:
+        nw = self.config.trainer.num_workers
+        kwargs: dict = {
+            "num_workers": nw,
+            "collate_fn": collate_fn,
+            "pin_memory": True,
+        }
+        if nw > 0:
+            kwargs["persistent_workers"] = True
+            kwargs["prefetch_factor"] = 2
+        return kwargs
+
     def train_dataloader(self) -> DataLoader:
         if self.train_dataset is None:
             raise RuntimeError("Call setup() before requesting dataloaders")
@@ -168,9 +189,7 @@ class MuDataDataModule(pl.LightningDataModule):
             self.train_dataset,
             batch_size=self.config.batch_size,
             shuffle=True,
-            num_workers=self.config.trainer.num_workers,
-            collate_fn=collate_fn,
-            pin_memory=True,
+            **self._loader_kwargs(),
         )
 
     def val_dataloader(self) -> DataLoader | None:
@@ -180,9 +199,7 @@ class MuDataDataModule(pl.LightningDataModule):
             self.val_dataset,
             batch_size=self.config.batch_size,
             shuffle=False,
-            num_workers=self.config.trainer.num_workers,
-            collate_fn=collate_fn,
-            pin_memory=True,
+            **self._loader_kwargs(),
         )
 
     def train_eval_dataloader(self) -> DataLoader:
@@ -193,9 +210,7 @@ class MuDataDataModule(pl.LightningDataModule):
             self.train_dataset,
             batch_size=self.config.batch_size,
             shuffle=False,
-            num_workers=self.config.trainer.num_workers,
-            collate_fn=collate_fn,
-            pin_memory=True,
+            **self._loader_kwargs(),
         )
 
     def full_dataloader(self) -> DataLoader:
@@ -210,9 +225,7 @@ class MuDataDataModule(pl.LightningDataModule):
             dataset,
             batch_size=self.config.batch_size,
             shuffle=False,
-            num_workers=self.config.trainer.num_workers,
-            collate_fn=collate_fn,
-            pin_memory=True,
+            **self._loader_kwargs(),
         )
 
     def test_dataloader(self) -> DataLoader:

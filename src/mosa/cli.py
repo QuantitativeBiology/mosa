@@ -122,7 +122,7 @@ def _train(args):
         sync_batchnorm=use_multi_gpu,
     )
     if use_multi_gpu:
-        trainer_kwargs["strategy"] = DDPStrategy(find_unused_parameters=True)
+        trainer_kwargs["strategy"] = DDPStrategy(find_unused_parameters=False)
     if not has_val:
         trainer_kwargs["limit_val_batches"] = 0
         trainer_kwargs["num_sanity_val_steps"] = 0
