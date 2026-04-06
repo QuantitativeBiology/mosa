@@ -426,6 +426,17 @@ class MuDataDataModule(pl.LightningDataModule):
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _zarr_index_key(group) -> str:
+        """Return the key that stores the index for a zarr obs/var group.
+
+        AnnData/MuData zarr stores record the index column name in the
+        ``_index`` attribute of the group.  The actual data lives under
+        ``group[attrs["_index"]]``, **not** under ``group["_index"]``
+        (unless the DataFrame index happened to be named ``_index``).
+        """
+        return group.attrs.get("_index", "_index")
+
+    @staticmethod
     def _read_zarr_column(group) -> np.ndarray:
         """Decode a single obs/var column from MuData's zarr encoding."""
         if isinstance(group, zarr.Array):
@@ -452,7 +463,8 @@ class MuDataDataModule(pl.LightningDataModule):
 
         # 1. Read obs metadata only (small)
         obs_group = store["obs"]
-        sample_names = list(self._read_zarr_column(obs_group["_index"]))
+        obs_idx_key = self._zarr_index_key(obs_group)
+        sample_names = list(self._read_zarr_column(obs_group[obs_idx_key]))
         obs_dict = {"model_type": self._read_zarr_column(obs_group["model_type"])}
         if "tissue" in obs_group:
             obs_dict["tissue"] = self._read_zarr_column(obs_group["tissue"])
@@ -466,7 +478,8 @@ class MuDataDataModule(pl.LightningDataModule):
             if f"mod/{view_name}" not in store:
                 raise ValueError(f"View '{view_name}' not found in zarr store")
             var_group = store[f"mod/{view_name}/var"]
-            self.feature_names[view_name] = list(self._read_zarr_column(var_group["_index"]))
+            var_idx_key = self._zarr_index_key(var_group)
+            self.feature_names[view_name] = list(self._read_zarr_column(var_group[var_idx_key]))
 
         # 3. Shared metadata processing
         meta = self._process_obs(obs_df, len(sample_names))
