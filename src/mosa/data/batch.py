@@ -8,10 +8,7 @@ from torch import Tensor
 
 @dataclass
 class MOSABatch:
-    """A collated batch of multi-omic samples.
-
-    All tensor fields have batch dimension B as their first axis.
-    """
+    """Collated batch of multi-omic samples with tensors indexed by batch."""
 
     encoder_inputs: dict[str, Tensor]   # {omic: [B, D_omic]} scaled features
     decoder_targets: dict[str, Tensor]  # {omic: [B, D_omic]} same as encoder_inputs
@@ -37,7 +34,7 @@ class MOSABatch:
 
 
 def collate_fn(samples: list[dict]) -> MOSABatch:
-    """Stack individual sample dicts from MOSADataset into a MOSABatch."""
+    """Stack individual samples into a batch."""
     omic_names = list(samples[0]["encoder_inputs"].keys())
 
     return MOSABatch(

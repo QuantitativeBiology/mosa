@@ -3,18 +3,14 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from mosa.model.mlp import MLP
+from mosa.model.layers import MLP
 
 
 class OmicDecoder(nn.Module):
-    """Per-view decoder that reconstructs omic features from the joint latent.
+    """Reconstructs omic features from the joint latent representation.
 
     Architecture: ``[joint_latent_dim + cond_dim] -> reversed hidden_dims -> output_dim``.
-
-    The conditional input passes through a dedicated projection layer
-    (Linear + BatchNorm + PReLU) before concatenation with z. This allows
-    the decoder to learn a non-linear transformation of the metadata,
-    rather than feeding raw one-hot vectors directly into the main MLP.
+    Conditionals are projected through a dedicated layer before concatenation with z.
     """
 
     def __init__(

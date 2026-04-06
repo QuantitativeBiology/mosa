@@ -17,7 +17,6 @@ _VALID_ACCELERATORS = ("auto", "cpu", "gpu", "mps")
 @dataclass
 class ViewConfig:
     name: str
-    path: str
     input_dim: int = 0
     output_dim: int = 0
     hidden_layer_dims: list[int] = field(default_factory=lambda: [512, 256])
@@ -103,13 +102,12 @@ class MOSAConfig:
     n_folds: int = 5
     test_size: float = 0.1
     random_seed: int = 42
-    samplesheet_path: str = ""
-    mutations_path: str = ""
+    data_path: str = ""                     # path to .h5mu/.zarr file
+    mask_layer_name: str = "mask"           # layer name for per-feature masks
+    scaler_sample_frac: float = 1.0         # fraction of training data for fitting StandardScaler
     output_dir: str = "outputs"
     inference: bool = False
     target_batch: str = ""
-    use_tissue_conditional: bool = True
-    use_mutations_conditional: bool = False
     n_batches: int = 0
 
     def __post_init__(self):
@@ -117,7 +115,7 @@ class MOSAConfig:
         for name in (
             "kl_weight", "kl_weight_final", "contrastive_weight", "adv_weight",
             "learning_rate", "adv_learning_rate", "lr_gamma", "view_dropout_prob",
-            "test_size",
+            "test_size", "scaler_sample_frac",
         ):
             val = getattr(self, name)
             if not isinstance(val, float):
@@ -151,6 +149,10 @@ class MOSAConfig:
                 f"adv_learning_rate must be positive when adv_weight > 0, "
                 f"got {self.adv_learning_rate}"
             )
+        if not 0.0 < self.scaler_sample_frac <= 1.0:
+            raise ValueError(
+                f"scaler_sample_frac must be in (0.0, 1.0], got {self.scaler_sample_frac}"
+            )
 
         # --- Cross-field validation ---
         if self.fusion_method == "poe" and self.views:
@@ -160,6 +162,11 @@ class MOSAConfig:
                     f"PoE fusion requires all views to have the same last hidden dim, "
                     f"got {last_dims}"
                 )
+
+        if self.views and not self.data_path:
+            raise ValueError(
+                "data_path is required when views are configured"
+            )
 
         # --- Warnings for suspicious but valid configs ---
         if self.use_kl_scheduler and self.kl_warmup_epochs > self.num_epochs:
@@ -173,25 +180,14 @@ class MOSAConfig:
         """Check that all referenced files exist. Call before training."""
         errors = []
 
-        if not self.samplesheet_path:
-            errors.append("samplesheet_path is required but not set")
-        elif not Path(self.samplesheet_path).is_file():
-            errors.append(f"samplesheet_path not found: {self.samplesheet_path}")
-
-        if self.use_mutations_conditional:
-            if not self.mutations_path:
-                errors.append("mutations_path is required when use_mutations_conditional=True")
-            elif not Path(self.mutations_path).is_file():
-                errors.append(f"mutations_path not found: {self.mutations_path}")
+        # Check MuData file exists
+        if not self.data_path:
+            errors.append("data_path is required but not set")
+        elif not (Path(self.data_path).is_file() or Path(self.data_path).is_dir()):
+            errors.append(f"data_path not found: {self.data_path}")
 
         if not self.views:
             errors.append("At least one view must be configured")
-
-        for name, vc in self.views.items():
-            if not vc.path:
-                errors.append(f"View '{name}': path is required but not set")
-            elif not Path(vc.path).is_file():
-                errors.append(f"View '{name}': path not found: {vc.path}")
 
         if errors:
             raise FileNotFoundError(

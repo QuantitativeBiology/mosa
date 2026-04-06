@@ -7,7 +7,7 @@ import torch.nn as nn
 class MLP(nn.Module):
     """Reusable multi-layer perceptron.
 
-    Hidden layers: Linear -> BatchNorm (optional) -> Dropout (if > 0) -> Activation.
+    Hidden layers: Linear -> BatchNorm1d (optional) -> Dropout (if > 0) -> Activation.
     Final layer:   Linear -> output_activation (optional).
     """
 
@@ -31,7 +31,9 @@ class MLP(nn.Module):
             if i < len(layer_sizes) - 1:
                 if use_batch_norm:
                     layers.append(
-                        nn.BatchNorm1d(layer_sizes[i], momentum=bn_momentum, eps=bn_eps)
+                        nn.BatchNorm1d(
+                            layer_sizes[i], momentum=bn_momentum, eps=bn_eps,
+                        )
                     )
                 if dropout_p > 0.0:
                     layers.append(nn.Dropout(p=dropout_p))
@@ -43,5 +45,5 @@ class MLP(nn.Module):
         self.net = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Pass input through all layers sequentially."""
         return self.net(x)
+

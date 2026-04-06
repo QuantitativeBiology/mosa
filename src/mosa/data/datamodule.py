@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import DataLoader, Dataset
+import zarr
+from torch.utils.data import ConcatDataset, DataLoader, Dataset
 
 import pytorch_lightning as pl
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+from scipy.sparse import issparse
 
 from mosa.config import MOSAConfig
 from mosa.data.batch import MOSABatch, collate_fn
@@ -18,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class MOSADataset(Dataset):
-    """Stores per-sample tensors for a single data split (train or val)."""
+    """In-memory dataset with per-sample tensors for a single split."""
 
     def __init__(
         self,
@@ -44,7 +47,6 @@ class MOSADataset(Dataset):
         return len(self.sample_names)
 
     def __getitem__(self, idx: int) -> dict:
-        """Return a single sample as a dict (collated into MOSABatch by collate_fn)."""
         return {
             "encoder_inputs": {k: self.omics[k][idx] for k in self.omic_names},
             "decoder_targets": {k: self.omics[k][idx] for k in self.omic_names},
@@ -57,15 +59,95 @@ class MOSADataset(Dataset):
         }
 
 
-class MOSADataModule(pl.LightningDataModule):
-    """Lightning DataModule for loading and preprocessing multi-omic data.
+class LazyZarrDataset(Dataset):
+    """Lazy-loading dataset from MuData zarr store; each worker opens its own handle."""
 
-    Orchestrates: CSV loading, sample alignment, train/val splitting,
-    z-score normalization (fit on train only), conditional vector
-    construction, and class weight computation.
+    def __init__(
+        self,
+        zarr_path: str,
+        view_names: list[str],
+        indices: np.ndarray,
+        conditionals: np.ndarray,
+        tissue_labels: np.ndarray,
+        source_ids: np.ndarray,
+        sample_weights: np.ndarray,
+        sample_names: list[str],
+        scalers: dict[str, dict[str, np.ndarray] | None],
+        mask_layer_name: str = "mask",
+    ):
+        self.zarr_path = zarr_path
+        self.view_names = view_names
+        self.indices = indices
+        self.conditionals = conditionals
+        self.tissue_labels = tissue_labels
+        self.source_ids = source_ids
+        self.sample_weights = sample_weights
+        self.sample_names = list(sample_names)
+        self.scalers = scalers
+        self.mask_layer_name = mask_layer_name
+        self._store = None
 
-    Input CSVs are expected in features x samples format and are transposed
-    during loading. Data is assumed to be already feature-engineered.
+    def _get_store(self):
+        if self._store is None:
+            self._store = zarr.open_group(self.zarr_path, mode="r")
+        return self._store
+
+    def __len__(self) -> int:
+        return len(self.indices)
+
+    def __getitem__(self, idx: int) -> dict:
+        return self.__getitems__([idx])[0]
+
+    def __getitems__(self, indices: list[int]) -> list[dict]:
+        """Batched read: one zarr slice per view for the whole batch.
+
+        Indices are sorted before the zarr read so the I/O is sequential
+        (contiguous chunks).  Within-batch order is irrelevant for SGD, so
+        the returned list follows the sorted order directly.
+        """
+        store = self._get_store()
+
+        # Sort for contiguous zarr I/O
+        order = np.argsort(self.indices[indices])
+        sorted_indices = [indices[i] for i in order]
+        sorted_real = self.indices[sorted_indices]
+
+        # Single vectorised zarr read per view
+        all_X: dict[str, np.ndarray] = {}
+        all_masks: dict[str, np.ndarray] = {}
+        for name in self.view_names:
+            X_batch = store[f"mod/{name}/X"][sorted_real].astype(np.float32)
+            mask_batch = store[f"mod/{name}/layers/{self.mask_layer_name}"][sorted_real].astype(bool)
+
+            scaler = self.scalers.get(name)
+            if scaler is not None:
+                X_batch = (X_batch - scaler["mean"]) / scaler["scale"]
+
+            np.nan_to_num(X_batch, nan=0.0, copy=False)
+            all_X[name] = X_batch
+            all_masks[name] = mask_batch
+
+        results = []
+        for i, idx in enumerate(sorted_indices):
+            t_views = {name: torch.from_numpy(all_X[name][i]) for name in self.view_names}
+            results.append({
+                "encoder_inputs": t_views,
+                "decoder_targets": t_views,
+                "missing_masks": {name: torch.from_numpy(all_masks[name][i]) for name in self.view_names},
+                "conditionals": torch.from_numpy(self.conditionals[idx].astype(np.float32)),
+                "tissue_labels": torch.from_numpy(self.tissue_labels[idx].astype(np.float32)),
+                "source_ids": torch.tensor(self.source_ids[idx], dtype=torch.long),
+                "sample_weights": torch.tensor(self.sample_weights[idx], dtype=torch.float32),
+                "sample_name": self.sample_names[idx],
+            })
+        return results
+
+
+class MuDataDataModule(pl.LightningDataModule):
+    """Loads MuData (h5mu or zarr) format with in-memory or lazy strategies.
+
+    - h5mu: all data loaded into memory.
+    - zarr: metadata at setup, samples loaded lazily per batch.
     """
 
     def __init__(self, config: MOSAConfig):
@@ -75,227 +157,411 @@ class MOSADataModule(pl.LightningDataModule):
         self.feature_names: dict[str, list[str]] = {}
         self.batch_categories: list[str] = []
         self.tissue_categories: list[str] = []
-        self.train_dataset: MOSADataset | None = None
-        self.val_dataset: MOSADataset | None = None
-        self.full_dataset: MOSADataset | None = None
+        self.train_dataset: Dataset | None = None
+        self.val_dataset: Dataset | None = None
         self.class_weights: np.ndarray | None = None
 
+    # Public API
+
     def setup(self, stage: str | None = None) -> None:
-        """Load data, split, preprocess, and create train/val datasets."""
-
-        # 1. Load CSVs (features x samples) and transpose to samples x features
-        logger.debug("Loading view CSVs")
-        omics: dict[str, pd.DataFrame] = {}
-        for name, vc in self.config.views.items():
-            df = pd.read_csv(vc.path, index_col=0).T.astype(float)
-            omics[name] = df
-            logger.debug("  view '%s': %d samples x %d features", name, *df.shape)
-
-        # 2. Load samplesheet
-        logger.debug("Loading samplesheet from %s", self.config.samplesheet_path)
-        samplesheet = pd.read_csv(self.config.samplesheet_path).set_index("model_id")
-
-        # 3. Find common samples across all views and samplesheet
-        common = set(samplesheet.index)
-        for df in omics.values():
-            common &= set(df.index)
-
-        # Include mutations in sample alignment if used
-        mutations_df = None
-        if self.config.use_mutations_conditional and self.config.mutations_path:
-            mutations_df = pd.read_csv(self.config.mutations_path, index_col=0).T
-            common &= set(mutations_df.index)
-
-        common_samples = sorted(common)
-        logger.debug("Common samples: %d", len(common_samples))
-
-        # 4. Align all data to common samples
-        samplesheet = samplesheet.loc[common_samples]
-        for name in omics:
-            omics[name] = omics[name].loc[common_samples]
-        if mutations_df is not None:
-            mutations_df = mutations_df.loc[common_samples]
-
-        # Store feature names for each view
-        for name, df in omics.items():
-            self.feature_names[name] = list(df.columns)
-
-        # 5. Train/val split (stratified by model_type)
-        logger.debug("Train/val split (test_size=%.2f)", self.config.test_size)
-        model_type_cats = pd.Categorical(
-            samplesheet["model_type"],
-            categories=sorted(samplesheet["model_type"].unique()),
-            ordered=True,
-        )
-        batch_codes = np.asarray(model_type_cats.codes, dtype=np.intp)
-
-        if self.config.test_size > 0:
-            train_idx, val_idx = train_test_split(
-                np.arange(len(common_samples)),
-                test_size=self.config.test_size,
-                random_state=self.config.random_seed,
-                stratify=batch_codes,
-            )
+        data_path = Path(self.config.data_path)
+        if data_path.suffix == ".zarr" or (data_path.is_dir() and not data_path.suffix):
+            self._setup_zarr()
         else:
-            train_idx = np.arange(len(common_samples))
-            val_idx = np.array([], dtype=int)
-        logger.debug("  train=%d, val=%d", len(train_idx), len(val_idx))
+            self._setup_h5mu()
 
-        # Full loader
-        all_idx = np.arange(len(common_samples))
-
-        # 6. Build masks, fit scalers (train only), transform
-        logger.debug("Building masks and fitting scalers")
-        omics_all: dict[str, np.ndarray] = {}
-        masks_all: dict[str, np.ndarray] = {}
-
-        for name, df in omics.items():
-            X = df.values.astype(np.float32)
-            masks_all[name] = ~np.isnan(X)
-
-            if self.config.views[name].discrete:
-                X = np.nan_to_num(X, nan=0.0)
-                self.scalers[name] = None
-            else:
-                scaler = StandardScaler()
-                scaler.fit(X[train_idx])
-                X = scaler.transform(X)
-                X = np.nan_to_num(X, nan=0.0)
-                self.scalers[name] = scaler
-
-            omics_all[name] = X
-
-        # 7. Build conditionals
-        logger.debug("Building conditionals")
-
-        # Model type (batch) — always included
-        self.batch_categories = sorted(samplesheet["model_type"].unique())
-        batch_dummies = pd.get_dummies(samplesheet["model_type"])
-        batch_labels = batch_dummies[self.batch_categories].values.astype(np.float32)
-
-        # Tissue — optional
-        self.tissue_categories = sorted(samplesheet["tissue"].unique())
-        tissue_dummies = pd.get_dummies(samplesheet["tissue"])
-        tissue_labels = tissue_dummies[self.tissue_categories].values.astype(np.float32)
-
-        # Mutations — optional
-        mutations_all = None
-        if mutations_df is not None:
-            mutations_all = mutations_df.values.astype(np.float32)
-
-        # Concatenate conditional vector: [batch, tissue?, mutations?]
-        cond_parts = [batch_labels]
-        if self.config.use_tissue_conditional:
-            cond_parts.append(tissue_labels)
-        if mutations_all is not None:
-            cond_parts.append(mutations_all)
-        conditionals = np.concatenate(cond_parts, axis=1).astype(np.float32)
-        logger.debug("  conditionals shape: %s", conditionals.shape)
-
-        # Source IDs (integer model_type index for discriminator/loss)
-        source_ids = batch_codes
-
-        # 8. Class weights (inverse-frequency balancing)
-        unique_classes = np.unique(batch_codes)
-        n_samples = len(batch_codes)
-        n_classes = len(unique_classes)
-        class_weights = np.zeros(n_classes, dtype=np.float64)
-        for i, cls in enumerate(unique_classes):
-            class_weights[i] = n_samples / (n_classes * np.sum(batch_codes == cls))
-        sample_weights = class_weights[batch_codes].astype(np.float32)
-        self.class_weights = class_weights.astype(np.float32)
-
-        # 9. Update config dims from loaded data
-        for name, df in omics.items():
-            self.config.views[name].input_dim = df.shape[1]
-            if self.config.views[name].output_dim == 0:
-                self.config.views[name].output_dim = df.shape[1]
-        self.config.conditional_dim = conditionals.shape[1]
-        self.config.n_batches = len(self.batch_categories)
-
-        # 10. Create datasets
-        omic_names = list(self.config.views.keys())
-
-        self.train_dataset = MOSADataset(
-            omics_data={k: v[train_idx] for k, v in omics_all.items()},
-            masks={k: v[train_idx] for k, v in masks_all.items()},
-            conditionals=conditionals[train_idx],
-            tissue_labels=tissue_labels[train_idx],
-            source_ids=source_ids[train_idx],
-            sample_weights=sample_weights[train_idx],
-            sample_names=[common_samples[i] for i in train_idx],
-            omic_names=omic_names,
-        )
-
-        if len(val_idx) > 0:
-            self.val_dataset = MOSADataset(
-                omics_data={k: v[val_idx] for k, v in omics_all.items()},
-                masks={k: v[val_idx] for k, v in masks_all.items()},
-                conditionals=conditionals[val_idx],
-                tissue_labels=tissue_labels[val_idx],
-                source_ids=source_ids[val_idx],
-                sample_weights=sample_weights[val_idx],
-                sample_names=[common_samples[i] for i in val_idx],
-                omic_names=omic_names,
-            )
-
-        self.full_dataset = MOSADataset(
-            omics_data={k: v[all_idx] for k, v in omics_all.items()},
-            masks={k: v[all_idx] for k, v in masks_all.items()},
-            conditionals=conditionals[all_idx],
-            tissue_labels=tissue_labels[all_idx],
-            source_ids=source_ids[all_idx],
-            sample_weights=sample_weights[all_idx],
-            sample_names=[common_samples[i] for i in all_idx],
-            omic_names=omic_names,
-        )
+    def _loader_kwargs(self) -> dict:
+        nw = self.config.trainer.num_workers
+        kwargs: dict = {
+            "num_workers": nw,
+            "collate_fn": collate_fn,
+            "pin_memory": True,
+        }
+        if nw > 0:
+            kwargs["persistent_workers"] = True
+            kwargs["prefetch_factor"] = 2
+        return kwargs
 
     def train_dataloader(self) -> DataLoader:
-        """Return a DataLoader for the training split."""
+        if self.train_dataset is None:
+            raise RuntimeError("Call setup() before requesting dataloaders")
         return DataLoader(
             self.train_dataset,
             batch_size=self.config.batch_size,
             shuffle=True,
-            collate_fn=collate_fn,
-            num_workers=self.config.trainer.num_workers,
-        )
-
-    def train_eval_dataloader(self) -> DataLoader:
-        """Return a deterministic DataLoader for the training split.
-        Used for exporting train-set predictions without sample reordering.
-        """
-        if self.train_dataset is None:
-            raise RuntimeError("train_dataset is not initialized")
-        return DataLoader(
-            self.train_dataset,
-            batch_size=self.config.batch_size,
-            shuffle=False,
-            collate_fn=collate_fn,
-            num_workers=self.config.trainer.num_workers,
+            **self._loader_kwargs(),
         )
 
     def val_dataloader(self) -> DataLoader | None:
-        """Return a DataLoader for the validation split, or None if no validation set."""
         if self.val_dataset is None:
             return None
         return DataLoader(
             self.val_dataset,
             batch_size=self.config.batch_size,
             shuffle=False,
-            collate_fn=collate_fn,
-            num_workers=self.config.trainer.num_workers,
+            **self._loader_kwargs(),
+        )
+
+    def train_eval_dataloader(self) -> DataLoader:
+        """Non-shuffled train dataloader for deterministic inference after training."""
+        if self.train_dataset is None:
+            raise RuntimeError("Call setup() before requesting dataloaders")
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.config.batch_size,
+            shuffle=False,
+            **self._loader_kwargs(),
         )
 
     def full_dataloader(self) -> DataLoader:
-        """Return a deterministic DataLoader with all available samples.
-        """
-        if self.full_dataset is None:
-            raise RuntimeError("full_dataset is not initialized")
-
+        """DataLoader over all samples (train + val) in a fixed order."""
+        if self.train_dataset is None:
+            raise RuntimeError("Call setup() before requesting dataloaders")
+        if self.val_dataset is not None:
+            dataset = ConcatDataset([self.train_dataset, self.val_dataset])
+        else:
+            dataset = self.train_dataset
         return DataLoader(
-            self.full_dataset,
+            dataset,
             batch_size=self.config.batch_size,
             shuffle=False,
-            collate_fn=collate_fn,
-            num_workers=self.config.trainer.num_workers,
+            **self._loader_kwargs(),
         )
+
+    def test_dataloader(self) -> DataLoader:
+        raise NotImplementedError("Test dataloader not implemented")
+
+    def predict_dataloader(self) -> DataLoader:
+        raise NotImplementedError("Predict dataloader not implemented")
+
+    # Shared helpers
+
+    def _process_obs(
+        self, obs_df: pd.DataFrame, n_samples: int,
+    ) -> dict:
+        """Process obs metadata into conditionals, labels, weights, and splits.
+
+        Returns
+        -------
+        dict
+            Keys: conditionals, tissue_labels, source_ids, sample_weights,
+            train_idx, val_idx, label_codes.
+        """
+        # Batch (model_type)
+        if "model_type" not in obs_df.columns:
+            raise ValueError("MuData .obs must contain 'model_type' column")
+        batch_dummies = pd.get_dummies(obs_df["model_type"])
+        self.batch_categories = list(batch_dummies.columns)
+
+        # Tissue
+        if "tissue" in obs_df.columns:
+            tissue_dummies = pd.get_dummies(obs_df["tissue"])
+            self.tissue_categories = list(tissue_dummies.columns)
+        else:
+            tissue_dummies = pd.DataFrame()
+            logger.warning("No 'tissue' column found in .obs")
+
+        # Mutations
+        mutation_cols = [c for c in obs_df.columns if c.startswith("mutation_")]
+        mutations = obs_df[mutation_cols].values.astype(np.float32) if mutation_cols else None
+
+        # Concatenate conditionals
+        cond_parts = [batch_dummies.values]
+        if not tissue_dummies.empty:
+            cond_parts.append(tissue_dummies.values)
+        if mutations is not None:
+            cond_parts.append(mutations)
+        conditionals = np.concatenate(cond_parts, axis=1).astype(np.float32)
+
+        # Tissue labels (one-hot)
+        if not tissue_dummies.empty:
+            tissue_labels = tissue_dummies.values.astype(np.float32)
+        else:
+            tissue_labels = np.zeros((n_samples, 1), dtype=np.float32)
+
+        # Source IDs & stratified split
+        model_type_cats = pd.Categorical(
+            obs_df["model_type"],
+            categories=sorted(obs_df["model_type"].unique()),
+            ordered=True,
+        )
+        label_codes = np.asarray(model_type_cats.codes, dtype=np.intp)
+
+        if self.config.test_size > 0:
+            train_idx, val_idx = train_test_split(
+                np.arange(n_samples),
+                test_size=self.config.test_size,
+                random_state=self.config.random_seed,
+                stratify=label_codes,
+            )
+        else:
+            train_idx = np.arange(n_samples)
+            val_idx = np.array([], dtype=int)
+
+        logger.debug("  train=%d, val=%d", len(train_idx), len(val_idx))
+
+        # Class weights
+        unique, counts = np.unique(label_codes[train_idx], return_counts=True)
+        class_weights = np.zeros(len(unique), dtype=np.float32)
+        for i, (cls, count) in enumerate(zip(unique, counts)):
+            class_weights[cls] = len(train_idx) / (len(unique) * count)
+        self.class_weights = class_weights
+
+        sample_weights = class_weights[label_codes].astype(np.float32)
+
+        return dict(
+            conditionals=conditionals,
+            tissue_labels=tissue_labels,
+            source_ids=label_codes,
+            sample_weights=sample_weights,
+            train_idx=train_idx,
+            val_idx=val_idx,
+        )
+
+    def _update_config_dims(self, conditionals: np.ndarray) -> None:
+        for view_name in self.config.views:
+            vc = self.config.views[view_name]
+            if vc.input_dim == 0:
+                vc.input_dim = len(self.feature_names[view_name])
+            if vc.output_dim == 0:
+                vc.output_dim = len(self.feature_names[view_name])
+        if self.config.conditional_dim == 0:
+            self.config.conditional_dim = conditionals.shape[1]
+        if self.config.n_batches == 0:
+            self.config.n_batches = len(self.batch_categories)
+
+    # h5mu path (in-memory)
+
+    def _setup_h5mu(self) -> None:
+        import mudata
+
+        logger.info("Loading MuData (h5mu) from %s", self.config.data_path)
+        mdata = mudata.read(self.config.data_path)
+        self._verify_mudata_structure(mdata)
+
+        # Extract dense arrays per modality
+        omics_all: dict[str, np.ndarray] = {}
+        masks_all: dict[str, np.ndarray] = {}
+
+        for view_name in self.config.views:
+            adata = mdata.mod[view_name]
+            X = adata.X
+            if issparse(X):
+                X = X.toarray()
+            X = X.astype(np.float32)
+
+            mask = adata.layers[self.config.mask_layer_name]
+            if issparse(mask):
+                mask = mask.toarray()
+            mask = mask.astype(bool)
+
+            if view_name in mdata.obsm:
+                presence = np.asarray(mdata.obsm[view_name]).flatten().astype(bool)
+                X[~presence] = 0.0
+                mask[~presence] = False
+
+            omics_all[view_name] = X
+            masks_all[view_name] = mask
+            self.feature_names[view_name] = list(adata.var_names)
+
+        obs_df = mdata.obs.loc[:, ~mdata.obs.columns.str.match(r"^Unnamed")]
+        sample_names = list(obs_df.index)
+
+        meta = self._process_obs(obs_df, len(sample_names))
+        train_idx, val_idx = meta["train_idx"], meta["val_idx"]
+
+        # Fit scalers on training data
+        for view_name, X in omics_all.items():
+            if self.config.views[view_name].discrete:
+                X = np.nan_to_num(X, nan=0.0)
+                self.scalers[view_name] = None
+            else:
+                scaler = StandardScaler()
+                scaler.fit(X[train_idx])
+                X = scaler.transform(X)
+                X = np.nan_to_num(X, nan=0.0)
+                self.scalers[view_name] = scaler
+            omics_all[view_name] = X
+
+        self._update_config_dims(meta["conditionals"])
+
+        self.train_dataset = self._create_inmemory_dataset(
+            omics_all, masks_all, meta, sample_names, train_idx,
+        )
+        if len(val_idx) > 0:
+            self.val_dataset = self._create_inmemory_dataset(
+                omics_all, masks_all, meta, sample_names, val_idx,
+            )
+
+        logger.info("h5mu setup complete: %d train, %d val", len(train_idx), len(val_idx))
+
+    def _create_inmemory_dataset(
+        self,
+        omics_all: dict[str, np.ndarray],
+        masks_all: dict[str, np.ndarray],
+        meta: dict,
+        sample_names: list[str],
+        indices: np.ndarray,
+    ) -> MOSADataset:
+        return MOSADataset(
+            omics_data={k: v[indices] for k, v in omics_all.items()},
+            masks={k: v[indices] for k, v in masks_all.items()},
+            conditionals=meta["conditionals"][indices],
+            tissue_labels=meta["tissue_labels"][indices],
+            source_ids=meta["source_ids"][indices],
+            sample_weights=meta["sample_weights"][indices],
+            sample_names=[sample_names[i] for i in indices],
+            omic_names=list(self.config.views.keys()),
+        )
+
+    def _verify_mudata_structure(self, mdata: object) -> None:
+        """Validate MuData structure has required columns and views."""
+        if "model_type" not in mdata.obs.columns:
+            raise ValueError(
+                f"MuData .obs missing 'model_type' column. "
+                f"Available: {list(mdata.obs.columns)}"
+            )
+        for view_name in self.config.views:
+            if view_name not in mdata.mod:
+                raise ValueError(
+                    f"View '{view_name}' not in MuData. Available: {list(mdata.mod.keys())}"
+                )
+            if self.config.mask_layer_name not in mdata.mod[view_name].layers:
+                raise ValueError(
+                    f"Mask layer '{self.config.mask_layer_name}' not in '{view_name}'. "
+                    f"Available: {list(mdata.mod[view_name].layers.keys())}"
+                )
+
+    # zarr path (lazy loading)
+
+    @staticmethod
+    def _zarr_index_key(group) -> str:
+        """Return the key that stores the index for a zarr obs/var group.
+
+        AnnData/MuData zarr stores record the index column name in the
+        ``_index`` attribute of the group.  The actual data lives under
+        ``group[attrs["_index"]]``, **not** under ``group["_index"]``
+        (unless the DataFrame index happened to be named ``_index``).
+        """
+        return group.attrs.get("_index", "_index")
+
+    @staticmethod
+    def _read_zarr_column(group) -> np.ndarray:
+        """Decode a single obs/var column from MuData's zarr encoding."""
+        if isinstance(group, zarr.Array):
+            return np.asarray(group)
+
+        keys = set(group.keys())
+        if {"categories", "codes"} <= keys:
+            cats_node = group["categories"]
+            if isinstance(cats_node, zarr.Group) and "values" in cats_node:
+                cats = np.asarray(cats_node["values"])
+            else:
+                cats = np.asarray(cats_node)
+            codes = np.asarray(group["codes"])
+            return cats[codes]
+
+        if "values" in keys:
+            return np.asarray(group["values"])
+
+        raise ValueError(f"Cannot decode zarr column with keys {keys}")
+
+    def _setup_zarr(self) -> None:
+        logger.info("Loading MuData (zarr, lazy) from %s", self.config.data_path)
+        store = zarr.open_group(self.config.data_path, mode="r")
+
+        # 1. Read obs metadata only (small)
+        obs_group = store["obs"]
+        obs_idx_key = self._zarr_index_key(obs_group)
+        sample_names = list(self._read_zarr_column(obs_group[obs_idx_key]))
+        obs_dict = {"model_type": self._read_zarr_column(obs_group["model_type"])}
+        if "tissue" in obs_group:
+            obs_dict["tissue"] = self._read_zarr_column(obs_group["tissue"])
+        for key in obs_group:
+            if key.startswith("mutation_"):
+                obs_dict[key] = self._read_zarr_column(obs_group[key])
+        obs_df = pd.DataFrame(obs_dict, index=sample_names)
+
+        # 2. Read feature names per view (small)
+        for view_name in self.config.views:
+            if f"mod/{view_name}" not in store:
+                raise ValueError(f"View '{view_name}' not found in zarr store")
+            var_group = store[f"mod/{view_name}/var"]
+            var_idx_key = self._zarr_index_key(var_group)
+            self.feature_names[view_name] = list(self._read_zarr_column(var_group[var_idx_key]))
+
+        # 3. Shared metadata processing
+        meta = self._process_obs(obs_df, len(sample_names))
+        train_idx, val_idx = meta["train_idx"], meta["val_idx"]
+
+        # 4. Fit scalers on subsample from zarr (avoids loading all data)
+        rng = np.random.RandomState(self.config.random_seed)
+        frac = self.config.scaler_sample_frac
+
+        for view_name in self.config.views:
+            if self.config.views[view_name].discrete:
+                self.scalers[view_name] = None
+                continue
+
+            X_zarr = store[f"mod/{view_name}/X"]
+
+            if frac < 1.0:
+                n_sub = max(1, int(len(train_idx) * frac))
+                sub_idx = sorted(rng.choice(train_idx, size=n_sub, replace=False))
+            else:
+                sub_idx = sorted(train_idx)
+
+            logger.debug("Fitting scaler for '%s' on %d samples", view_name, len(sub_idx))
+            X_sub = np.asarray(X_zarr[sub_idx]).astype(np.float32)
+            X_sub = np.nan_to_num(X_sub, nan=0.0)
+
+            scaler = StandardScaler()
+            scaler.fit(X_sub)
+            self.scalers[view_name] = scaler
+
+        del store  # close zarr handle; LazyZarrDataset opens its own
+
+        self._update_config_dims(meta["conditionals"])
+
+        # 5. Package scaler params as plain arrays (pickle-safe for workers)
+        scaler_dicts: dict[str, dict[str, np.ndarray] | None] = {}
+        for name, scaler in self.scalers.items():
+            if scaler is not None:
+                scaler_dicts[name] = {
+                    "mean": scaler.mean_.astype(np.float32),
+                    "scale": scaler.scale_.astype(np.float32),
+                }
+            else:
+                scaler_dicts[name] = None
+
+        # 6. Create lazy datasets
+        view_names = list(self.config.views.keys())
+
+        self.train_dataset = LazyZarrDataset(
+            zarr_path=self.config.data_path,
+            view_names=view_names,
+            indices=train_idx,
+            conditionals=meta["conditionals"][train_idx],
+            tissue_labels=meta["tissue_labels"][train_idx],
+            source_ids=meta["source_ids"][train_idx],
+            sample_weights=meta["sample_weights"][train_idx],
+            sample_names=[sample_names[i] for i in train_idx],
+            scalers=scaler_dicts,
+            mask_layer_name=self.config.mask_layer_name,
+        )
+
+        if len(val_idx) > 0:
+            self.val_dataset = LazyZarrDataset(
+                zarr_path=self.config.data_path,
+                view_names=view_names,
+                indices=val_idx,
+                conditionals=meta["conditionals"][val_idx],
+                tissue_labels=meta["tissue_labels"][val_idx],
+                source_ids=meta["source_ids"][val_idx],
+                sample_weights=meta["sample_weights"][val_idx],
+                sample_names=[sample_names[i] for i in val_idx],
+                scalers=scaler_dicts,
+                mask_layer_name=self.config.mask_layer_name,
+            )
+
+        logger.info("zarr setup complete: %d train, %d val", len(train_idx), len(val_idx))

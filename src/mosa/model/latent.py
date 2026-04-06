@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 import torch
 import torch.nn as nn
 
-from mosa.model.mlp import MLP
+from mosa.model.layers import MLP
 
 _REGISTRY: dict[str, type] = {}
 
@@ -19,10 +19,10 @@ def register_latent(name: str):
 
 
 class BaseLatentSpace(ABC, nn.Module):
-    """Base class for all fusion-based latent spaces.
+    """Abstract base for latent space fusion methods.
 
-    Subclasses must implement ``_build`` and ``forward``.
-    Use ``BaseLatentSpace.create(method, ...)`` to instantiate.
+    Subclasses implement _build and forward.
+    Instantiate via BaseLatentSpace.create(method, ...).
     """
 
     def __init__(self, view_dims: dict[str, int], latent_dim: int):
@@ -62,10 +62,7 @@ class BaseLatentSpace(ABC, nn.Module):
 
 @register_latent("concat")
 class ConcatLatentSpace(BaseLatentSpace):
-    """Concatenation-based Gaussian latent space.
-
-    Concatenates per-view embeddings, projects to mu/logvar, reparameterizes.
-    """
+    """Concatenates view embeddings and projects to Gaussian posterior."""
 
     def _build(self) -> None:
         concat_dim = sum(self.view_dims.values())
@@ -87,11 +84,10 @@ class ConcatLatentSpace(BaseLatentSpace):
 
 @register_latent("poe")
 class PoELatentSpace(BaseLatentSpace):
-    """Product of Experts Gaussian latent space.
+    """Product of Experts: fuses per-view Gaussians via precision-weighted averaging.
 
-    Each view produces its own mu/logvar via a shared projection head.
-    The per-view posteriors are fused with an isotropic N(0, I) prior using
-    precision-weighted averaging.
+    Each view projects to mu/logvar through a shared head, then combined
+    with an isotropic N(0, I) prior.
     """
 
     EPS = 1e-8
@@ -115,7 +111,9 @@ class PoELatentSpace(BaseLatentSpace):
             bn_eps=0.001,
         )
 
-    def _project_view(self, embedding: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def _project_view(
+        self, embedding: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         stats = self.shared_head(embedding)
         return stats.split(self.latent_dim, dim=1)
 
@@ -133,13 +131,14 @@ class PoELatentSpace(BaseLatentSpace):
         mu_precision_sum = torch.zeros(B, self.latent_dim, device=device)
 
         for name in view_order:
+            view_mask = sample_masks.get(name) if sample_masks is not None else None
             mu_v, logvar_v = self._project_view(view_embeddings[name])
             precision_v = torch.exp(-logvar_v)
 
-            if sample_masks is not None and name in sample_masks:
-                mask = sample_masks[name].unsqueeze(1)  # [B, 1]
-                precision_v = precision_v * mask
-                mu_v = mu_v * mask
+            if view_mask is not None:
+                mask_f = view_mask.unsqueeze(1)  # [B, 1]
+                precision_v = precision_v * mask_f
+                mu_v = mu_v * mask_f
 
             precision_sum = precision_sum + precision_v
             mu_precision_sum = mu_precision_sum + mu_v * precision_v

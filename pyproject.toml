@@ -8,22 +8,26 @@ version = "0.1.0"
 description = "Generative Multi-Omics Data Integration"
 requires-python = ">=3.11"
 dependencies = [
-    "torch>=2.10.0",
-    "pytorch-lightning>=2.6.1",
-    "pytorch-metric-learning>=2.9.0",
-    "numpy>=2.4.2",
-    "pandas>=3.0.1",
-    "scikit-learn>=1.8.0",
-    "scipy>=1.17.1",
-    "PyYAML>=6.0.3",
-    "tqdm>=4.67.3",
+    "torch==2.10.0",
+    "torchvision>=0.13",
+    "pytorch-lightning==2.6.1",
+    "pytorch-metric-learning==2.9.0",
+    "numpy==2.4.2",
+    "pandas==3.0.1",
+    "scikit-learn==1.8.0",
+    "scipy==1.17.1",
+    "PyYAML==6.0.3",
+    "tqdm==4.67.3",
+    "mudata>=0.3",
+    "anndata>=0.10",
+    "pyarrow>=15.0",
 ]
 
 [project.optional-dependencies]
 plot = [
-    "matplotlib>=3.10.8",
-    "seaborn>=0.13.2",
-    "umap-learn>=0.5.11",
+    "matplotlib==3.10.8",
+    "seaborn==0.13.2",
+    "umap-learn==0.5.11",
 ]
 dev = [
     "pytest>=8.0",

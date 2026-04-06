@@ -1,14 +1,12 @@
 # Developer Guide
 
-This guide explains how to extend MOSA with new fusion methods, loss functions, omic processors, and models. It assumes familiarity with the [Architecture Guide](architecture.md).
+How to extend MOSA with new fusion methods, loss functions, and models. Assumes familiarity with the [Architecture Guide](architecture.md).
 
 ## Adding a new fusion method
 
-Fusion methods determine how per-view embeddings are combined into the joint latent space. MOSA uses a registry pattern: you write a class, decorate it, and it becomes available in the config.
+Fusion methods determine how per-view embeddings are combined into the joint latent space. MOSA uses a registry pattern: write a class, decorate it, and it becomes available in the config.
 
-### Step 1: Write the class
-
-Create your fusion class in `src/mosa/model/latent.py` (or a new file that gets imported):
+Write the class in `src/mosa/model/latent.py` (or a new file that gets imported):
 
 ```python
 from mosa.model.latent import BaseLatentSpace, register_latent
@@ -23,7 +21,6 @@ class MoELatentSpace(BaseLatentSpace):
           self.view_dims  — dict mapping view name -> embedding dim
           self.latent_dim — target joint latent dimensionality
         """
-        # Example: gating network + per-view projection
         total_dim = sum(self.view_dims.values())
         self.gate = nn.Linear(total_dim, len(self.view_dims))
         self.fc_mu = nn.Linear(total_dim, self.latent_dim)
@@ -53,40 +50,35 @@ class MoELatentSpace(BaseLatentSpace):
         return mu, logvar, z
 ```
 
-### Step 2: Register in config validation
-
-Add your method name to the valid options in `src/mosa/config.py`:
+Then add your method name to the valid options in `src/mosa/config.py`:
 
 ```python
 _VALID_FUSION_METHODS = ("concat", "poe", "moe")
 ```
 
-Add any cross-field validation your method needs in `MOSAConfig.__post_init__()`. For example, PoE validates that all views share the same last hidden dim.
+Add any cross-field validation in `MOSAConfig.__post_init__()` if needed (e.g., PoE validates that all views share the same last hidden dim).
 
-### Step 3: Use it
+Use it:
 
 ```yaml
 fusion_method: moe
 ```
 
-No changes needed in the model, CLI, or training loop. The factory method `BaseLatentSpace.create()` handles instantiation automatically.
+No changes needed in the model, CLI, or training loop — `BaseLatentSpace.create()` handles instantiation automatically.
 
 ## Adding a new loss function
 
-Loss functions live in `src/mosa/losses.py`. To add a new loss:
+Loss functions live in `src/mosa/losses.py`.
 
-### Step 1: Write the function
+Write the function:
 
 ```python
 def my_custom_loss(mu: Tensor, labels: Tensor) -> Tensor:
     """Compute my custom loss on the latent space."""
-    # Your implementation here
     return loss_scalar
 ```
 
-### Step 2: Integrate into the model
-
-In `src/mosa/model/mosavae.py`, add it to `_compute_losses()`:
+Integrate it into `_compute_losses()` in `src/mosa/model/mosavae.py`:
 
 ```python
 from mosa.losses import my_custom_loss
@@ -107,7 +99,7 @@ def _compute_losses(self, batch, out):
     }
 ```
 
-Then add it to the total loss in `training_step()`:
+Add it to the total loss in `training_step()`:
 
 ```python
 total = (
@@ -118,17 +110,13 @@ total = (
 )
 ```
 
-### Step 3: Add the config field
-
-In `src/mosa/config.py`, add the weight parameter to `MOSAConfig`:
+Add the config field in `src/mosa/config.py`:
 
 ```python
 custom_weight: float = 0.0
 ```
 
-### Step 4: Log it
-
-In `training_step()`:
+Log it in `training_step()`:
 
 ```python
 if self.config.custom_weight > 0:
@@ -137,11 +125,11 @@ if self.config.custom_weight > 0:
 
 ## Building a new model on MOSA's architecture
 
-MOSA's data pipeline and training infrastructure are decoupled from the specific model. You can reuse the data loading, preprocessing, and config system while replacing the model.
+MOSA's data pipeline and training infrastructure are decoupled from the model. You can reuse data loading, preprocessing, and config while replacing the model entirely.
 
-### Option A: Subclass MOSAVAE
+### Subclassing MOSAVAE
 
-If your model is a variation of the VAE (e.g., different encoder architecture, different training loop):
+For variations of the VAE (different encoder architecture, different training loop):
 
 ```python
 from mosa.model.mosavae import MOSAVAE
@@ -150,11 +138,9 @@ class MyModel(MOSAVAE):
 
     def __init__(self, config):
         super().__init__(config)
-        # Replace or add components
         self.my_extra_module = nn.Linear(config.joint_latent_dim, 10)
 
     def forward(self, batch):
-        # Call parent or write your own
         out = super().forward(batch)
         out["my_output"] = self.my_extra_module(out["z"])
         return out
@@ -164,7 +150,7 @@ class MyModel(MOSAVAE):
         ...
 ```
 
-### Option B: Write a new LightningModule
+### Writing a new LightningModule
 
 For a fundamentally different model, write a new `LightningModule` that uses the same data pipeline:
 
@@ -178,11 +164,11 @@ class MyNewModel(pl.LightningModule):
     def __init__(self, config: MOSAConfig):
         super().__init__()
         self.config = config
-        # Build your model here using config.views, config.joint_latent_dim, etc.
+        # Build your model using config.views, config.joint_latent_dim, etc.
 
     def forward(self, batch: MOSABatch) -> dict:
-        # batch.encoder_inputs is a dict[str, Tensor] with one entry per view
-        # batch.conditionals is a Tensor [batch, cond_dim]
+        # batch.encoder_inputs is dict[str, Tensor] with one entry per view
+        # batch.conditionals is Tensor [batch, cond_dim]
         ...
 
     def training_step(self, batch: MOSABatch, batch_idx: int):
@@ -192,7 +178,7 @@ class MyNewModel(pl.LightningModule):
         ...
 ```
 
-Then plug it into the existing CLI or use it directly:
+Plug it into the existing CLI or use it directly:
 
 ```python
 from mosa.data.datamodule import MOSADataModule
@@ -210,16 +196,15 @@ trainer = pl.Trainer(max_epochs=config.num_epochs)
 trainer.fit(model, datamodule)
 ```
 
-The `MOSADataModule` handles all data loading, splitting, preprocessing, and batching. Your model receives `MOSABatch` objects with:
+`MOSADataModule` handles all data loading, splitting, preprocessing, and batching. Your model receives `MOSABatch` objects with these fields:
 
-| Field | Type | Shape | Description |
-|-------|------|-------|-------------|
-| `encoder_inputs` | `dict[str, Tensor]` | `[B, D_view]` | Normalized omic features per view |
-| `decoder_targets` | `dict[str, Tensor]` | `[B, D_view]` | Same as encoder_inputs (reconstruction targets) |
-| `missing_masks` | `dict[str, Tensor]` | `[B, D_view]` (bool) | True where feature is present |
-| `conditionals` | `Tensor` | `[B, cond_dim]` | Concatenated conditional metadata |
-| `tissue_labels` | `Tensor` | `[B, n_tissues]` | One-hot tissue encoding |
-| `source_ids` | `Tensor` | `[B]` | Integer model_type index |
-| `sample_weights` | `Tensor` | `[B]` | Inverse-frequency class weight per sample |
-| `sample_names` | `list[str]` | `[B]` | Sample identifiers |
-
+| Field | Type | Shape |
+|-------|------|-------|
+| `encoder_inputs` | `dict[str, Tensor]` | `[B, D_view]` |
+| `decoder_targets` | `dict[str, Tensor]` | `[B, D_view]` |
+| `missing_masks` | `dict[str, Tensor]` | `[B, D_view]` (bool) |
+| `conditionals` | `Tensor` | `[B, cond_dim]` |
+| `tissue_labels` | `Tensor` | `[B, n_tissues]` |
+| `source_ids` | `Tensor` | `[B]` |
+| `sample_weights` | `Tensor` | `[B]` |
+| `sample_names` | `list[str]` | `[B]` |

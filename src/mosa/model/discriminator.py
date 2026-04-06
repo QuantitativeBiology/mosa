@@ -3,18 +3,14 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from mosa.model.mlp import MLP
+from mosa.model.layers import MLP
 
 
 class Discriminator(nn.Module):
-    """MLP discriminator for adversarial batch correction.
+    """Predicts model_type from latent vectors for adversarial training.
 
-    Predicts model_type (e.g., Cell Line / Tumor / Organoid) from the
-    latent vector z. The VAE is trained to fool this discriminator,
-    encouraging batch-invariant latent representations.
-
-    Architecture: three hidden layers of size ``enc_dim`` with ReLU and
-    BatchNorm, followed by a linear output layer with ``output_dim`` classes.
+    Architecture: three hidden layers of size ``enc_dim`` with ReLU and BatchNorm,
+    followed by a linear output layer with ``output_dim`` classes.
     """
 
     def __init__(self, enc_dim: int, output_dim: int):

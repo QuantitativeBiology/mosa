@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
+import warnings
 
 logger = logging.getLogger(__name__)
 
 
 def _setup_logging(debug: bool):
-    """Configure logging verbosity. Debug mode enables detailed MOSA logs
-    while keeping noisy third-party loggers at WARNING/INFO level."""
+    """Configure logging: debug enables detailed logs, suppressess noisy third-party loggers."""
     if debug:
         logging.basicConfig(
             level=logging.DEBUG,
@@ -20,23 +21,37 @@ def _setup_logging(debug: bool):
         logging.getLogger("matplotlib").setLevel(logging.WARNING)
         logging.getLogger("numba").setLevel(logging.WARNING)
         logging.getLogger("fsspec").setLevel(logging.WARNING)
+        logging.getLogger("numcodecs").setLevel(logging.WARNING)
+        logging.getLogger("h5py").setLevel(logging.WARNING)
+        logging.getLogger("zarr").setLevel(logging.WARNING)
+        logging.getLogger("asyncio").setLevel(logging.WARNING)
+
+        # Suppress noisy third-party warnings
+        warnings.filterwarnings("ignore", category=FutureWarning, module="mudata")
+
         logger.debug("Debug logging enabled")
     else:
         logging.basicConfig(level=logging.WARNING)
 
 
 def _train(args):
-    """Load config, build data module and model, then run the training loop."""
+    """Load config, build datamodule and model, and run training."""
     import pytorch_lightning as pl
     import torch
     from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
+    from pytorch_lightning.strategies import DDPStrategy
 
     from mosa.callbacks import SaveLatentAndReconCallback
-    from mosa.data.datamodule import MOSADataModule
+    from mosa.data.datamodule import MuDataDataModule
     from mosa.model.mosavae import MOSAVAE
     from mosa.utils import load_config, seed_everything
 
     torch.set_float32_matmul_precision("high")
+    torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(False)
+
+    # In DDP each GPU process re-runs this function; silence all logs on non-zero ranks.
+    if int(os.environ.get("LOCAL_RANK", 0)) != 0:
+        logging.getLogger("mosa").setLevel(logging.WARNING)
 
     config = load_config(args.config)
     config.validate_paths()
@@ -49,7 +64,7 @@ def _train(args):
 
     # Data
     logger.debug("Setting up data module")
-    datamodule = MOSADataModule(config)
+    datamodule = MuDataDataModule(config)
     datamodule.setup()
     logger.debug("Data module ready — train=%d, val=%d",
                  len(datamodule.train_dataset) if datamodule.train_dataset else 0,
@@ -93,6 +108,7 @@ def _train(args):
             ),
         )
 
+    use_multi_gpu = isinstance(tc.devices, int) and tc.devices > 1
     trainer_kwargs = dict(
         max_epochs=config.num_epochs,
         callbacks=callbacks,
@@ -103,7 +119,10 @@ def _train(args):
         gradient_clip_val=tc.gradient_clip_val,
         accumulate_grad_batches=tc.accumulate_grad_batches,
         log_every_n_steps=tc.log_every_n_steps,
+        sync_batchnorm=use_multi_gpu,
     )
+    if use_multi_gpu:
+        trainer_kwargs["strategy"] = DDPStrategy(find_unused_parameters=True)
     if not has_val:
         trainer_kwargs["limit_val_batches"] = 0
         trainer_kwargs["num_sanity_val_steps"] = 0
@@ -112,7 +131,8 @@ def _train(args):
 
     logger.debug("Starting training")
     trainer.fit(model, datamodule)
-    logger.debug("Training complete")
+    if trainer.is_global_zero:
+        logger.debug("Training complete")
 
 
 def _plot(args):
@@ -127,6 +147,34 @@ def _plot(args):
 
     plots_dir = generate_all_plots(output_dir, config)
     print(f"Plots saved to {plots_dir}")
+
+
+def _convert(args):
+    """Convert CSV dataset to MuData (.h5mu) format."""
+    from mosa.convert import csv_to_mudata
+
+    # Parse --view name:path pairs
+    view_specs = []
+    for spec in args.view:
+        if ":" not in spec:
+            raise ValueError(
+                f"Invalid --view format: '{spec}'. Expected 'name:path' "
+                f"(e.g. 'gexp_voom:data/gexp_voom.csv')"
+            )
+        name, path = spec.split(":", 1)
+        view_specs.append((name, path))
+
+    logger.debug("Converting CSV dataset to MuData format")
+    logger.debug("Output file: %s", args.output)
+
+    csv_to_mudata(
+        samplesheet_path=args.samplesheet,
+        view_specs=view_specs,
+        output_path=args.output,
+        mutations_path=args.mutations,
+        format=args.format,
+    )
+    print(f"MuData file saved to {args.output}")
 
 
 def main():
@@ -150,6 +198,29 @@ def main():
         help="Path to training output directory (defaults to output_dir in config)",
     )
     plot_parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
+    
+    # --- convert ---
+    convert_parser = subparsers.add_parser(
+        "convert", help="Convert CSV dataset to MuData (.h5mu)",
+    )
+    convert_parser.add_argument(
+        "--samplesheet", required=True,
+        help="Path to samplesheet CSV (must contain model_id, model_type, tissue columns)",
+    )
+    convert_parser.add_argument(
+        "--view", required=True, action="append",
+        help="View spec as 'name:path' (e.g. 'gexp_voom:data/gexp_voom.csv'). Repeat for each modality.",
+    )
+    convert_parser.add_argument(
+        "--mutations", default=None,
+        help="Path to mutations CSV (features x samples, binary). Columns become mutation_* conditionals.",
+    )
+    convert_parser.add_argument("--output", required=True, help="Output file path (.h5mu or .zarr)")
+    convert_parser.add_argument(
+        "--format", choices=["h5mu", "zarr"], default="h5mu",
+        help="Output format (default: h5mu)",
+    )
+    convert_parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
 
     args = parser.parse_args()
     _setup_logging(args.debug)
@@ -158,6 +229,8 @@ def main():
         _train(args)
     elif args.command == "plot":
         _plot(args)
+    elif args.command == "convert":
+        _convert(args)
 
 
 if __name__ == "__main__":
