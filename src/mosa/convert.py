@@ -54,6 +54,10 @@ def csv_to_mudata(
     # Drop any unnamed index-artifact columns (e.g. 'Unnamed: 0') that appear
     # when the source CSV was written with df.to_csv() without index=False.
     samplesheet = samplesheet.loc[:, ~samplesheet.columns.str.match(r"^Unnamed")]
+    # Convert Arrow-backed string columns to object dtype so anndata can serialize them
+    for col in samplesheet.columns:
+        if pd.api.types.is_string_dtype(samplesheet[col]):
+            samplesheet[col] = samplesheet[col].astype(object)
 
     # 2. Load view CSVs (features x samples) and transpose to samples x features
     logger.debug("Loading view CSVs")
