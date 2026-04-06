@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import warnings
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,10 @@ def _train(args):
 
     torch.set_float32_matmul_precision("high")
     torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(False)
+
+    # In DDP each GPU process re-runs this function; silence setup logs on non-zero ranks.
+    if int(os.environ.get("LOCAL_RANK", 0)) != 0:
+        logger.setLevel(logging.WARNING)
 
     config = load_config(args.config)
     config.validate_paths()
@@ -115,7 +120,7 @@ def _train(args):
         sync_batchnorm=use_multi_gpu,
     )
     if use_multi_gpu:
-        trainer_kwargs["strategy"] = DDPStrategy(static_graph=True)
+        trainer_kwargs["strategy"] = DDPStrategy(find_unused_parameters=True)
     if not has_val:
         trainer_kwargs["limit_val_batches"] = 0
         trainer_kwargs["num_sanity_val_steps"] = 0
