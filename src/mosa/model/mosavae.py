@@ -256,15 +256,7 @@ class MOSAVAE(pl.LightningModule):
 
 
     def on_train_epoch_end(self) -> None:
-        """Log epoch summary and step LR schedulers."""
-        if self.trainer.is_global_zero:
-            metrics = self.trainer.callback_metrics
-            parts = [f"epoch {self.current_epoch}"]
-            for key in ("train/loss", "train/recon", "train/kl"):
-                if key in metrics:
-                    parts.append(f"{key.split('/')[-1]}={metrics[key]:.4f}")
-            logger.debug(" | ".join(parts))
-
+        """Step LR schedulers at end of training epoch."""
         schedulers = self.lr_schedulers()
         if schedulers is None:
             return
@@ -294,14 +286,22 @@ class MOSAVAE(pl.LightningModule):
             self.log(f"val/recon_{omic_name}", omic_loss, sync_dist=True)
 
     def on_validation_epoch_end(self) -> None:
-        """Log validation epoch summary on rank 0."""
+        """Log combined train + val epoch summary on rank 0."""
         if self.trainer.is_global_zero:
             metrics = self.trainer.callback_metrics
-            parts = [f"epoch {self.current_epoch} val"]
+            logger.debug("epoch %d", self.current_epoch)
+
+            train_parts = ["  train"]
+            for key in ("train/loss", "train/recon", "train/kl"):
+                if key in metrics:
+                    train_parts.append(f"{key.split('/')[-1]}={metrics[key]:.4f}")
+            logger.debug(" | ".join(train_parts))
+
+            val_parts = ["  val  "]
             for key in ("val/loss", "val/recon", "val/kl"):
                 if key in metrics:
-                    parts.append(f"{key.split('/')[-1]}={metrics[key]:.4f}")
-            logger.debug(" | ".join(parts))
+                    val_parts.append(f"{key.split('/')[-1]}={metrics[key]:.4f}")
+            logger.debug(" | ".join(val_parts))
 
     @torch.no_grad()
     def predict(
