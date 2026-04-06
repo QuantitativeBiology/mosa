@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import warnings
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,11 @@ def _setup_logging(debug: bool):
         logging.getLogger("numba").setLevel(logging.WARNING)
         logging.getLogger("fsspec").setLevel(logging.WARNING)
         logging.getLogger("numcodecs").setLevel(logging.WARNING)
+        logging.getLogger("h5py").setLevel(logging.WARNING)
+
+        # Suppress noisy third-party warnings
+        warnings.filterwarnings("ignore", category=FutureWarning, module="mudata")
+
         logger.debug("Debug logging enabled")
     else:
         logging.basicConfig(level=logging.WARNING)
@@ -38,6 +44,7 @@ def _train(args):
     from mosa.utils import load_config, seed_everything
 
     torch.set_float32_matmul_precision("high")
+    torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(False)
 
     config = load_config(args.config)
     config.validate_paths()
@@ -117,7 +124,8 @@ def _train(args):
 
     logger.debug("Starting training")
     trainer.fit(model, datamodule)
-    logger.debug("Training complete")
+    if trainer.is_global_zero:
+        logger.debug("Training complete")
 
 
 def _plot(args):

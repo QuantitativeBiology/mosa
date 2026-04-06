@@ -254,19 +254,17 @@ class MOSAVAE(pl.LightningModule):
             self.log("train/disc_loss", disc_loss_val)
             self.log("train/adv_loss", adv_loss_val)
 
-        logger.debug(
-            "train step %d — loss=%.4f recon=%.4f kl=%.4f contrastive=%.4f disc=%.4f adv=%.4f",
-            batch_idx,
-            total.item(),
-            losses["recon"].item(),
-            losses["kl"].item(),
-            losses["contrastive"].item(),
-            disc_loss_val.item(),
-            adv_loss_val.item(),
-        )
 
     def on_train_epoch_end(self) -> None:
-        """Step LR schedulers at the end of each epoch."""
+        """Log epoch summary and step LR schedulers."""
+        if self.trainer.is_global_zero:
+            metrics = self.trainer.callback_metrics
+            parts = [f"epoch {self.current_epoch}"]
+            for key in ("train/loss", "train/recon", "train/kl"):
+                if key in metrics:
+                    parts.append(f"{key.split('/')[-1]}={metrics[key]:.4f}")
+            logger.debug(" | ".join(parts))
+
         schedulers = self.lr_schedulers()
         if schedulers is None:
             return
@@ -289,19 +287,21 @@ class MOSAVAE(pl.LightningModule):
             + self.config.contrastive_weight * losses["contrastive"]
         )
 
-        self.log("val/loss", total, prog_bar=True)
-        self.log("val/recon", losses["recon"])
-        self.log("val/kl", losses["kl"])
+        self.log("val/loss", total, prog_bar=True, sync_dist=True)
+        self.log("val/recon", losses["recon"], sync_dist=True)
+        self.log("val/kl", losses["kl"], sync_dist=True)
         for omic_name, omic_loss in losses["recon_metrics"]["omic_losses"].items():
-            self.log(f"val/recon_{omic_name}", omic_loss)
+            self.log(f"val/recon_{omic_name}", omic_loss, sync_dist=True)
 
-        logger.debug(
-            "val step %d — loss=%.4f recon=%.4f kl=%.4f",
-            batch_idx,
-            total.item(),
-            losses["recon"].item(),
-            losses["kl"].item(),
-        )
+    def on_validation_epoch_end(self) -> None:
+        """Log validation epoch summary on rank 0."""
+        if self.trainer.is_global_zero:
+            metrics = self.trainer.callback_metrics
+            parts = [f"epoch {self.current_epoch} val"]
+            for key in ("val/loss", "val/recon", "val/kl"):
+                if key in metrics:
+                    parts.append(f"{key.split('/')[-1]}={metrics[key]:.4f}")
+            logger.debug(" | ".join(parts))
 
     @torch.no_grad()
     def predict(
