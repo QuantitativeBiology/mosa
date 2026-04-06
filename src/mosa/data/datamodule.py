@@ -96,38 +96,42 @@ class LazyZarrDataset(Dataset):
         return len(self.indices)
 
     def __getitem__(self, idx: int) -> dict:
+        return self.__getitems__([idx])[0]
+
+    def __getitems__(self, indices: list[int]) -> list[dict]:
+        """Batched read: one zarr slice per view for the whole batch."""
         store = self._get_store()
-        real_idx = self.indices[idx]
+        real_indices = self.indices[indices]
 
-        encoder_inputs = {}
-        decoder_targets = {}
-        missing_masks = {}
-
+        # Single vectorised zarr read per view
+        all_X: dict[str, np.ndarray] = {}
+        all_masks: dict[str, np.ndarray] = {}
         for name in self.view_names:
-            X_row = store[f"mod/{name}/X"][real_idx].astype(np.float32)
-            mask_row = store[f"mod/{name}/layers/{self.mask_layer_name}"][real_idx].astype(bool)
+            X_batch = store[f"mod/{name}/X"][real_indices].astype(np.float32)
+            mask_batch = store[f"mod/{name}/layers/{self.mask_layer_name}"][real_indices].astype(bool)
 
             scaler = self.scalers.get(name)
             if scaler is not None:
-                X_row = (X_row - scaler["mean"]) / scaler["scale"]
+                X_batch = (X_batch - scaler["mean"]) / scaler["scale"]
 
-            X_row = np.nan_to_num(X_row, nan=0.0)
+            np.nan_to_num(X_batch, nan=0.0, copy=False)
+            all_X[name] = X_batch
+            all_masks[name] = mask_batch
 
-            t = torch.from_numpy(X_row)
-            encoder_inputs[name] = t
-            decoder_targets[name] = t
-            missing_masks[name] = torch.from_numpy(mask_row)
-
-        return {
-            "encoder_inputs": encoder_inputs,
-            "decoder_targets": decoder_targets,
-            "missing_masks": missing_masks,
-            "conditionals": torch.from_numpy(self.conditionals[idx].astype(np.float32)),
-            "tissue_labels": torch.from_numpy(self.tissue_labels[idx].astype(np.float32)),
-            "source_ids": torch.tensor(self.source_ids[idx], dtype=torch.long),
-            "sample_weights": torch.tensor(self.sample_weights[idx], dtype=torch.float32),
-            "sample_name": self.sample_names[idx],
-        }
+        results = []
+        for i, idx in enumerate(indices):
+            t_views = {name: torch.from_numpy(all_X[name][i]) for name in self.view_names}
+            results.append({
+                "encoder_inputs": t_views,
+                "decoder_targets": t_views,
+                "missing_masks": {name: torch.from_numpy(all_masks[name][i]) for name in self.view_names},
+                "conditionals": torch.from_numpy(self.conditionals[idx].astype(np.float32)),
+                "tissue_labels": torch.from_numpy(self.tissue_labels[idx].astype(np.float32)),
+                "source_ids": torch.tensor(self.source_ids[idx], dtype=torch.long),
+                "sample_weights": torch.tensor(self.sample_weights[idx], dtype=torch.float32),
+                "sample_name": self.sample_names[idx],
+            })
+        return results
 
 
 class MuDataDataModule(pl.LightningDataModule):
@@ -148,9 +152,7 @@ class MuDataDataModule(pl.LightningDataModule):
         self.val_dataset: Dataset | None = None
         self.class_weights: np.ndarray | None = None
 
-    # ------------------------------------------------------------------
     # Public API
-    # ------------------------------------------------------------------
 
     def setup(self, stage: str | None = None) -> None:
         data_path = Path(self.config.data_path)
@@ -219,9 +221,7 @@ class MuDataDataModule(pl.LightningDataModule):
     def predict_dataloader(self) -> DataLoader:
         raise NotImplementedError("Predict dataloader not implemented")
 
-    # ------------------------------------------------------------------
     # Shared helpers
-    # ------------------------------------------------------------------
 
     def _process_obs(
         self, obs_df: pd.DataFrame, n_samples: int,
@@ -317,9 +317,7 @@ class MuDataDataModule(pl.LightningDataModule):
         if self.config.n_batches == 0:
             self.config.n_batches = len(self.batch_categories)
 
-    # ------------------------------------------------------------------
     # h5mu path (in-memory)
-    # ------------------------------------------------------------------
 
     def _setup_h5mu(self) -> None:
         import mudata
@@ -421,9 +419,7 @@ class MuDataDataModule(pl.LightningDataModule):
                     f"Available: {list(mdata.mod[view_name].layers.keys())}"
                 )
 
-    # ------------------------------------------------------------------
     # zarr path (lazy loading)
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _zarr_index_key(group) -> str:
