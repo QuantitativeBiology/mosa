@@ -10,6 +10,14 @@ logger = logging.getLogger(__name__)
 
 def _setup_logging(debug: bool):
     """Configure logging: debug enables detailed logs, suppressess noisy third-party loggers."""
+    # Suppress noisy third-party warnings (applies in all modes)
+    warnings.filterwarnings("ignore", category=FutureWarning, module="mudata")
+    warnings.filterwarnings("ignore", message="Cannot join columns with the same name", module="mudata")
+    warnings.filterwarnings("ignore", message=".*LeafSpec.*is deprecated", module="pytorch_lightning")
+    warnings.filterwarnings("ignore", message=".*transfer_batch_to_device.*", module="pytorch_lightning")
+    warnings.filterwarnings("ignore", message=".*batch_size.*ambiguous collection", module="pytorch_lightning")
+    warnings.filterwarnings("ignore", message=".*tensorboardX.*", module="pytorch_lightning")
+
     if debug:
         logging.basicConfig(
             level=logging.DEBUG,
@@ -25,13 +33,10 @@ def _setup_logging(debug: bool):
         logging.getLogger("h5py").setLevel(logging.WARNING)
         logging.getLogger("zarr").setLevel(logging.WARNING)
         logging.getLogger("asyncio").setLevel(logging.WARNING)
-
-        # Suppress noisy third-party warnings
-        warnings.filterwarnings("ignore", category=FutureWarning, module="mudata")
-
         logger.debug("Debug logging enabled")
     else:
         logging.basicConfig(level=logging.WARNING)
+        logging.getLogger("pytorch_lightning").setLevel(logging.WARNING)
 
 
 def _train(args):
