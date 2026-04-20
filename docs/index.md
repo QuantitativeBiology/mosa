@@ -6,11 +6,13 @@ MOSA (Multi-Omic Synthetic Augmentation) is a configurable VAE for integrating m
 
 [Getting Started](getting-started.md) covers installation, data preparation, and running your first experiment.
 
+[CLI Reference](cli.md) lists every command with flags, types, and defaults.
+
 [Configuration Reference](configuration.md) documents every YAML config option with defaults and examples.
 
 [Architecture Guide](architecture.md) explains the model structure, forward pass, training loop, and data pipeline.
 
-[Data Pipeline](data-pipeline.md) details how data flows from MuData files to GPU-ready batches.
+[Data Pipeline](data-pipeline.md) details how data flows from MuData files to GPU-ready batches, including CSV format requirements and conversion troubleshooting.
 
 [Plotting Guide](plotting.md) covers plot data sources, customization, and how to add new plots.
 
@@ -21,6 +23,12 @@ MOSA (Multi-Omic Synthetic Augmentation) is a configurable VAE for integrating m
 ```bash
 # Install
 pip install -e ".[dev]"
+
+# Convert CSVs to MuData
+mosa convert --samplesheet data/samplesheet.csv --view gexp:data/gexp.csv --output data/dataset.h5mu
+
+# Verify conversion
+mosa inspect --input data/dataset.h5mu
 
 # Train
 mosa train --config configs/example.yaml [--debug]

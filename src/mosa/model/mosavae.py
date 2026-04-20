@@ -8,7 +8,7 @@ import pytorch_lightning as pl
 
 from mosa.config import MOSAConfig
 from mosa.data.batch import MOSABatch
-from mosa.losses import (
+from mosa.model.losses import (
     adversarial_loss,
     contrastive_loss,
     kl_divergence,

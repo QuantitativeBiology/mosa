@@ -9,8 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 def _setup_logging(debug: bool):
-    """Configure logging: debug enables detailed logs, suppressess noisy third-party loggers."""
-    # Suppress noisy third-party warnings (applies in all modes)
+    """Configure logging: debug enables detailed logs, suppresses noisy third-party loggers."""
     warnings.filterwarnings("ignore", category=FutureWarning, module="mudata")
     warnings.filterwarnings("ignore", message="Cannot join columns with the same name", module="mudata")
     warnings.filterwarnings("ignore", message=".*LeafSpec.*is deprecated", module="pytorch_lightning")
@@ -46,7 +45,7 @@ def _train(args):
     from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
     from pytorch_lightning.strategies import DDPStrategy
 
-    from mosa.callbacks import SaveLatentAndReconCallback
+    from mosa.model.callbacks import SaveLatentAndReconCallback
     from mosa.data.datamodule import MuDataDataModule
     from mosa.model.mosavae import MOSAVAE
     from mosa.utils import load_config, seed_everything
@@ -54,7 +53,6 @@ def _train(args):
     torch.set_float32_matmul_precision("high")
     torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(False)
 
-    # In DDP each GPU process re-runs this function; silence all logs on non-zero ranks.
     if int(os.environ.get("LOCAL_RANK", 0)) != 0:
         logging.getLogger("mosa").setLevel(logging.WARNING)
 
@@ -63,11 +61,9 @@ def _train(args):
     logger.debug("Config loaded and validated from %s", args.config)
     logger.debug("Config: %s", vars(config))
 
-    # Seed
     logger.debug("Setting random seed: %d", config.random_seed)
     seed_everything(config.random_seed)
 
-    # Data
     logger.debug("Setting up data module")
     datamodule = MuDataDataModule(config)
     datamodule.setup()
@@ -75,13 +71,11 @@ def _train(args):
                  len(datamodule.train_dataset) if datamodule.train_dataset else 0,
                  len(datamodule.val_dataset) if datamodule.val_dataset else 0)
 
-    # Model (config dims are now populated by datamodule.setup())
     logger.debug("Building model (joint_latent_dim=%d, conditional_dim=%d)",
                  config.joint_latent_dim, config.conditional_dim)
     model = MOSAVAE(config)
     logger.debug("Model:\n%s", model)
 
-    # Set class weights and model_type names on model from datamodule
     if datamodule.class_weights is not None:
         model.class_weights = torch.tensor(
             datamodule.class_weights, dtype=torch.float32
@@ -91,7 +85,6 @@ def _train(args):
         model.model_type_names = datamodule.batch_categories
         logger.debug("Model type names: %s", model.model_type_names)
 
-    # Trainer
     tc = config.trainer
     logger.debug(
         "Configuring trainer (max_epochs=%d, accelerator=%s, devices=%s, precision=%s)",
@@ -142,11 +135,10 @@ def _train(args):
 
 def _plot(args):
     """Generate diagnostic plots from a completed training run."""
-    from mosa.plot_utils import generate_all_plots
+    from mosa.plot import generate_all_plots
     from mosa.utils import load_config
 
     config = load_config(args.config)
-
     output_dir = args.output_dir or config.output_dir
     logger.debug("Generating plots from %s", output_dir)
 
@@ -156,9 +148,8 @@ def _plot(args):
 
 def _convert(args):
     """Convert CSV dataset to MuData (.h5mu) format."""
-    from mosa.convert import csv_to_mudata
+    from mosa.data.io import csv_to_mudata
 
-    # Parse --view name:path pairs
     view_specs = []
     for spec in args.view:
         if ":" not in spec:
@@ -182,19 +173,24 @@ def _convert(args):
     print(f"MuData file saved to {args.output}")
 
 
+def _inspect(args):
+    """Print a summary of a MuData file."""
+    from mosa.data.io import inspect_mudata
+
+    inspect_mudata(args.input)
+
+
 def main():
-    """CLI entry point. Dispatches to ``train`` or ``plot`` subcommands."""
+    """CLI entry point."""
     parser = argparse.ArgumentParser(
         description="MOSA: Multi-Omic Synthetic Augmentation",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # --- train ---
     train_parser = subparsers.add_parser("train", help="Train a MOSA model")
     train_parser.add_argument("--config", required=True, help="Path to YAML config file")
     train_parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
 
-    # --- plot ---
     plot_parser = subparsers.add_parser("plot", help="Generate diagnostic plots from training outputs")
     plot_parser.add_argument("--config", required=True, help="Path to YAML config file")
     plot_parser.add_argument(
@@ -203,14 +199,13 @@ def main():
         help="Path to training output directory (defaults to output_dir in config)",
     )
     plot_parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
-    
-    # --- convert ---
+
     convert_parser = subparsers.add_parser(
-        "convert", help="Convert CSV dataset to MuData (.h5mu)",
+        "convert", help="Convert CSV files to MuData (.h5mu or .zarr)",
     )
     convert_parser.add_argument(
         "--samplesheet", required=True,
-        help="Path to samplesheet CSV (must contain model_id, model_type, tissue columns)",
+        help="Path to samplesheet CSV (required columns: model_id, model_type; optional: tissue)",
     )
     convert_parser.add_argument(
         "--view", required=True, action="append",
@@ -218,7 +213,7 @@ def main():
     )
     convert_parser.add_argument(
         "--mutations", default=None,
-        help="Path to mutations CSV (features x samples, binary). Columns become mutation_* conditionals.",
+        help="Path to mutations CSV (features x samples, binary). Columns become mutation_* in .obs.",
     )
     convert_parser.add_argument("--output", required=True, help="Output file path (.h5mu or .zarr)")
     convert_parser.add_argument(
@@ -226,6 +221,12 @@ def main():
         help="Output format (default: h5mu)",
     )
     convert_parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
+
+    inspect_parser = subparsers.add_parser(
+        "inspect", help="Print a summary of a MuData file (.h5mu or .zarr)",
+    )
+    inspect_parser.add_argument("--input", required=True, help="Path to .h5mu or .zarr file")
+    inspect_parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
 
     args = parser.parse_args()
     _setup_logging(args.debug)
@@ -236,6 +237,8 @@ def main():
         _plot(args)
     elif args.command == "convert":
         _convert(args)
+    elif args.command == "inspect":
+        _inspect(args)
 
 
 if __name__ == "__main__":
