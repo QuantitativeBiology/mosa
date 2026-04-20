@@ -581,7 +581,11 @@ def _load_data_files(output_dir, views, data_path):
     output_dir = Path(output_dir)
 
     # Load samplesheet from MuData .obs
-    mdata = mudata.read(data_path)
+    data_path_obj = Path(data_path)
+    if data_path_obj.suffix == ".zarr" or (data_path_obj.is_dir() and not data_path_obj.suffix):
+        mdata = mudata.read_zarr(str(data_path))
+    else:
+        mdata = mudata.read(str(data_path))
     data = {"omics": {}, "samplesheet": mdata.obs}
 
     # Prefer full pass latents when available; fallback to train split latents.
