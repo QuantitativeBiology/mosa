@@ -98,10 +98,12 @@ def _check_view_orientation(
 
 
 def _validate_view_numeric(df_raw: pd.DataFrame, view_name: str, csv_path: str) -> None:
-    for col in df_raw.columns:
+    # Only object-dtype columns can contain non-numeric strings; float/int are already clean.
+    for col in df_raw.select_dtypes(include="object").columns:
         coerced = pd.to_numeric(df_raw[col], errors="coerce")
-        if coerced.isna().any() and not df_raw[col].isna().all():
-            bad_vals = df_raw[col][coerced.isna() & df_raw[col].notna()].unique()
+        bad_mask = coerced.isna() & df_raw[col].notna()
+        if bad_mask.any():
+            bad_vals = df_raw[col][bad_mask].unique()
             raise ValueError(
                 f"View '{view_name}' ({csv_path}): column '{col}' contains non-numeric "
                 f"values: {list(bad_vals[:5])}"
@@ -382,5 +384,10 @@ def inspect_mudata(path: str) -> None:
             arr = mdata.obsm[key]
             n = int(arr.sum()) if arr.dtype == bool else int((arr > 0).sum())
             print(f"  {key}: {n}/{n_obs} samples")
+            adata = mdata.mod[key]
+            if "mask" in adata.layers:
+                mask_present = int(adata.layers["mask"].any(axis=1).sum())
+                if n > mask_present:
+                    print(f"    [WARNING: {n - mask_present} samples present in obsm but have all-NaN data — they contribute nothing to this modality]")
 
     print()
