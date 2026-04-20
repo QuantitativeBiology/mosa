@@ -3,8 +3,10 @@
 Generates UMAP visualizations, loss curves, reconstruction scatter plots,
 and clustering quality metrics from training outputs.
 """
+import colorsys
 import logging
 import warnings
+import zlib
 from pathlib import Path
 
 import numpy as np
@@ -70,14 +72,40 @@ DEFAULT_PALETTE = {
 }
 """Default tissue/model_type color palette for DepMap data."""
 
-# Visual style per model_type layer in UMAP plots. Tumors are drawn first
-# with low alpha as background; cell lines and organoids are drawn on top
-# with higher contrast for visibility.
-_UMAP_LAYERS = [
-    {"model_type": "Tumor",     "marker": "o", "alpha": 0.4, "size": 5,  "zorder": 1, "edgecolor": None,    "linewidth": 0.1},
-    {"model_type": "Cell Line", "marker": "o", "alpha": 0.6, "size": 5,  "zorder": 2, "edgecolor": "black", "linewidth": 0.2},
-    {"model_type": "Organoid",  "marker": "^", "alpha": 0.9, "size": 10, "zorder": 2, "edgecolor": "black", "linewidth": 0.2},
-]
+# Seed for deterministic color generation for unknown categories.
+_PALETTE_COLOR_SEED = 0xA3F1B2C4
+
+# Visual style per known model_type.
+_DEFAULT_LAYER_STYLES = {
+    "Tumor":     {"marker": "o", "alpha": 0.4, "size": 5,  "zorder": 1, "edgecolor": None,    "linewidth": 0.1},
+    "Cell Line": {"marker": "o", "alpha": 0.6, "size": 5,  "zorder": 2, "edgecolor": "black", "linewidth": 0.2},
+    "Organoid":  {"marker": "^", "alpha": 0.9, "size": 10, "zorder": 2, "edgecolor": "black", "linewidth": 0.2},
+}
+_DEFAULT_LAYER_STYLE = {"marker": "o", "alpha": 0.6, "size": 5, "zorder": 2, "edgecolor": None, "linewidth": 0.1}
+
+
+def _name_to_color(name):
+    """Map a category name to a deterministic HLS color via CRC32."""
+    hue = ((zlib.crc32(name.encode()) ^ _PALETTE_COLOR_SEED) & 0xFFFFFFFF) / 0xFFFFFFFF
+    return colorsys.hls_to_rgb(hue, 0.5, 0.7)
+
+
+def build_palette(categories, base_palette=None):
+    """Build a complete color palette covering all categories.
+
+    Known categories use colors from base_palette. Unknown categories receive
+    deterministic colors derived from their name.
+    """
+    base = base_palette or DEFAULT_PALETTE
+    return {c: base[c] if c in base else _name_to_color(c) for c in categories}
+
+
+def _get_umap_layers(model_types):
+    """Return layer specs for every model_type present in the data."""
+    ordered = [mt for mt in _DEFAULT_LAYER_STYLES if mt in model_types]
+    ordered += sorted(mt for mt in model_types if mt not in _DEFAULT_LAYER_STYLES)
+    return [{"model_type": mt, **_DEFAULT_LAYER_STYLES.get(mt, _DEFAULT_LAYER_STYLE)}
+            for mt in ordered]
 
 
 def configure_plot_style():
@@ -159,11 +187,12 @@ def plot_umap(plot_df, palette, title=None):
     """
     fig, ax = plt.subplots()
 
-    # Build complete mappings for all model types
-    sizes = {layer["model_type"]: layer["size"] for layer in _UMAP_LAYERS}
-    markers = {layer["model_type"]: layer["marker"] for layer in _UMAP_LAYERS}
+    model_types_present = plot_df["model_type"].dropna().unique()
+    layers = _get_umap_layers(model_types_present)
+    sizes = {layer["model_type"]: layer["size"] for layer in layers}
+    markers = {layer["model_type"]: layer["marker"] for layer in layers}
 
-    for layer in _UMAP_LAYERS:
+    for layer in layers:
         subset = plot_df[plot_df["model_type"] == layer["model_type"]]
         if subset.empty:
             continue
@@ -179,17 +208,12 @@ def plot_umap(plot_df, palette, title=None):
             scatter_kw["edgecolor"] = layer["edgecolor"]
         sns.scatterplot(**scatter_kw)
 
-    # Model type legend
-    legend_specs = [
-        ("Tumor",     "o", None),
-        ("Cell Line", "o", "black"),
-        ("Organoid",  "^", None),
-    ]
     type_handles = [
-        Line2D([0], [0], marker=m, color="w", label=label,
+        Line2D([0], [0], marker=layer["marker"], color="w", label=layer["model_type"],
                markerfacecolor="gray", markersize=6,
-               **({"markeredgecolor": ec, "markeredgewidth": 0.6} if ec else {}))
-        for label, m, ec in legend_specs
+               **({"markeredgecolor": layer["edgecolor"], "markeredgewidth": 0.6}
+                  if layer["edgecolor"] else {}))
+        for layer in layers
     ]
     legend_markers = ax.legend(
         handles=type_handles, title="Sample Type",
@@ -197,11 +221,10 @@ def plot_umap(plot_df, palette, title=None):
     )
     ax.add_artist(legend_markers)
 
-    # Tissue legend
-    tissues_present = plot_df["tissue"].unique()
+    tissues_present = plot_df["tissue"].dropna().unique()
     color_handles = [
         Line2D([0], [0], marker="o", color=palette[t], label=t, linestyle="", markersize=6)
-        for t in tissues_present if t in palette
+        for t in tissues_present
     ]
     ax.legend(
         handles=color_handles, title="Tissue",
@@ -664,7 +687,8 @@ def generate_all_plots(output_dir, config, palette=None, pca_components=50):
     config : MOSAConfig
         Experiment configuration.
     palette : dict or None
-        Color mapping for tissues/model types. Defaults to DEFAULT_PALETTE.
+        Base color mapping for known tissues. Missing categories are assigned
+        deterministic colors via build_palette.
     pca_components : int
         PCA dimensions before UMAP.
 
@@ -674,12 +698,14 @@ def generate_all_plots(output_dir, config, palette=None, pca_components=50):
         Path to plots directory.
     """
     configure_plot_style()
-    palette = palette or DEFAULT_PALETTE
     output_dir = Path(output_dir)
     plots_dir = output_dir / "plots"
 
     logger.debug("Loading data files")
     data = _load_data_files(output_dir, config.views, config.data_path)
+
+    tissues = data["samplesheet"]["tissue"].dropna().unique()
+    palette = build_palette(tissues, base_palette=palette)
 
     logger.debug("Generating UMAP plots")
     _generate_umap_plots(data, config.views, plots_dir, palette, pca_components)
