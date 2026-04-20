@@ -25,7 +25,7 @@ mosa --help
 
 ## Preparing your data
 
-You need a samplesheet CSV with columns `model_id`, `model_type`, `tissue`, one omic CSV per modality (features x samples format), and optionally a mutations CSV (binary, same format).
+You need a samplesheet CSV with columns `model_id` and `model_type` (required) and `tissue` (optional), one omic CSV per modality in features × samples format, and optionally a mutations CSV (binary, same format). See [Data Pipeline](data-pipeline.md#converting-csvs-to-mudata) for full format requirements and troubleshooting.
 
 Example samplesheet:
 ```
@@ -51,7 +51,11 @@ For large datasets (> 10 GB), use zarr for lazy loading:
 mosa convert ... --output data.zarr --format zarr
 ```
 
-NaN imputation and mask creation are handled automatically.
+NaN imputation and mask creation are handled automatically. Verify the output with:
+
+```bash
+mosa inspect --input data.h5mu
+```
 
 ## Write a config
 

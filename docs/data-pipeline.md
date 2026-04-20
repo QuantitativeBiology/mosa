@@ -18,11 +18,19 @@ MOSA expects data in MuData format (`.h5mu` or `.zarr`). The structure:
 
 ## Converting CSVs to MuData
 
-The `mosa convert` command builds a MuData file from CSV tables.
+The `mosa convert` command builds a MuData file from CSV tables. It validates all inputs before writing anything — if validation fails, you get a clear error message with no partial output.
 
-### Input file formats
+See [CLI Reference — convert](cli.md#convert) for the full flag list.
 
-The samplesheet (required) has one row per sample with `model_id`, `model_type`, and `tissue` columns:
+### Samplesheet
+
+The samplesheet has one row per sample. Required columns:
+
+| Column | Required | Purpose |
+|---|---|---|
+| `model_id` | yes | Unique sample identifier. Must match column headers in omic CSVs exactly (case-sensitive). |
+| `model_type` | yes | Sample class (e.g. `Cell Line`, `Tumor`). Used for conditional encoding, class balancing, and batch correction. Add the column even if all samples share the same value. |
+| `tissue` | no | Tissue of origin. Used for tissue conditioning if present. Omitting it disables tissue conditioning. |
 
 ```
 model_id,model_type,tissue
@@ -31,7 +39,9 @@ ACH-000002,Cell Line,Skin
 TCGA-A1-A0SO,Tumor,Breast
 ```
 
-Omic CSVs (one per modality) have features as rows and samples as columns. The first column is the feature index. MOSA transposes these automatically:
+### Omic CSVs
+
+Each omic CSV must be **features × samples**: features as rows, samples as columns. The first column is the feature index. MOSA transposes these automatically during conversion.
 
 ```
 ,ACH-000001,ACH-000002,TCGA-A1-A0SO
@@ -40,29 +50,23 @@ GENE_B,0.5,1.2,
 GENE_C,7.8,,6.1
 ```
 
-Missing values (empty cells or NaN) are allowed — they become masked features.
+Missing values (empty cells or NaN) are allowed and become masked positions in `.layers["mask"]`.
 
-The mutations CSV (optional) uses the same format but with binary values (0/1). Gene names become `mutation_<gene>` columns in `.obs`.
+**Orientation is the most common source of errors.** If your CSV is already samples × features (rows are samples, columns are features), the conversion will raise an error when it detects that row names match samplesheet sample IDs. The detection threshold is 50%: if more than half of the samplesheet IDs appear in the CSV row index, the CSV is considered transposed. Fix: re-export the file with features as rows.
 
-### Command
+If fewer than 10% of samplesheet IDs appear in the CSV column names, the converter emits a warning. This usually means sample ID formats differ between files (e.g. `ACH-000001` vs `ACH000001`). The conversion proceeds, but you may end up with 0 samples if the IDs don't overlap at all.
 
-```bash
-mosa convert \
-  --samplesheet data/samplesheet.csv \
-  --view gexp_voom:data/gexp_voom.csv \
-  --view meth_combat:data/meth_combat.csv \
-  --output data/dataset.h5mu \
-  [--mutations data/mutations.csv] \
-  [--format h5mu]
-```
+All values must be numeric. Empty cells and `NaN` are treated as missing data. String placeholders like `NA` or `N/A` are not accepted and will cause an error naming the offending column.
 
-Use `--format zarr` for a zarr store instead of h5mu.
+### Mutations CSV
+
+Optional. Same format as omic CSVs (features × samples), but values should be binary (0/1). Each row (gene) becomes a `mutation_<gene>` column in `.obs`. Missing values are filled with 0.
 
 ### What the conversion does
 
-The conversion loads the samplesheet (indexed by `model_id`), transposes each omic CSV from features x samples to samples x features, computes the sample union across all views intersected with the samplesheet, and aligns everything to that common sample set. Samples missing from a view get NaN rows via `reindex`. NaN positions become `False` in the mask layer and NaN values in `.X` are replaced with 0.0. Per-view presence indicators are stored in `.obsm[view_name]`. Mutations (if provided) are added as `mutation_`-prefixed columns in `.obs`.
+The converter loads the samplesheet indexed by `model_id`, transposes each omic CSV to samples × features, and computes the union of samples across all views intersected with the samplesheet. Everything is aligned to that common set. Samples missing from a view get NaN rows via `reindex`; those NaN positions become `False` in `.layers["mask"]` and 0.0 in `.X`. Per-view presence indicators (boolean arrays) are stored in `.obsm[view_name]`. Mutations are added as `mutation_`-prefixed columns in `.obs`.
 
-Samples don't need to appear in every view — missing views are handled via masks.
+Samples don't need to appear in every view — partial coverage is handled via masks.
 
 ### h5mu vs zarr
 
@@ -74,19 +78,54 @@ Samples don't need to appear in every view — missing views are handled via mas
 | Workers | No special handling | Each DataLoader worker opens its own handle |
 | File structure | Single `.h5mu` file | Directory with chunked arrays |
 
-### Inspecting the output
+### Verifying the output
 
-```python
-import mudata
-mdata = mudata.read("data/dataset.h5mu")
+Run `mosa inspect` on the output file to verify the conversion:
 
-print(mdata)                          # overview: n_obs, modalities
-print(mdata.obs.head())               # sample metadata
-print(list(mdata.mod.keys()))         # modality names (must match config views)
-print(mdata.mod["gexp_voom"].X.shape) # (n_samples, n_features)
-print(mdata.mod["gexp_voom"].layers["mask"].sum())  # non-missing feature count
-print(mdata.obsm["gexp_voom"].sum())  # samples present in this view
+```bash
+mosa inspect --input data/dataset.h5mu
 ```
+
+Example output:
+
+```
+MuData: 850 samples x 2 modalities
+  File: data/dataset.h5mu
+
+Modalities:
+  gexp_voom: 5000 features | 720/850 samples present, 84.7% values non-missing | min=-3.21, mean=0.412, max=14.6
+  meth_combat: 485000 features | 850/850 samples present, 100.0% values non-missing | min=0.001, mean=0.489, max=0.999
+
+Sample metadata (obs):
+  model_type: Cell Line: 700, Tumor: 150
+  tissue: Lung: 210, Breast: 180, Skin: 120 ... (23 unique values)
+
+Sample IDs (first 5): ACH-000001, ACH-000002, ACH-000003, ACH-000005, ACH-000007  ... (850 total)
+
+Per-view sample presence (obsm):
+  gexp_voom: 720/850 samples
+  meth_combat: 850/850 samples
+```
+
+What to check:
+
+- **Sample count** matches what you expect from your samplesheet and view CSVs.
+- **Modality names** match the view names you will use in your config file.
+- **Samples present** per modality is plausible. 0 samples in a modality means no sample IDs overlapped between that CSV and the samplesheet — almost always an ID format mismatch.
+- **Data range** is in the expected range for that data type (e.g. methylation beta values should be 0–1, voom-transformed expression is typically –5 to 15).
+- **Sample IDs** look like real sample identifiers, not feature names. If you see gene names or CpG IDs here, the CSV was transposed.
+
+### Troubleshooting
+
+| Error / symptom | Likely cause | Fix |
+|---|---|---|
+| `missing required column 'model_id'` | Samplesheet has no `model_id` column, or it is named differently | Rename the column to `model_id` |
+| `missing required column 'model_type'` | Samplesheet has no `model_type` column | Add the column; use a single value if all samples are the same type |
+| `CSV appears to be samples x features` | Omic CSV is transposed (rows are samples) | Transpose the CSV: features as rows, samples as columns |
+| `column 'X' contains non-numeric values` | CSV has string placeholders for missing data | Replace `NA`, `N/A`, `null`, etc. with empty cells or leave blank |
+| `No samples found … that appear in any view CSV` | Sample ID format mismatch between samplesheet and CSVs | Ensure IDs are identical in both files, including capitalisation and separators |
+| 0 samples present in a modality after conversion | ID overlap below detection threshold | Check ID format; use `--debug` to see per-view sample counts |
+| Data range looks wrong (e.g. expression values are 0–1) | Wrong CSV passed for a modality | Check that each `--view name:path` pair points to the correct file |
 
 ## Setup process
 

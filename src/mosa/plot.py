@@ -239,9 +239,7 @@ def plot_umap(plot_df, palette, title=None):
     return fig, ax
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 def _try_read(parquet_path, csv_path):
     """Try reading parquet first, fall back to CSV."""
@@ -279,9 +277,7 @@ def _save_fig(fig, out_path):
     logger.debug("Saved plot: %s", out_path)
 
 
-# ---------------------------------------------------------------------------
 # Loss plots
-# ---------------------------------------------------------------------------
 
 def _load_lightning_metrics(output_dir):
     """Load metrics from latest Lightning log version.
@@ -415,9 +411,7 @@ def _generate_loss_plots(output_dir, views, plots_dir):
         _plot_omic_mse(metrics, omic, plots_dir / f"mse_{omic}.png")
 
 
-# ---------------------------------------------------------------------------
 # Reconstruction scatter plots
-# ---------------------------------------------------------------------------
 
 def _scatter_with_identity(ax, x, y, **scatter_kw):
     """Plot scatter with y=x identity line."""
@@ -474,7 +468,6 @@ def _generate_reconstruction_plots(data, views, plots_dir):
                 continue
             inp, rec = input_df.loc[common], recon_df.loc[common]
 
-            # Sample means (mean across features per sample)
             sample_df = pd.DataFrame({
                 "input_mean": inp.mean(axis=1),
                 "recon_mean": rec.mean(axis=1),
@@ -491,7 +484,6 @@ def _generate_reconstruction_plots(data, views, plots_dir):
                     f"Sample mean {name}{suffix} (reconstructed)",
                 )
 
-            # Feature means (mean across samples per feature)
             common_feats = inp.columns.intersection(rec.columns)
             if not common_feats.empty:
                 feat_df = pd.DataFrame({
@@ -507,9 +499,7 @@ def _generate_reconstruction_plots(data, views, plots_dir):
                 )
 
 
-# ---------------------------------------------------------------------------
 # Clustering metrics
-# ---------------------------------------------------------------------------
 
 def _compute_clustering_metrics(X, labels, dataset_name, label_type):
     """Compute Calinski-Harabasz and Davies-Bouldin scores."""
@@ -566,9 +556,7 @@ def _compute_all_clustering_metrics(data, views, samplesheet):
     return rows
 
 
-# ---------------------------------------------------------------------------
 # Data loading
-# ---------------------------------------------------------------------------
 
 def _load_data_files(output_dir, views, data_path):
     """Load latents, reconstructions, and inputs for plotting.
@@ -580,7 +568,6 @@ def _load_data_files(output_dir, views, data_path):
 
     output_dir = Path(output_dir)
 
-    # Load samplesheet from MuData .obs
     data_path_obj = Path(data_path)
     if data_path_obj.suffix == ".zarr" or (data_path_obj.is_dir() and not data_path_obj.suffix):
         mdata = mudata.read_zarr(str(data_path))
@@ -588,7 +575,6 @@ def _load_data_files(output_dir, views, data_path):
         mdata = mudata.read(str(data_path))
     data = {"omics": {}, "samplesheet": mdata.obs}
 
-    # Prefer full pass latents when available; fallback to train split latents.
     z_full_pq = output_dir / "full" / "latent.parquet"
     z_full_csv = output_dir / "full" / "latent.csv"
     z_train_pq = output_dir / "train" / "latent.parquet"
@@ -609,7 +595,6 @@ def _load_data_files(output_dir, views, data_path):
     for name in views:
         omic_data = {}
 
-        # Load input data from MuData modality
         if name in mdata.mod:
             X = mdata.mod[name].X
             if issparse(X):
@@ -640,9 +625,7 @@ def _load_data_files(output_dir, views, data_path):
     return data
 
 
-# ---------------------------------------------------------------------------
 # UMAP plot generation
-# ---------------------------------------------------------------------------
 
 def _make_umap_plot(df, samplesheet, palette, title, out_path, pca_components):
     """Compute UMAP and save scatter plot."""
@@ -676,10 +659,6 @@ def _generate_umap_plots(data, views, plots_dir, palette, pca_components):
                             f"Reconstructed corrected {name.upper()} UMAP",
                             plots_dir / f"umap_recon_corrected_{name}.png", pca_components)
 
-
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
 
 def generate_all_plots(output_dir, config, palette=None, pca_components=50):
     """Generate diagnostic plots and clustering metrics.
