@@ -247,23 +247,27 @@ class MuDataDataModule(pl.LightningDataModule):
             Keys: conditionals, tissue_labels, source_ids, sample_weights,
             train_idx, val_idx, label_codes.
         """
-        # Batch (model_type)
+        # Batch (model_type) - always included
         if "model_type" not in obs_df.columns:
             raise ValueError("MuData .obs must contain 'model_type' column")
         batch_dummies = pd.get_dummies(obs_df["model_type"])
         self.batch_categories = list(batch_dummies.columns)
 
-        # Tissue
-        if "tissue" in obs_df.columns:
+        # Tissue (included if use_tissue=True)
+        if self.config.use_tissue and "tissue" in obs_df.columns:
             tissue_dummies = pd.get_dummies(obs_df["tissue"])
             self.tissue_categories = list(tissue_dummies.columns)
         else:
             tissue_dummies = pd.DataFrame()
-            logger.warning("No 'tissue' column found in .obs")
+            if self.config.use_tissue and "tissue" not in obs_df.columns:
+                logger.warning("use_tissue=True but no 'tissue' column found in .obs")
 
-        # Mutations
-        mutation_cols = [c for c in obs_df.columns if c.startswith("mutation_")]
-        mutations = obs_df[mutation_cols].values.astype(np.float32) if mutation_cols else None
+        # Mutations (included if use_mutations=True)
+        if self.config.use_mutations:
+            mutation_cols = [c for c in obs_df.columns if c.startswith("mutation_")]
+            mutations = obs_df[mutation_cols].values.astype(np.float32) if mutation_cols else None
+        else:
+            mutations = None
 
         # Concatenate conditionals
         cond_parts = [batch_dummies.values]
@@ -371,6 +375,7 @@ class MuDataDataModule(pl.LightningDataModule):
         train_idx, val_idx = meta["train_idx"], meta["val_idx"]
 
         # Fit scalers on training data
+        # X already contains NaN for missing values (from MuData); no need to convert back
         for view_name, X in omics_all.items():
             if self.config.views[view_name].discrete:
                 X = np.nan_to_num(X, nan=0.0)
@@ -513,8 +518,7 @@ class MuDataDataModule(pl.LightningDataModule):
 
             logger.debug("Fitting scaler for '%s' on %d samples", view_name, len(sub_idx))
             X_sub = np.asarray(X_zarr[sub_idx]).astype(np.float32)
-            X_sub = np.nan_to_num(X_sub, nan=0.0)
-
+            # X_sub already contains NaN for missing values (from MuData); no need to convert back
             scaler = StandardScaler()
             scaler.fit(X_sub)
             self.scalers[view_name] = scaler
