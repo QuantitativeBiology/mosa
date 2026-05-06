@@ -258,8 +258,9 @@ def csv_to_mudata(
     for view_name, df in omics.items():
         X = df.values.astype(np.float32)
         mask = ~np.isnan(X)
-        X = np.nan_to_num(X, nan=0.0)
-        adata = AnnData(X=X, var=pd.DataFrame(index=df.columns), dtype=np.float32)
+        # Do NOT impute here; keep NaN for z-score in datamodule
+        # Only mask layer records which values are missing
+        adata = AnnData(X=X.astype(np.float32), var=pd.DataFrame(index=df.columns), dtype=np.float32)
         adata.obs_names = samplesheet.index
         adata.layers["mask"] = mask
         adatas[view_name] = adata
@@ -268,12 +269,17 @@ def csv_to_mudata(
     logger.debug("Creating MuData object")
     mdata = MuData(adatas)
 
+    # Set obsm presence flags based on actual mask (≥1 feature present), not CSV presence
     for view_name in omics:
-        presence = np.array(
-            [s in view_sample_sets[view_name] for s in common_samples],
-            dtype=bool,
-        )
+        adata = adatas[view_name]
+        mask = adata.layers["mask"]
+        # True if sample has ≥1 non-missing feature
+        presence = mask.any(axis=1).reshape(-1, 1)
         mdata.obsm[view_name] = presence
+        logger.debug(
+            "  %s: %d / %d samples have ≥1 feature present",
+            view_name, presence.sum(), len(presence),
+        )
 
     mdata.obs = samplesheet.copy()
 
