@@ -105,6 +105,8 @@ class MOSAConfig:
     data_path: str = ""                     # path to .h5mu/.zarr file
     mask_layer_name: str = "mask"           # layer name for per-feature masks
     scaler_sample_frac: float = 1.0         # fraction of training data for fitting StandardScaler
+    use_tissue: bool = True                 # include tissue as conditional (model_type always included)
+    use_mutations: bool = True              # include mutation_* columns as conditionals
     output_dir: str = "outputs"
     inference: bool = False
     target_batch: str = ""
