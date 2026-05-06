@@ -53,6 +53,8 @@ views:
 # - tissue column: always included if present
 # - mutation_* columns: always included if present (columns prefixed "mutation_")
 conditional_dim: 0                  # set automatically after loading; leave 0
+use_tissue: false
+use_mutations: false
 
 # ──────────────────────────────────────────────────────────────────
 # TRAINING
