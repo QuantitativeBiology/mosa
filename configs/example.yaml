@@ -73,6 +73,7 @@ adv_weight: 0.0             # adversarial batch-correction loss; also enables th
 learning_rate: 0.001
 num_epochs: 200
 batch_size: 64
+weighted_random_sampler: false    # use WeightedRandomSampler to balance model_type in training; set to false to disable
 test_size: 0.1              # fraction held out as validation set; set to 0 to use all data for training
 random_seed: 42
 

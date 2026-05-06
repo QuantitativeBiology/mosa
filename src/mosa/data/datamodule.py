@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import torch
 import zarr
-from torch.utils.data import ConcatDataset, DataLoader, Dataset
+from torch.utils.data import ConcatDataset, DataLoader, Dataset, WeightedRandomSampler
 
 import pytorch_lightning as pl
 from sklearn.model_selection import train_test_split
@@ -182,15 +182,51 @@ class MuDataDataModule(pl.LightningDataModule):
             kwargs["prefetch_factor"] = 2
         return kwargs
 
+    def _get_weighted_sampler(self, dataset: Dataset) -> WeightedRandomSampler:
+        """Create a WeightedRandomSampler using pre-computed sample weights.
+        
+        Uses the sample_weights already calculated in _process_obs() to balance
+        model_type categories, ensuring each mini-batch has a balanced distribution
+        of organoides, cell_lines, and tumores.
+        """
+        if isinstance(dataset, MOSADataset):
+            sample_weights = dataset.sample_weights.numpy()
+        elif isinstance(dataset, LazyZarrDataset):
+            sample_weights = dataset.sample_weights
+        else:
+            raise TypeError(f"Unsupported dataset type: {type(dataset)}")
+        
+        # Create sampler using pre-computed weights
+        sampler = WeightedRandomSampler(
+            weights=sample_weights,
+            num_samples=len(dataset),
+            replacement=True,
+        )
+        return sampler
+
     def train_dataloader(self) -> DataLoader:
         if self.train_dataset is None:
             raise RuntimeError("Call setup() before requesting dataloaders")
-        return DataLoader(
-            self.train_dataset,
-            batch_size=self.config.batch_size,
-            shuffle=True,
-            **self._loader_kwargs(),
-        )
+        
+        loader_kwargs = self._loader_kwargs()
+        
+        if self.config.weighted_random_sampler:
+            # Create weighted sampler to balance model_type categories in each batch
+            sampler = self._get_weighted_sampler(self.train_dataset)
+            return DataLoader(
+                self.train_dataset,
+                batch_size=self.config.batch_size,
+                sampler=sampler,
+                **loader_kwargs,
+            )
+        else:
+            # Use default sequential sampling with shuffle
+            return DataLoader(
+                self.train_dataset,
+                batch_size=self.config.batch_size,
+                shuffle=True,
+                **loader_kwargs,
+            )
 
     def val_dataloader(self) -> DataLoader | None:
         if self.val_dataset is None:
