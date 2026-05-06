@@ -80,6 +80,7 @@ class MOSAVAE(pl.LightningModule):
         # Joint latent space (fusion method selected via config)
         self.latent_space = BaseLatentSpace.create(
             config.fusion_method, self.view_latent_dims, config.joint_latent_dim,
+            config.shared_hidden_layer_dims,
         )
 
         logger.debug("Encoders: %s",
