@@ -85,6 +85,7 @@ class MOSAConfig:
     conditional_dim: int = 0
     fusion_method: str = "concat"  # "concat" or "poe"
     joint_latent_dim: int = 64
+    shared_hidden_layer_dims: list[int] = field(default_factory=list)  # intermediate dims for PoE shared head
     view_dropout_prob: float = 0.2
     kl_weight: float = 0.01
     kl_weight_final: float = 0.01
