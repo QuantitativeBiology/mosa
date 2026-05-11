@@ -7,7 +7,6 @@ import torch.nn as nn
 import pytorch_lightning as pl
 
 from mosa.config import MOSAConfig
-from mosa.data.batch import MOSABatch
 from mosa.model.losses import (
     adversarial_loss,
     contrastive_loss,
@@ -20,6 +19,19 @@ from mosa.model.encoder import OmicEncoder
 from mosa.model.latent import BaseLatentSpace
 
 logger = logging.getLogger(__name__)
+
+
+def _batch_to_device(batch: dict, device: torch.device) -> dict:
+    """Recursively move a nested dict batch to the given device."""
+    result = {}
+    for k, v in batch.items():
+        if isinstance(v, dict):
+            result[k] = {vk: vv.to(device) for vk, vv in v.items()}
+        elif isinstance(v, torch.Tensor):
+            result[k] = v.to(device)
+        else:
+            result[k] = v
+    return result
 
 
 def _kl_weight_for_epoch(epoch: int, config: MOSAConfig) -> float:
@@ -80,6 +92,7 @@ class MOSAVAE(pl.LightningModule):
         # Joint latent space (fusion method selected via config)
         self.latent_space = BaseLatentSpace.create(
             config.fusion_method, self.view_latent_dims, config.joint_latent_dim,
+            config.shared_hidden_layer_dims,
         )
 
         logger.debug("Encoders: %s",
@@ -104,7 +117,7 @@ class MOSAVAE(pl.LightningModule):
         # Model type category names (set by datamodule for per-group logging)
         self.model_type_names: list[str] | None = None
 
-    def forward(self, batch: MOSABatch) -> dict:
+    def forward(self, batch: dict) -> dict:
         """Encode, fuse, and decode in one forward pass.
 
         Returns
@@ -125,12 +138,12 @@ class MOSAVAE(pl.LightningModule):
         view_embeddings = {}
         sample_masks = {}
         for name in self.view_order:
-            x = batch.encoder_inputs[name]
+            x = batch["encoder_inputs"][name]
 
-            sample_mask = batch.missing_masks[name].any(dim=1)
+            sample_mask = batch["missing_masks"][name].any(dim=1)
             sample_masks[name] = sample_mask
 
-            emb = self.encoders[name](x, batch.conditionals)
+            emb = self.encoders[name](x, batch["conditionals"])
             emb[~sample_mask] = 0.0
             view_embeddings[name] = emb
 
@@ -140,7 +153,7 @@ class MOSAVAE(pl.LightningModule):
         # Decode each view
         x_hat = {}
         for name in self.view_order:
-            x_hat[name] = self.decoders[name](z, batch.conditionals)
+            x_hat[name] = self.decoders[name](z, batch["conditionals"])
 
         return {"x_hat": x_hat, "z": z, "mu": mu, "logvar": logvar}
 
@@ -148,7 +161,7 @@ class MOSAVAE(pl.LightningModule):
         """Return the KL weight for the current training epoch."""
         return _kl_weight_for_epoch(self.current_epoch, self.config)
 
-    def _compute_losses(self, batch: MOSABatch, out: dict) -> dict:
+    def _compute_losses(self, batch: dict, out: dict) -> dict:
         """Compute reconstruction, KL, and contrastive loss components.
 
         Returns
@@ -158,12 +171,12 @@ class MOSAVAE(pl.LightningModule):
         """
         recon_loss, recon_metrics = reconstruction_loss(
             x_hat=out["x_hat"],
-            x=batch.decoder_targets,
-            mask=batch.missing_masks,
-            group=batch.source_ids if any(
+            x=batch["decoder_targets"],
+            mask=batch["missing_masks"],
+            group=batch["source_ids"] if any(
                 vc.loss_type == "macro" for vc in self.config.views.values()
             ) else None,
-            sample_weights=batch.sample_weights,
+            sample_weights=batch["sample_weights"],
             loss_type="macro" if any(
                 vc.loss_type == "macro" for vc in self.config.views.values()
             ) else "mean",
@@ -173,7 +186,7 @@ class MOSAVAE(pl.LightningModule):
 
         c_loss = torch.tensor(0.0, device=self.device)
         if self.config.contrastive_weight > 0:
-            c_loss = contrastive_loss(out["mu"], batch.tissue_labels)
+            c_loss = contrastive_loss(out["mu"], batch["tissue_labels"])
 
         return {
             "recon": recon_loss,
@@ -182,13 +195,7 @@ class MOSAVAE(pl.LightningModule):
             "recon_metrics": recon_metrics,
         }
 
-    def transfer_batch_to_device(self, batch, device, dataloader_idx):
-        """Ensure MOSABatch is moved to the correct device."""
-        if isinstance(batch, MOSABatch):
-            return batch.to(device)
-        return super().transfer_batch_to_device(batch, device, dataloader_idx)
-
-    def training_step(self, batch: MOSABatch, batch_idx: int):
+    def training_step(self, batch: dict, batch_idx: int):
         """Two-phase training step: discriminator update, then VAE update."""
         optimizers = self.optimizers()
         schedulers = self.lr_schedulers()
@@ -211,7 +218,7 @@ class MOSAVAE(pl.LightningModule):
         if self.discriminator is not None and opt_disc is not None:
             disc_pred = self.discriminator(out["z"].detach())
             disc_loss_val = adversarial_loss(
-                disc_pred, batch.source_ids, self.class_weights
+                disc_pred, batch["source_ids"], self.class_weights
             )
             opt_disc.zero_grad()
             self.manual_backward(disc_loss_val)
@@ -220,7 +227,7 @@ class MOSAVAE(pl.LightningModule):
             # Phase 2: adversarial component for VAE (fool discriminator)
             adv_pred = self.discriminator(out["z"])
             adv_loss_val = adversarial_loss(
-                adv_pred, batch.source_ids, self.class_weights
+                adv_pred, batch["source_ids"], self.class_weights
             )
 
         # VAE total loss
@@ -266,7 +273,7 @@ class MOSAVAE(pl.LightningModule):
             if sched is not None:
                 sched.step()
 
-    def validation_step(self, batch: MOSABatch, batch_idx: int):
+    def validation_step(self, batch: dict, batch_idx: int):
         """Compute and log validation losses (no adversarial component)."""
         out = self.forward(batch)
         losses = self._compute_losses(batch, out)
@@ -333,7 +340,7 @@ class MOSAVAE(pl.LightningModule):
         all_names: list[str] = []
 
         for batch in loader:
-            batch = batch.to(self.device)
+            batch = _batch_to_device(batch, self.device)
 
             if force_source_id is not None:
                 if n_batches is None or n_batches <= 0:
@@ -344,15 +351,15 @@ class MOSAVAE(pl.LightningModule):
                     )
 
                 # Conditionals start with one-hot model_type block.
-                conditionals = batch.conditionals.clone()
+                conditionals = batch["conditionals"].clone()
                 conditionals[:, :n_batches] = 0.0
                 conditionals[:, force_source_id] = 1.0
-                batch.conditionals = conditionals
+                batch["conditionals"] = conditionals
 
             out = self.forward(batch)
 
             all_z.append(out["z"].cpu())
-            all_names.extend(batch.sample_names)
+            all_names.extend(batch["sample_name"])
 
             for omic, recon in out["x_hat"].items():
                 all_x_hat.setdefault(omic, []).append(recon.cpu())
