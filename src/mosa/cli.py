@@ -13,7 +13,6 @@ def _setup_logging(debug: bool):
     warnings.filterwarnings("ignore", category=FutureWarning, module="mudata")
     warnings.filterwarnings("ignore", message="Cannot join columns with the same name", module="mudata")
     warnings.filterwarnings("ignore", message=".*LeafSpec.*is deprecated", module="pytorch_lightning")
-    warnings.filterwarnings("ignore", message=".*transfer_batch_to_device.*", module="pytorch_lightning")
     warnings.filterwarnings("ignore", message=".*batch_size.*ambiguous collection", module="pytorch_lightning")
     warnings.filterwarnings("ignore", message=".*tensorboardX.*", module="pytorch_lightning")
 

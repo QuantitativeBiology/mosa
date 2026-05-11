@@ -137,7 +137,7 @@ class LazyZarrDataset(Dataset):
         return results
 
 
-class MuDataDataModule(pl.LightningDataModule):
+class MOSADataModule(pl.LightningDataModule):
     """VAE-internal data handler: scaling, batching, and DataLoader creation.
 
     Receives already-loaded MultiOmicDataset objects. Does not read files.
@@ -336,7 +336,7 @@ class MuDataDataModule(pl.LightningDataModule):
         
         Uses the sample_weights already calculated in _process_obs() to balance
         model_type categories, ensuring each mini-batch has a balanced distribution
-        of organoides, cell_lines, and tumores.
+        of organoids, cell lines, and tumors.
         """
         if isinstance(dataset, MOSADataset):
             sample_weights = dataset.sample_weights.numpy()
@@ -352,6 +352,13 @@ class MuDataDataModule(pl.LightningDataModule):
             replacement=True,
         )
         return sampler
+
+    def teardown(self, stage: str | None = None) -> None:
+        """Close any open zarr store handles held by lazy datasets."""
+        for ds in [self.train_dataset, self.val_dataset]:
+            if isinstance(ds, LazyZarrDataset) and ds._store is not None:
+                ds._store.store.close()
+                ds._store = None
 
     def train_dataloader(self) -> DataLoader:
         if self.train_dataset is None:

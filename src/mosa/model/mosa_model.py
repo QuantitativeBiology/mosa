@@ -13,7 +13,7 @@ from mosa.api import MultiOmicModel
 from mosa.config import MOSAConfig
 from mosa.data.dataset import MultiOmicDataset
 from mosa.model.callbacks import SaveLatentAndReconCallback
-from mosa.model.datamodule import MuDataDataModule
+from mosa.model.datamodule import MOSADataModule
 from mosa.model.mosavae import MOSAVAE
 
 logger = logging.getLogger(__name__)
@@ -22,14 +22,14 @@ logger = logging.getLogger(__name__)
 class MOSAVAEModel(MultiOmicModel):
     """MultiOmicModel implementation using the MOSAVAE architecture.
 
-    Wraps the MOSAVAE Lightning module, MuDataDataModule, and training
+    Wraps the MOSAVAE Lightning module, MOSADataModule, and training
     orchestration behind the standard MultiOmicModel interface.
     """
 
     def __init__(self, config: MOSAConfig):
         self.config = config
         self._model: MOSAVAE | None = None
-        self._datamodule: MuDataDataModule | None = None
+        self._datamodule: MOSADataModule | None = None
 
     def fit(
         self,
@@ -37,7 +37,7 @@ class MOSAVAEModel(MultiOmicModel):
         val: MultiOmicDataset | None = None,
     ) -> None:
         """Train the model on the provided data."""
-        self._datamodule = MuDataDataModule(
+        self._datamodule = MOSADataModule(
             train_data=train,
             val_data=val,
             config=self.config,
@@ -112,7 +112,7 @@ class MOSAVAEModel(MultiOmicModel):
         if self._model is None or self._datamodule is None:
             raise RuntimeError("Model must be fit before calling transform()")
 
-        inf_dm = MuDataDataModule(
+        inf_dm = MOSADataModule(
             train_data=data,
             val_data=None,
             config=self.config,
@@ -129,7 +129,7 @@ class MOSAVAEModel(MultiOmicModel):
         if self._model is None or self._datamodule is None:
             raise RuntimeError("Model must be fit before calling reconstruct()")
 
-        inf_dm = MuDataDataModule(
+        inf_dm = MOSADataModule(
             train_data=data,
             val_data=None,
             config=self.config,
