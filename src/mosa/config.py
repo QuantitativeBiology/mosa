@@ -85,6 +85,7 @@ class MOSAConfig:
     conditional_dim: int = 0
     fusion_method: str = "concat"  # "concat" or "poe"
     joint_latent_dim: int = 64
+    shared_hidden_layer_dims: list[int] = field(default_factory=list)  # intermediate dims for PoE shared head
     view_dropout_prob: float = 0.2
     kl_weight: float = 0.01
     kl_weight_final: float = 0.01
@@ -105,6 +106,9 @@ class MOSAConfig:
     data_path: str = ""                     # path to .h5mu/.zarr file
     mask_layer_name: str = "mask"           # layer name for per-feature masks
     scaler_sample_frac: float = 1.0         # fraction of training data for fitting StandardScaler
+    use_tissue: bool = True                 # include tissue as conditional (model_type always included)
+    use_mutations: bool = True              # include mutation_* columns as conditionals
+    weighted_random_sampler: bool = True    # use WeightedRandomSampler to balance model_type in training
     output_dir: str = "outputs"
     inference: bool = False
     target_batch: str = ""

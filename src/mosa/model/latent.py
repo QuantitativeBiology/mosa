@@ -25,10 +25,11 @@ class BaseLatentSpace(ABC, nn.Module):
     Instantiate via BaseLatentSpace.create(method, ...).
     """
 
-    def __init__(self, view_dims: dict[str, int], latent_dim: int):
+    def __init__(self, view_dims: dict[str, int], latent_dim: int, shared_hidden_dims: list[int] | None = None):
         super().__init__()
         self.view_dims = view_dims
         self.latent_dim = latent_dim
+        self.shared_hidden_dims = shared_hidden_dims or []
         self._build()
 
     @abstractmethod
@@ -51,13 +52,13 @@ class BaseLatentSpace(ABC, nn.Module):
         return mu
 
     @classmethod
-    def create(cls, method: str, view_dims: dict[str, int], latent_dim: int) -> BaseLatentSpace:
+    def create(cls, method: str, view_dims: dict[str, int], latent_dim: int, shared_hidden_dims: list[int] | None = None) -> BaseLatentSpace:
         if method not in _REGISTRY:
             raise ValueError(
                 f"Unknown fusion method '{method}'. "
                 f"Available: {list(_REGISTRY.keys())}"
             )
-        return _REGISTRY[method](view_dims, latent_dim)
+        return _REGISTRY[method](view_dims, latent_dim, shared_hidden_dims)
 
 
 @register_latent("concat")
@@ -101,8 +102,11 @@ class PoELatentSpace(BaseLatentSpace):
             )
         shared_dim = next(iter(dims))
 
+        # Build layer sizes: input -> intermediate dims -> 2*latent_dim (mu, logvar)
+        layer_sizes = [shared_dim] + self.shared_hidden_dims + [self.latent_dim * 2]
+
         self.shared_head = MLP(
-            layer_sizes=[shared_dim, self.latent_dim * 2],
+            layer_sizes=layer_sizes,
             dropout_p=0.0,
             use_batch_norm=True,
             activation=nn.PReLU,

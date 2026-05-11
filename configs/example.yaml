@@ -53,6 +53,8 @@ views:
 # - tissue column: always included if present
 # - mutation_* columns: always included if present (columns prefixed "mutation_")
 conditional_dim: 0                  # set automatically after loading; leave 0
+use_tissue: false
+use_mutations: false
 
 # ──────────────────────────────────────────────────────────────────
 # TRAINING
@@ -61,6 +63,7 @@ conditional_dim: 0                  # set automatically after loading; leave 0
 fusion_method: concat       # "concat" (concatenation) or "poe" (Product of Experts)
 joint_latent_dim: 64        # dimensionality of the shared latent bottleneck
 view_dropout_prob: 0.2      # probability of zeroing an entire view during training
+shared_hidden_layer_dims: []  # intermediate dims for PoE shared head; ignored if fusion_method is "concat"; [] if direct shared head (no hidden layers)
 
 # Loss weights — set a weight to 0.0 to disable that term
 kl_weight: 0.01             # β scaling the KL divergence term
@@ -70,6 +73,7 @@ adv_weight: 0.0             # adversarial batch-correction loss; also enables th
 learning_rate: 0.001
 num_epochs: 200
 batch_size: 64
+weighted_random_sampler: false    # use WeightedRandomSampler to balance model_type in training; set to false to disable
 test_size: 0.1              # fraction held out as validation set; set to 0 to use all data for training
 random_seed: 42
 
