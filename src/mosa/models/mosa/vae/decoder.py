@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from mosa.model.layers import MLP
+from mosa.models.mosa.vae.layers import MLP
 
 
 class OmicDecoder(nn.Module):

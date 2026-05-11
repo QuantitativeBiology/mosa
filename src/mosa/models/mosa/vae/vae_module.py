@@ -7,16 +7,16 @@ import torch.nn as nn
 import pytorch_lightning as pl
 
 from mosa.config import MOSAConfig
-from mosa.model.losses import (
+from mosa.models.mosa.vae.losses import (
     adversarial_loss,
     contrastive_loss,
     kl_divergence,
     reconstruction_loss,
 )
-from mosa.model.decoder import OmicDecoder
-from mosa.model.discriminator import Discriminator
-from mosa.model.encoder import OmicEncoder
-from mosa.model.latent import BaseLatentSpace
+from mosa.models.mosa.vae.decoder import OmicDecoder
+from mosa.models.mosa.vae.discriminator import Discriminator
+from mosa.models.mosa.vae.encoder import OmicEncoder
+from mosa.models.mosa.vae.latent import BaseLatentSpace
 
 logger = logging.getLogger(__name__)
 

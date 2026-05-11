@@ -505,12 +505,20 @@ class MOSADataModule(pl.LightningDataModule):
 
         batch_dummies = pd.get_dummies(obs_df["model_type"]).reindex(
             columns=self.batch_categories, fill_value=0
+        )
+
+        if self.tissue_categories:
+            tissue_dummies = pd.get_dummies(obs_df.get("tissue", pd.Series(dtype=str))).reindex(
+                columns=self.tissue_categories, fill_value=0
             )
         else:
             tissue_dummies = pd.DataFrame()
 
-        mutation_cols = [c for c in obs_df.columns if c.startswith("mutation_")]
-        mutations = obs_df[mutation_cols].values.astype(np.float32) if mutation_cols else None
+        if self.config.use_mutations:
+            mutation_cols = [c for c in obs_df.columns if c.startswith("mutation_")]
+            mutations = obs_df[mutation_cols].values.astype(np.float32) if mutation_cols else None
+        else:
+            mutations = None
 
         cond_parts = [batch_dummies.values]
         if not tissue_dummies.empty:

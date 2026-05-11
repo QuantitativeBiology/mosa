@@ -45,7 +45,7 @@ def _train(args):
     from sklearn.model_selection import train_test_split
 
     from mosa.data.io import load_mudata
-    from mosa.model.mosa_model import MOSAVAEModel
+    from mosa.models.mosa import MOSAVAEModel
     from mosa.utils import load_config, seed_everything
 
     torch.set_float32_matmul_precision("high")
