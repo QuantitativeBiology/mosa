@@ -36,8 +36,6 @@ views:
 | `dropout_p` | `0.1` | Dropout probability in encoder and decoder layers. |
 | `discrete` | `false` | If true, skips z-score normalization for this view (for integer/count data). |
 
-`input_dim` and `output_dim` are auto-set from the MuData modality — leave them at 0.
-
 ### Multiple views
 
 ```yaml
@@ -74,7 +72,7 @@ When using `poe`, all views must have the same last value in `hidden_layer_dims`
 
 ## Conditionals
 
-Metadata from MuData `.obs` is automatically converted to conditional vectors: `model_type` (always one-hot encoded), `tissue` (one-hot if column exists), and `mutation_*` columns (if present). No config flags needed — `conditional_dim` is computed from the MuData file.
+Metadata from MuData `.obs` is automatically converted to conditional vectors: `model_type` (always one-hot encoded), `tissue` (one-hot if column exists), and `mutation_*` columns (if present). No config needed — these dimensions are derived from the data at training time.
 
 ## Loss weights
 

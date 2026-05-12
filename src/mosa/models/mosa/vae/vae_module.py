@@ -57,10 +57,19 @@ class MOSAVAE(pl.LightningModule):
     then VAE parameters are updated with reconstruction, KL, and adversarial losses.
     """
 
-    def __init__(self, config: MOSAConfig):
+    def __init__(
+        self,
+        config: MOSAConfig,
+        view_input_dims: dict[str, int],
+        conditional_dim: int,
+        n_batches: int,
+    ):
         super().__init__()
         self.automatic_optimization = False
         self.config = config
+        self.view_input_dims = view_input_dims
+        self.conditional_dim = conditional_dim
+        self.n_batches = n_batches
         self.save_hyperparameters({"config": vars(config)})
 
         self.view_latent_dims: dict[str, int] = {
@@ -73,17 +82,16 @@ class MOSAVAE(pl.LightningModule):
         self.decoders = nn.ModuleDict()
         for name, vc in config.views.items():
             self.encoders[name] = OmicEncoder(
-                input_dim=vc.input_dim,
-                cond_dim=config.conditional_dim,
+                input_dim=view_input_dims[name],
+                cond_dim=conditional_dim,
                 hidden_dims=vc.hidden_layer_dims,
                 latent_dim=self.view_latent_dims[name],
                 dropout_p=vc.dropout_p,
                 view_dropout_p=config.view_dropout_prob,
             )
-            output_dim = vc.output_dim if vc.output_dim > 0 else vc.input_dim
             self.decoders[name] = OmicDecoder(
-                output_dim=output_dim,
-                cond_dim=config.conditional_dim,
+                output_dim=view_input_dims[name],
+                cond_dim=conditional_dim,
                 hidden_dims=vc.hidden_layer_dims,
                 latent_dim=config.joint_latent_dim,
                 dropout_p=vc.dropout_p,
@@ -96,22 +104,22 @@ class MOSAVAE(pl.LightningModule):
         )
 
         logger.debug("Encoders: %s",
-                      {n: f"{vc.input_dim}->{self.view_latent_dims[n]}" for n, vc in config.views.items()})
+                      {n: f"{view_input_dims[n]}->{self.view_latent_dims[n]}" for n in config.views})
         logger.debug("Decoders: %s",
-                      {n: f"{config.joint_latent_dim}->{vc.output_dim or vc.input_dim}" for n, vc in config.views.items()})
+                      {n: f"{config.joint_latent_dim}->{view_input_dims[n]}" for n in config.views})
         logger.debug("Latent space: %s -> joint_latent_dim=%d",
                       config.fusion_method, config.joint_latent_dim)
 
         # Optional adversarial discriminator
         self.discriminator: Discriminator | None = None
-        if config.adv_weight > 0 and config.n_batches > 0:
-            self.discriminator = Discriminator(config.joint_latent_dim, config.n_batches)
+        if config.adv_weight > 0 and n_batches > 0:
+            self.discriminator = Discriminator(config.joint_latent_dim, n_batches)
             logger.debug("Discriminator: latent_dim=%d, n_batches=%d",
-                         config.joint_latent_dim, config.n_batches)
+                         config.joint_latent_dim, n_batches)
 
         # Class weights for adversarial loss (set by datamodule after setup)
         self.register_buffer(
-            "class_weights", torch.ones(max(config.n_batches, 1)), persistent=False
+            "class_weights", torch.ones(max(n_batches, 1)), persistent=False
         )
 
         # Model type category names (set by datamodule for per-group logging)

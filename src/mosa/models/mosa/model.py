@@ -45,18 +45,12 @@ class MOSAVAEModel(MultiOmicModel):
         )
         self._datamodule.setup()
 
-        for view_name, input_dim in self._datamodule.view_input_dims.items():
-            vc = self.config.views[view_name]
-            if vc.input_dim == 0:
-                vc.input_dim = input_dim
-            if vc.output_dim == 0:
-                vc.output_dim = input_dim
-        if self.config.conditional_dim == 0:
-            self.config.conditional_dim = self._datamodule.conditional_dim
-        if self.config.n_batches == 0:
-            self.config.n_batches = self._datamodule.n_batches
-
-        self._model = MOSAVAE(self.config)
+        self._model = MOSAVAE(
+            config=self.config,
+            view_input_dims=self._datamodule.view_input_dims,
+            conditional_dim=self._datamodule.conditional_dim,
+            n_batches=self._datamodule.n_batches,
+        )
 
         if self._datamodule.class_weights is not None:
             self._model.class_weights = torch.tensor(
@@ -197,10 +191,18 @@ class MOSAVAEModel(MultiOmicModel):
         return results["x_hat"]
 
     def save(self, path: str | Path) -> None:
-        """Save model state dict to disk."""
+        """Save model weights and architecture dims to disk."""
         if self._model is None:
             raise RuntimeError("Model must be fit before saving")
-        torch.save(self._model.state_dict(), str(path))
+        torch.save(
+            {
+                "state_dict": self._model.state_dict(),
+                "view_input_dims": self._model.view_input_dims,
+                "conditional_dim": self._model.conditional_dim,
+                "n_batches": self._model.n_batches,
+            },
+            str(path),
+        )
 
     @classmethod
     def load(cls, path: str | Path, config: MOSAConfig) -> MOSAVAEModel:
@@ -209,12 +211,18 @@ class MOSAVAEModel(MultiOmicModel):
         Parameters
         ----------
         path : str or Path
-            Path to the saved state dict.
+            Path to saved checkpoint (produced by save()).
         config : MOSAConfig
             Config used to reconstruct the model architecture.
         """
+        checkpoint = torch.load(str(path))
         instance = cls(config)
-        instance._model = MOSAVAE(config)
-        instance._model.load_state_dict(torch.load(str(path)))
+        instance._model = MOSAVAE(
+            config=config,
+            view_input_dims=checkpoint["view_input_dims"],
+            conditional_dim=checkpoint["conditional_dim"],
+            n_batches=checkpoint["n_batches"],
+        )
+        instance._model.load_state_dict(checkpoint["state_dict"])
         instance._model.eval()
         return instance
