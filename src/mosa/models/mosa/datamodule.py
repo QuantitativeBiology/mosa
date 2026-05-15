@@ -30,8 +30,8 @@ class MOSADataset(Dataset):
         sample_names: list[str],
         omic_names: list[str],
     ):
-        self.omics = {k: torch.tensor(v, dtype=torch.float32) for k, v in omics_data.items()}
-        self.masks = {k: torch.tensor(v, dtype=torch.bool) for k, v in masks.items()}
+        self.omics = {k: torch.from_numpy(v) for k, v in omics_data.items()}
+        self.masks = {k: torch.from_numpy(v) for k, v in masks.items()}
         self.conditionals = torch.tensor(conditionals, dtype=torch.float32)
         self.tissue_labels = torch.tensor(tissue_labels, dtype=torch.float32)
         self.source_ids = torch.tensor(source_ids, dtype=torch.long)
@@ -185,6 +185,8 @@ class MOSADataModule(pl.LightningDataModule):
 
     def setup(self, stage: str | None = None) -> None:
         """Fit scalers on train_data and create torch Dataset objects."""
+        if self.train_dataset is not None:
+            return
         train = self.train_data
         self.feature_names = {k: list(v) for k, v in train.feature_names.items()}
 
