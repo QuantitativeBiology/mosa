@@ -16,7 +16,7 @@ class ViewDropout(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply view-level dropout: zero the entire input with probability p."""
-        if self.training and np.random.binomial(1, self.p):
+        if self.training and torch.rand(1, device=x.device).item() < self.p:
             x = x.clone()
             x.zero_()
         return x
