@@ -515,16 +515,19 @@ class MOSADataModule(pl.LightningDataModule):
         else:
             tissue_labels = np.zeros((n_samples, 1), dtype=np.float32)
 
+        # Align codes with batch_categories so unused-but-defined Categorical
+        # levels do not mismatch the discriminator output size.
         model_type_cats = pd.Categorical(
             obs_df["model_type"],
-            categories=sorted(obs_df["model_type"].unique()),
+            categories=self.batch_categories,
             ordered=True,
         )
         label_codes = np.asarray(model_type_cats.codes, dtype=np.intp)
 
+        n_classes = len(self.batch_categories)
+        class_weights = np.ones(n_classes, dtype=np.float32)
         unique, counts = np.unique(label_codes, return_counts=True)
-        class_weights = np.zeros(len(unique), dtype=np.float32)
-        for i, (cls, count) in enumerate(zip(unique, counts)):
+        for cls, count in zip(unique, counts):
             class_weights[cls] = n_samples / (len(unique) * count)
         self.class_weights = class_weights
 
@@ -575,7 +578,7 @@ class MOSADataModule(pl.LightningDataModule):
 
         model_type_cats = pd.Categorical(
             obs_df["model_type"],
-            categories=sorted(obs_df["model_type"].unique()),
+            categories=self.batch_categories,
             ordered=True,
         )
         label_codes = np.asarray(model_type_cats.codes, dtype=np.intp)
