@@ -145,7 +145,7 @@ class MOSADataModule(pl.LightningDataModule):
 
     def __init__(
         self,
-        train_data: MultiOmicDataset,
+        train_data: MultiOmicDataset | None,
         val_data: MultiOmicDataset | None,
         config: MOSAConfig,
         zarr_path: str | None = None,
@@ -199,8 +199,12 @@ class MOSADataModule(pl.LightningDataModule):
             self._setup_inmemory(train, meta)
 
     def _setup_inmemory(self, train: MultiOmicDataset, meta: dict) -> None:
+        import time
+        t0 = time.perf_counter()
+
         omics_train = {}
         for view_name, X in train.views.items():
+            tv = time.perf_counter()
             if self.config.views[view_name].discrete:
                 X = np.nan_to_num(X, nan=0.0)
                 self.scalers[view_name] = None
@@ -211,6 +215,7 @@ class MOSADataModule(pl.LightningDataModule):
                 X = np.nan_to_num(X, nan=0.0)
                 self.scalers[view_name] = scaler
             omics_train[view_name] = X
+            logger.debug("  view '%s': scaled and imputed in %.2fs", view_name, time.perf_counter() - tv)
 
         self.train_dataset = MOSADataset(
             omics_data=omics_train,
@@ -246,7 +251,7 @@ class MOSADataModule(pl.LightningDataModule):
 
         n_train = self.train_data.n_samples
         n_val = self.val_data.n_samples if self.val_data is not None else 0
-        logger.info("In-memory setup complete: %d train, %d val", n_train, n_val)
+        logger.info("Setup complete: %d train, %d val (%.2fs)", n_train, n_val, time.perf_counter() - t0)
 
     def _setup_lazy_zarr(self, meta: dict) -> None:
         """Set up LazyZarrDataset for large zarr stores."""
@@ -361,6 +366,40 @@ class MOSADataModule(pl.LightningDataModule):
             if isinstance(ds, LazyZarrDataset) and ds._store is not None:
                 ds._store.store.close()
                 ds._store = None
+
+    def state_dict(self) -> dict:
+        """Return serialisable preprocessing state for checkpoint saving."""
+        scalers = {}
+        for name, scaler in self.scalers.items():
+            if scaler is None:
+                scalers[name] = None
+            else:
+                scalers[name] = {
+                    "mean": scaler.mean_.tolist(),
+                    "scale": scaler.scale_.tolist(),
+                }
+        return {
+            "scalers": scalers,
+            "batch_categories": self.batch_categories,
+            "tissue_categories": self.tissue_categories,
+            "feature_names": self.feature_names,
+        }
+
+    def load_state_dict(self, state: dict) -> None:
+        """Restore preprocessing state from a saved checkpoint."""
+        self.batch_categories = state["batch_categories"]
+        self.tissue_categories = state["tissue_categories"]
+        self.feature_names = state["feature_names"]
+        self.scalers = {}
+        for name, s in state["scalers"].items():
+            if s is None:
+                self.scalers[name] = None
+            else:
+                scaler = StandardScaler()
+                scaler.mean_ = np.array(s["mean"], dtype=np.float64)
+                scaler.scale_ = np.array(s["scale"], dtype=np.float64)
+                scaler.n_features_in_ = len(s["mean"])
+                self.scalers[name] = scaler
 
     def train_dataloader(self) -> DataLoader:
         if self.train_dataset is None:

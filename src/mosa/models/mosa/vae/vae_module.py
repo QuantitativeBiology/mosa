@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import logging
 
 import torch
@@ -70,7 +71,12 @@ class MOSAVAE(pl.LightningModule):
         self.view_input_dims = view_input_dims
         self.conditional_dim = conditional_dim
         self.n_batches = n_batches
-        self.save_hyperparameters({"config": vars(config)})
+        self.save_hyperparameters({
+            "config": dataclasses.asdict(config),
+            "view_input_dims": view_input_dims,
+            "conditional_dim": conditional_dim,
+            "n_batches": n_batches,
+        })
 
         self.view_latent_dims: dict[str, int] = {
             name: vc.hidden_layer_dims[-1] for name, vc in config.views.items()

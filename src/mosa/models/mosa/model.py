@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
 from pathlib import Path
@@ -12,7 +13,7 @@ from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.strategies import DDPStrategy
 
 from mosa.api import MultiOmicModel
-from mosa.config import MOSAConfig
+from mosa.config import MOSAConfig, TrainerConfig, ViewConfig
 from mosa.data.dataset import MultiOmicDataset
 from mosa.models.mosa.datamodule import MOSADataModule
 from mosa.models.mosa.vae.vae_module import MOSAVAE
@@ -36,6 +37,7 @@ class MOSAVAEModel(MultiOmicModel):
         self,
         train: MultiOmicDataset,
         val: MultiOmicDataset | None = None,
+        resume_from: str | Path | None = None,
     ) -> None:
         """Train the model on the provided data."""
         self._datamodule = MOSADataModule(
@@ -77,6 +79,7 @@ class MOSAVAEModel(MultiOmicModel):
                     monitor="val/loss",
                     mode="min",
                     save_top_k=tc.checkpoint_top_k,
+                    save_last=True,
                 ),
             )
 
@@ -100,7 +103,7 @@ class MOSAVAEModel(MultiOmicModel):
             trainer_kwargs["num_sanity_val_steps"] = 0
 
         trainer = pl.Trainer(**trainer_kwargs)
-        trainer.fit(self._model, self._datamodule)
+        trainer.fit(self._model, self._datamodule, ckpt_path=str(resume_from) if resume_from else None)
 
         if int(os.environ.get("LOCAL_RANK", 0)) == 0:
             self._save_outputs()
@@ -191,31 +194,38 @@ class MOSAVAEModel(MultiOmicModel):
         return results["x_hat"]
 
     def save(self, path: str | Path) -> None:
-        """Save model weights and architecture dims to disk."""
-        if self._model is None:
+        """Save model weights, architecture dims, and preprocessing state to disk."""
+        if self._model is None or self._datamodule is None:
             raise RuntimeError("Model must be fit before saving")
         torch.save(
             {
                 "state_dict": self._model.state_dict(),
+                "config": dataclasses.asdict(self.config),
                 "view_input_dims": self._model.view_input_dims,
                 "conditional_dim": self._model.conditional_dim,
                 "n_batches": self._model.n_batches,
+                "datamodule": self._datamodule.state_dict(),
             },
             str(path),
         )
 
     @classmethod
-    def load(cls, path: str | Path, config: MOSAConfig) -> MOSAVAEModel:
+    def load(cls, path: str | Path) -> MOSAVAEModel:
         """Load a saved model from disk.
 
         Parameters
         ----------
         path : str or Path
-            Path to saved checkpoint (produced by save()).
-        config : MOSAConfig
-            Config used to reconstruct the model architecture.
+            Path to checkpoint produced by save(). The config, architecture
+            dims, and preprocessing state are all restored from the file.
         """
-        checkpoint = torch.load(str(path))
+        checkpoint = torch.load(str(path), weights_only=True)
+
+        cfg = dict(checkpoint["config"])
+        views = {k: ViewConfig(**v) for k, v in cfg.pop("views").items()}
+        trainer = TrainerConfig(**cfg.pop("trainer"))
+        config = MOSAConfig(views=views, trainer=trainer, **cfg)
+
         instance = cls(config)
         instance._model = MOSAVAE(
             config=config,
@@ -225,4 +235,9 @@ class MOSAVAEModel(MultiOmicModel):
         )
         instance._model.load_state_dict(checkpoint["state_dict"])
         instance._model.eval()
+
+        dm = MOSADataModule(train_data=None, val_data=None, config=config)
+        dm.load_state_dict(checkpoint["datamodule"])
+        instance._datamodule = dm
+
         return instance

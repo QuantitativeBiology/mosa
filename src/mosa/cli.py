@@ -4,6 +4,7 @@ import argparse
 import logging
 import os
 import warnings
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,11 @@ def _setup_logging(debug: bool):
         logging.getLogger("asyncio").setLevel(logging.WARNING)
         logger.debug("Debug logging enabled")
     else:
-        logging.basicConfig(level=logging.WARNING)
+        logging.basicConfig(
+            level=logging.WARNING,
+            format="[%(levelname)s] %(message)s",
+        )
+        logging.getLogger("mosa").setLevel(logging.INFO)
         logging.getLogger("pytorch_lightning").setLevel(logging.WARNING)
 
 
@@ -85,10 +90,39 @@ def _train(args):
         val_data = dataset.subset(val_idx)
 
     model = MOSAVAEModel(config)
-    model.fit(train_data, val_data)
+    model.fit(train_data, val_data, resume_from=args.resume)
 
     if int(os.environ.get("LOCAL_RANK", 0)) == 0:
         logger.debug("Training complete")
+
+
+def _transform(args):
+    """Load a saved model and project data into the latent space."""
+    import pandas as pd
+
+    from mosa.data.io import load_mudata
+    from mosa.models.mosa import MOSAVAEModel
+
+    model = MOSAVAEModel.load(args.checkpoint)
+    dataset = load_mudata(
+        args.input,
+        list(model.config.views.keys()),
+        model.config.mask_layer_name,
+    )
+
+    out_dir = Path(args.output)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    z = model.transform(dataset)
+    pd.DataFrame(z, index=dataset.sample_names).to_parquet(out_dir / "latent.parquet")
+    print(f"Latent representations saved to {out_dir / 'latent.parquet'}")
+
+    if args.reconstruct:
+        recon = model.reconstruct(dataset)
+        for omic, arr in recon.items():
+            df = pd.DataFrame(arr, index=dataset.sample_names)
+            df.to_parquet(out_dir / f"recon_{omic}.parquet")
+        print(f"Reconstructions saved to {out_dir}/")
 
 
 def _plot(args):
@@ -147,7 +181,19 @@ def main():
 
     train_parser = subparsers.add_parser("train", help="Train a MOSA model")
     train_parser.add_argument("--config", required=True, help="Path to YAML config file")
+    train_parser.add_argument("--resume", default=None, metavar="CKPT",
+                              help="Resume training from a Lightning checkpoint (.ckpt)")
     train_parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
+
+    transform_parser = subparsers.add_parser(
+        "transform", help="Project data into the latent space using a saved model",
+    )
+    transform_parser.add_argument("--checkpoint", required=True, help="Path to saved model checkpoint (.pt)")
+    transform_parser.add_argument("--input", required=True, help="Path to .h5mu or .zarr input data")
+    transform_parser.add_argument("--output", required=True, help="Directory to write latent.parquet (and reconstructions)")
+    transform_parser.add_argument("--reconstruct", action="store_true",
+                                  help="Also write per-omic reconstruction parquets")
+    transform_parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
 
     plot_parser = subparsers.add_parser("plot", help="Generate diagnostic plots from training outputs")
     plot_parser.add_argument("--config", required=True, help="Path to YAML config file")
@@ -191,6 +237,8 @@ def main():
 
     if args.command == "train":
         _train(args)
+    elif args.command == "transform":
+        _transform(args)
     elif args.command == "plot":
         _plot(args)
     elif args.command == "convert":

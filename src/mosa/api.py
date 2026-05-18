@@ -68,5 +68,5 @@ class MultiOmicModel(ABC):
 
     @classmethod
     @abstractmethod
-    def load(cls, path: str | Path) -> MultiOmicModel:
+    def load(cls, path: str | Path, **kwargs) -> MultiOmicModel:
         """Load a saved model from disk."""

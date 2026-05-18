@@ -84,10 +84,13 @@ def _load_h5mu(
     mask_layer_name: str,
 ) -> MultiOmicDataset:
     """Load an h5mu file into a MultiOmicDataset."""
+    import time
     import mudata
 
-    logger.info("Loading MuData (h5mu) from %s", path)
+    logger.info("Loading MuData from %s", path)
+    t0 = time.perf_counter()
     mdata = mudata.read(path)
+    logger.debug("h5mu read took %.2fs", time.perf_counter() - t0)
     _verify_mudata_structure(mdata, view_names, mask_layer_name)
 
     views: dict[str, np.ndarray] = {}
@@ -95,6 +98,7 @@ def _load_h5mu(
     feature_names: dict[str, list[str]] = {}
 
     for view_name in view_names:
+        tv = time.perf_counter()
         adata = mdata.mod[view_name]
         X = adata.X
         if issparse(X):
@@ -114,8 +118,14 @@ def _load_h5mu(
         views[view_name] = X
         masks[view_name] = mask
         feature_names[view_name] = list(adata.var_names)
+        logger.debug("  view '%s': %d samples x %d features (%.2fs)",
+                     view_name, X.shape[0], X.shape[1], time.perf_counter() - tv)
 
     obs_df = mdata.obs.loc[:, ~mdata.obs.columns.str.match(r"^Unnamed")]
+    n_samples = len(obs_df)
+    view_summary = ", ".join(f"{k}: {v.shape[1]}" for k, v in views.items())
+    logger.info("Loaded %d samples — %s (%.2fs)",
+                n_samples, view_summary, time.perf_counter() - t0)
 
     return MultiOmicDataset(
         views=views,
@@ -131,7 +141,10 @@ def _load_zarr(
     mask_layer_name: str,
 ) -> MultiOmicDataset:
     """Load a zarr store into a MultiOmicDataset (all data read into memory)."""
-    logger.info("Loading MuData (zarr) from %s", path)
+    import time
+
+    logger.info("Loading MuData from %s", path)
+    t0 = time.perf_counter()
     store = zarr.open_group(path, mode="r")
 
     obs_group = store["obs"]
@@ -163,6 +176,11 @@ def _load_zarr(
         var_group = store[f"{mod_key}/var"]
         var_idx_key = _zarr_index_key(var_group)
         feature_names[view_name] = list(_read_zarr_column(var_group[var_idx_key]))
+
+    view_summary = ", ".join(f"{k}: {v.shape[1]}" for k, v in views.items())
+    n_samples = len(obs_df)
+    logger.info("Loaded %d samples — %s (%.2fs)",
+                n_samples, view_summary, time.perf_counter() - t0)
 
     return MultiOmicDataset(
         views=views,
