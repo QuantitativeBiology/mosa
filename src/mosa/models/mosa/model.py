@@ -79,7 +79,7 @@ class MOSAVAEModel(MultiOmicModel):
                     monitor="val/loss",
                     mode="min",
                     save_top_k=tc.checkpoint_top_k,
-                    save_last=True,
+                    save_weights_only=True,
                 ),
             )
 
