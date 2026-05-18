@@ -21,6 +21,22 @@ from mosa.models.mosa.vae.vae_module import MOSAVAE
 logger = logging.getLogger(__name__)
 
 
+class _LoggingModelCheckpoint(ModelCheckpoint):
+    """ModelCheckpoint that logs a line each time a checkpoint is written."""
+
+    def _save_checkpoint(self, trainer: "pl.Trainer", filepath: str) -> None:
+        import time
+
+        t0 = time.perf_counter()
+        super()._save_checkpoint(trainer, filepath)
+        logger.info(
+            "Saved checkpoint %s (epoch %d, %.1fs)",
+            Path(filepath).name,
+            trainer.current_epoch,
+            time.perf_counter() - t0,
+        )
+
+
 class MOSAVAEModel(MultiOmicModel):
     """MultiOmicModel implementation using the MOSAVAE architecture.
 
@@ -72,16 +88,17 @@ class MOSAVAEModel(MultiOmicModel):
                     mode="min",
                 ),
             )
-            callbacks.append(
-                ModelCheckpoint(
-                    dirpath=self.config.output_dir,
-                    filename="mosa-{epoch:03d}-{val/loss:.4f}",
-                    monitor="val/loss",
-                    mode="min",
-                    save_top_k=tc.checkpoint_top_k,
-                    save_weights_only=True,
-                ),
-            )
+            if tc.checkpoint_top_k != 0:
+                callbacks.append(
+                    _LoggingModelCheckpoint(
+                        dirpath=self.config.output_dir,
+                        filename="mosa-{epoch:03d}-{val/loss:.4f}",
+                        monitor="val/loss",
+                        mode="min",
+                        save_top_k=tc.checkpoint_top_k,
+                        save_weights_only=True,
+                    ),
+                )
 
         use_multi_gpu = isinstance(tc.devices, int) and tc.devices > 1
         trainer_kwargs = dict(
