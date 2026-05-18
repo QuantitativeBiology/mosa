@@ -110,15 +110,23 @@ class MOSAVAEModel(MultiOmicModel):
 
     def _save_outputs(self) -> None:
         """Save latent representations and reconstructions for all splits."""
+        import time
+
         output_dir = Path(self.config.output_dir)
         dm = self._datamodule
 
+        logger.info("Saving outputs to %s", output_dir)
+        t0 = time.perf_counter()
+
+        logger.info("Predicting on train split")
         self._save_split(dm.train_eval_dataloader(), output_dir / "train")
 
         val_loader = dm.val_dataloader()
         if val_loader is not None:
+            logger.info("Predicting on val split")
             self._save_split(val_loader, output_dir / "val")
 
+        logger.info("Predicting on full split")
         self._save_split(dm.full_dataloader(), output_dir / "full")
 
         if self.config.inference:
@@ -129,11 +137,14 @@ class MOSAVAEModel(MultiOmicModel):
                     f"target_batch '{target}' not in model_type categories: {categories}"
                 )
             target_idx = categories.index(target) if target else 0
+            logger.info("Predicting inference split with target_batch='%s'", target or categories[0])
             self._save_split(
                 dm.full_dataloader(),
                 output_dir / "inference",
                 force_source_id=target_idx,
             )
+
+        logger.info("Outputs saved in %.1fs", time.perf_counter() - t0)
 
     def _save_split(
         self,
@@ -142,13 +153,21 @@ class MOSAVAEModel(MultiOmicModel):
         force_source_id: int | None = None,
     ) -> None:
         """Run predict on a dataloader and write latent/recon parquet files."""
+        import time
+
         out_dir.mkdir(parents=True, exist_ok=True)
         n_batches = len(self._datamodule.batch_categories) if force_source_id is not None else None
-        results = self._model.predict(loader, force_source_id=force_source_id, n_batches=n_batches)
 
+        t = time.perf_counter()
+        results = self._model.predict(loader, force_source_id=force_source_id, n_batches=n_batches)
+        logger.debug("  predict %d samples in %.1fs", len(results["sample_names"]), time.perf_counter() - t)
+
+        t = time.perf_counter()
         pd.DataFrame(results["z"], index=results["sample_names"]).to_parquet(out_dir / "latent.parquet")
+        logger.debug("  wrote latent.parquet (%.1fs)", time.perf_counter() - t)
 
         for omic, recon in results["x_hat"].items():
+            t = time.perf_counter()
             scaler = self._datamodule.scalers.get(omic)
             if scaler is not None:
                 recon = scaler.inverse_transform(recon)
@@ -158,6 +177,7 @@ class MOSAVAEModel(MultiOmicModel):
             else:
                 df = pd.DataFrame(recon, index=results["sample_names"])
             df.to_parquet(out_dir / f"recon_{omic}.parquet")
+            logger.debug("  wrote recon_%s.parquet shape=%s (%.1fs)", omic, recon.shape, time.perf_counter() - t)
 
     def transform(self, data: MultiOmicDataset) -> np.ndarray:
         """Project data into the learned latent space."""
