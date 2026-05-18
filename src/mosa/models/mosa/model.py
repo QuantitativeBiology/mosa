@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import dataclasses
 import logging
 import os
 from pathlib import Path
@@ -48,6 +47,7 @@ class MOSAVAEModel(MultiOmicModel):
         self.config = config
         self._model: MOSAVAE | None = None
         self._datamodule: MOSADataModule | None = None
+        self._trainer: pl.Trainer | None = None
 
     def fit(
         self,
@@ -96,7 +96,7 @@ class MOSAVAEModel(MultiOmicModel):
                         monitor="val/loss",
                         mode="min",
                         save_top_k=tc.checkpoint_top_k,
-                        save_weights_only=True,
+                        save_last=True,
                     ),
                 )
 
@@ -119,8 +119,8 @@ class MOSAVAEModel(MultiOmicModel):
             trainer_kwargs["limit_val_batches"] = 0
             trainer_kwargs["num_sanity_val_steps"] = 0
 
-        trainer = pl.Trainer(**trainer_kwargs)
-        trainer.fit(self._model, self._datamodule, ckpt_path=str(resume_from) if resume_from else None)
+        self._trainer = pl.Trainer(**trainer_kwargs)
+        self._trainer.fit(self._model, self._datamodule, ckpt_path=str(resume_from) if resume_from else None)
 
         if int(os.environ.get("LOCAL_RANK", 0)) == 0:
             self._save_outputs()
@@ -231,34 +231,29 @@ class MOSAVAEModel(MultiOmicModel):
         return results["x_hat"]
 
     def save(self, path: str | Path) -> None:
-        """Save model weights, architecture dims, and preprocessing state to disk."""
-        if self._model is None or self._datamodule is None:
+        """Save model state to a Lightning checkpoint.
+
+        Delegates to trainer.save_checkpoint so the file is identical in
+        shape to the .ckpt files Lightning's ModelCheckpoint writes during
+        training. Both can be loaded with load() and used for inference.
+        """
+        if self._trainer is None:
             raise RuntimeError("Model must be fit before saving")
-        torch.save(
-            {
-                "state_dict": self._model.state_dict(),
-                "config": dataclasses.asdict(self.config),
-                "view_input_dims": self._model.view_input_dims,
-                "conditional_dim": self._model.conditional_dim,
-                "n_batches": self._model.n_batches,
-                "datamodule": self._datamodule.state_dict(),
-            },
-            str(path),
-        )
+        self._trainer.save_checkpoint(str(path))
 
     @classmethod
-    def load(cls, path: str | Path) -> MOSAVAEModel:
-        """Load a saved model from disk.
+    def load(cls, path: str | Path, **kwargs) -> MOSAVAEModel:
+        """Load a model from a Lightning checkpoint.
 
-        Parameters
-        ----------
-        path : str or Path
-            Path to checkpoint produced by save(). The config, architecture
-            dims, and preprocessing state are all restored from the file.
+        Accepts any Lightning .ckpt file: those written by save() and those
+        written automatically by ModelCheckpoint during training are
+        interchangeable. Config, arch dims, and preprocessing state are all
+        restored from the file.
         """
-        checkpoint = torch.load(str(path), weights_only=True)
+        checkpoint = torch.load(str(path), weights_only=False)
+        hp = checkpoint["hyper_parameters"]
 
-        cfg = dict(checkpoint["config"])
+        cfg = dict(hp["config"])
         views = {k: ViewConfig(**v) for k, v in cfg.pop("views").items()}
         trainer = TrainerConfig(**cfg.pop("trainer"))
         config = MOSAConfig(views=views, trainer=trainer, **cfg)
@@ -266,15 +261,17 @@ class MOSAVAEModel(MultiOmicModel):
         instance = cls(config)
         instance._model = MOSAVAE(
             config=config,
-            view_input_dims=checkpoint["view_input_dims"],
-            conditional_dim=checkpoint["conditional_dim"],
-            n_batches=checkpoint["n_batches"],
+            view_input_dims=hp["view_input_dims"],
+            conditional_dim=hp["conditional_dim"],
+            n_batches=hp["n_batches"],
         )
         instance._model.load_state_dict(checkpoint["state_dict"])
         instance._model.eval()
 
-        dm = MOSADataModule(train_data=None, val_data=None, config=config)
-        dm.load_state_dict(checkpoint["datamodule"])
-        instance._datamodule = dm
+        dm_key = MOSADataModule.__name__
+        if dm_key in checkpoint:
+            dm = MOSADataModule(train_data=None, val_data=None, config=config)
+            dm.load_state_dict(checkpoint[dm_key])
+            instance._datamodule = dm
 
         return instance
