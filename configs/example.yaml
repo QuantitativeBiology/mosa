@@ -111,3 +111,4 @@ trainer:
 output_dir: outputs
 inference: false        # if true, runs corrected inference by forcing all samples to target_batch
 target_batch: ""        # model_type value for corrected inference; empty uses the first category
+                        # e.g. "Organoid", "Cell Line", "Tumor"
