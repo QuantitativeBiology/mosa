@@ -17,8 +17,6 @@ _VALID_ACCELERATORS = ("auto", "cpu", "gpu", "mps")
 @dataclass
 class ViewConfig:
     name: str
-    input_dim: int = 0
-    output_dim: int = 0
     hidden_layer_dims: list[int] = field(default_factory=lambda: [512, 256])
     loss_type: str = "mean"
     dropout_p: float = 0.1
@@ -82,7 +80,6 @@ class TrainerConfig:
 class MOSAConfig:
     views: dict[str, ViewConfig] = field(default_factory=dict)
     trainer: TrainerConfig = field(default_factory=TrainerConfig)
-    conditional_dim: int = 0
     fusion_method: str = "concat"  # "concat" or "poe"
     joint_latent_dim: int = 64
     shared_hidden_layer_dims: list[int] = field(default_factory=list)  # intermediate dims for PoE shared head
@@ -112,7 +109,6 @@ class MOSAConfig:
     output_dir: str = "outputs"
     inference: bool = False
     target_batch: str = ""
-    n_batches: int = 0
 
     def __post_init__(self):
         # Coerce fields that YAML may parse as strings (e.g. "1e-5")

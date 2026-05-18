@@ -4,6 +4,7 @@ import argparse
 import logging
 import os
 import warnings
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +14,6 @@ def _setup_logging(debug: bool):
     warnings.filterwarnings("ignore", category=FutureWarning, module="mudata")
     warnings.filterwarnings("ignore", message="Cannot join columns with the same name", module="mudata")
     warnings.filterwarnings("ignore", message=".*LeafSpec.*is deprecated", module="pytorch_lightning")
-    warnings.filterwarnings("ignore", message=".*transfer_batch_to_device.*", module="pytorch_lightning")
     warnings.filterwarnings("ignore", message=".*batch_size.*ambiguous collection", module="pytorch_lightning")
     warnings.filterwarnings("ignore", message=".*tensorboardX.*", module="pytorch_lightning")
 
@@ -34,20 +34,23 @@ def _setup_logging(debug: bool):
         logging.getLogger("asyncio").setLevel(logging.WARNING)
         logger.debug("Debug logging enabled")
     else:
-        logging.basicConfig(level=logging.WARNING)
+        logging.basicConfig(
+            level=logging.WARNING,
+            format="[%(levelname)s] %(message)s",
+        )
+        logging.getLogger("mosa").setLevel(logging.INFO)
         logging.getLogger("pytorch_lightning").setLevel(logging.WARNING)
 
 
 def _train(args):
-    """Load config, build datamodule and model, and run training."""
-    import pytorch_lightning as pl
+    """Load config and data, split into train/val, and fit the model."""
+    import numpy as np
+    import pandas as pd
     import torch
-    from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
-    from pytorch_lightning.strategies import DDPStrategy
+    from sklearn.model_selection import train_test_split
 
-    from mosa.model.callbacks import SaveLatentAndReconCallback
-    from mosa.data.datamodule import MuDataDataModule
-    from mosa.model.mosavae import MOSAVAE
+    from mosa.data.io import load_mudata
+    from mosa.models.mosa import MOSAVAEModel
     from mosa.utils import load_config, seed_everything
 
     torch.set_float32_matmul_precision("high")
@@ -58,79 +61,68 @@ def _train(args):
 
     config = load_config(args.config)
     config.validate_paths()
-    logger.debug("Config loaded and validated from %s", args.config)
-    logger.debug("Config: %s", vars(config))
+    logger.debug("Config loaded from %s", args.config)
 
-    logger.debug("Setting random seed: %d", config.random_seed)
     seed_everything(config.random_seed)
 
-    logger.debug("Setting up data module")
-    datamodule = MuDataDataModule(config)
-    datamodule.setup()
-    logger.debug("Data module ready — train=%d, val=%d",
-                 len(datamodule.train_dataset) if datamodule.train_dataset else 0,
-                 len(datamodule.val_dataset) if datamodule.val_dataset else 0)
-
-    logger.debug("Building model (joint_latent_dim=%d, conditional_dim=%d)",
-                 config.joint_latent_dim, config.conditional_dim)
-    model = MOSAVAE(config)
-    logger.debug("Model:\n%s", model)
-
-    if datamodule.class_weights is not None:
-        model.class_weights = torch.tensor(
-            datamodule.class_weights, dtype=torch.float32
-        )
-        logger.debug("Class weights set: %s", datamodule.class_weights)
-    if datamodule.batch_categories:
-        model.model_type_names = datamodule.batch_categories
-        logger.debug("Model type names: %s", model.model_type_names)
-
-    tc = config.trainer
-    logger.debug(
-        "Configuring trainer (max_epochs=%d, accelerator=%s, devices=%s, precision=%s)",
-        config.num_epochs, tc.accelerator, tc.devices, tc.precision,
+    dataset = load_mudata(
+        config.data_path,
+        list(config.views.keys()),
+        config.mask_layer_name,
     )
-    has_val = config.test_size > 0
-    callbacks = [SaveLatentAndReconCallback(output_dir=config.output_dir)]
-    if has_val:
-        callbacks.append(
-            EarlyStopping(monitor="val/loss", patience=tc.early_stopping_patience, mode="min"),
+
+    train_data = dataset
+    val_data = None
+    if config.test_size > 0:
+        label_codes = pd.Categorical(
+            dataset.metadata["model_type"],
+            categories=sorted(dataset.metadata["model_type"].unique()),
+            ordered=True,
+        ).codes
+
+        train_idx, val_idx = train_test_split(
+            np.arange(dataset.n_samples),
+            test_size=config.test_size,
+            random_state=config.random_seed,
+            stratify=label_codes,
         )
-        callbacks.append(
-            ModelCheckpoint(
-                dirpath=config.output_dir,
-                filename="mosa-{epoch:03d}-{val/loss:.4f}",
-                monitor="val/loss",
-                mode="min",
-                save_top_k=tc.checkpoint_top_k,
-            ),
-        )
+        train_data = dataset.subset(train_idx)
+        val_data = dataset.subset(val_idx)
 
-    use_multi_gpu = isinstance(tc.devices, int) and tc.devices > 1
-    trainer_kwargs = dict(
-        max_epochs=config.num_epochs,
-        callbacks=callbacks,
-        default_root_dir=config.output_dir,
-        accelerator=tc.accelerator,
-        devices=tc.devices,
-        precision=tc.precision,
-        gradient_clip_val=tc.gradient_clip_val,
-        accumulate_grad_batches=tc.accumulate_grad_batches,
-        log_every_n_steps=tc.log_every_n_steps,
-        sync_batchnorm=use_multi_gpu,
-    )
-    if use_multi_gpu:
-        trainer_kwargs["strategy"] = DDPStrategy(find_unused_parameters=True)
-    if not has_val:
-        trainer_kwargs["limit_val_batches"] = 0
-        trainer_kwargs["num_sanity_val_steps"] = 0
+    model = MOSAVAEModel(config)
+    model.fit(train_data, val_data, resume_from=args.resume)
 
-    trainer = pl.Trainer(**trainer_kwargs)
-
-    logger.debug("Starting training")
-    trainer.fit(model, datamodule)
-    if trainer.is_global_zero:
+    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
         logger.debug("Training complete")
+
+
+def _transform(args):
+    """Load a saved model and project data into the latent space."""
+    import pandas as pd
+
+    from mosa.data.io import load_mudata
+    from mosa.models.mosa import MOSAVAEModel
+
+    model = MOSAVAEModel.load(args.checkpoint)
+    dataset = load_mudata(
+        args.input,
+        list(model.config.views.keys()),
+        model.config.mask_layer_name,
+    )
+
+    out_dir = Path(args.output)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    z = model.transform(dataset)
+    pd.DataFrame(z, index=dataset.sample_names).to_parquet(out_dir / "latent.parquet")
+    print(f"Latent representations saved to {out_dir / 'latent.parquet'}")
+
+    if args.reconstruct:
+        recon = model.reconstruct(dataset)
+        for omic, arr in recon.items():
+            df = pd.DataFrame(arr, index=dataset.sample_names)
+            df.to_parquet(out_dir / f"recon_{omic}.parquet")
+        print(f"Reconstructions saved to {out_dir}/")
 
 
 def _plot(args):
@@ -189,7 +181,19 @@ def main():
 
     train_parser = subparsers.add_parser("train", help="Train a MOSA model")
     train_parser.add_argument("--config", required=True, help="Path to YAML config file")
+    train_parser.add_argument("--resume", default=None, metavar="CKPT",
+                              help="Resume training from a Lightning checkpoint (.ckpt)")
     train_parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
+
+    transform_parser = subparsers.add_parser(
+        "transform", help="Project data into the latent space using a saved model",
+    )
+    transform_parser.add_argument("--checkpoint", required=True, help="Path to saved model checkpoint (.pt)")
+    transform_parser.add_argument("--input", required=True, help="Path to .h5mu or .zarr input data")
+    transform_parser.add_argument("--output", required=True, help="Directory to write latent.parquet (and reconstructions)")
+    transform_parser.add_argument("--reconstruct", action="store_true",
+                                  help="Also write per-omic reconstruction parquets")
+    transform_parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
 
     plot_parser = subparsers.add_parser("plot", help="Generate diagnostic plots from training outputs")
     plot_parser.add_argument("--config", required=True, help="Path to YAML config file")
@@ -233,6 +237,8 @@ def main():
 
     if args.command == "train":
         _train(args)
+    elif args.command == "transform":
+        _transform(args)
     elif args.command == "plot":
         _plot(args)
     elif args.command == "convert":

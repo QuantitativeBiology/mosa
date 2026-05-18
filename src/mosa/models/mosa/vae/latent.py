@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 import torch
 import torch.nn as nn
 
-from mosa.model.layers import MLP
+from mosa.models.mosa.vae.layers import MLP
 
 _REGISTRY: dict[str, type] = {}
 

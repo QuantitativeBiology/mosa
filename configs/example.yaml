@@ -1,136 +1,114 @@
 # MOSA example configuration
-# Copy this file, adjust the data_path, and add or remove views to match your dataset.
+# Copy this file and adjust data_path and views to match your dataset.
 #
-# To convert existing CSVs to MuData format:
+# Docs:
+#   Getting started    docs/getting-started.md
+#   Configuration ref  docs/configuration.md
+#   Data pipeline      docs/data-pipeline.md
+#   Architecture       docs/architecture.md
+#
+# To convert CSVs to MuData:
 #   mosa convert --samplesheet data/samplesheet.csv \
 #                --view transcriptomics:data/transcriptomics.csv \
-#                --view methylation:data/methylation.csv \
 #                --output data/dataset.h5mu
 
-# ──────────────────────────────────────────────────────────────────
-# DATA (MuData format)
-# ──────────────────────────────────────────────────────────────────
 
-# Path to MuData file (.h5mu or .zarr format)
+# Data
+
 data_path: data/dataset.h5mu
-
-# Layer name containing per-feature masks (required)
 mask_layer_name: mask
+scaler_sample_frac: 1.0   # fraction of training data used to fit StandardScaler
 
-# Each entry under `views` defines one omic modality.
-# The view name must match a modality name in the MuData file (.mod keys)
-#
-#   input_dim         – set automatically after loading; leave 0
-#   output_dim        – reconstruction target dim; 0 mirrors input_dim
-#   hidden_layer_dims – encoder/decoder layer sizes; the last value is the
-#                       per-view latent dim before the joint bottleneck
-#   loss_type         – "mean" (MSE averaged over present features) or
-#                       "macro" (class-balanced MSE weighted by model_type)
-#   dropout_p         – feature dropout rate inside encoder/decoder layers
-#   discrete          – true for count/integer data (reserved for future NB loss)
-
+# View names must match modality keys in the MuData file.
+# hidden_layer_dims: encoder/decoder MLP sizes; last value sets the per-view embedding dim.
+# loss_type: "mean" for standard MSE, "macro" for model_type-balanced MSE.
+# discrete: true skips z-score normalisation (for count/integer data).
 views:
   transcriptomics:
-    input_dim: 0
-    output_dim: 0
     hidden_layer_dims: [512, 256]
     loss_type: mean
     dropout_p: 0.1
     discrete: false
 
-  # Add more views here, matching modality names in MuData file:
   # methylation:
-  #   input_dim: 0
-  #   output_dim: 0
   #   hidden_layer_dims: [512, 256]
   #   loss_type: mean
   #   dropout_p: 0.1
   #   discrete: false
 
-# Conditional vectors are concatenated to encoder and decoder inputs.
-# They are built automatically from .obs columns in the MuData file:
-# - model_type column: always included (batch correction)
-# - tissue column: always included if present
-# - mutation_* columns: always included if present (columns prefixed "mutation_")
-conditional_dim: 0                  # set automatically after loading; leave 0
+# Conditionals are built from .obs automatically: model_type (always),
+# tissue (if use_tissue), mutation_* columns (if use_mutations).
 use_tissue: false
 use_mutations: false
 
-# ──────────────────────────────────────────────────────────────────
-# TRAINING
-# ──────────────────────────────────────────────────────────────────
 
-fusion_method: concat       # "concat" (concatenation) or "poe" (Product of Experts)
-joint_latent_dim: 64        # dimensionality of the shared latent bottleneck
-view_dropout_prob: 0.2      # probability of zeroing an entire view during training
-shared_hidden_layer_dims: []  # intermediate dims for PoE shared head; ignored if fusion_method is "concat"; [] if direct shared head (no hidden layers)
+# Model
 
-# Loss weights — set a weight to 0.0 to disable that term
-kl_weight: 0.01             # β scaling the KL divergence term
-contrastive_weight: 0.0     # tissue-supervised contrastive loss on the latent mean
-adv_weight: 0.0             # adversarial batch-correction loss; also enables the discriminator
+fusion_method: concat   # concat or poe
+joint_latent_dim: 64
+view_dropout_prob: 0.2
+shared_hidden_layer_dims: []  # PoE only; hidden dims before the shared projection head
+
+
+# KL term
+# Optional linear warmup from kl_weight to kl_weight_final over kl_warmup_epochs.
+
+kl_weight: 0.01
+use_kl_scheduler: false
+kl_weight_final: 0.01
+kl_warmup_epochs: 0
+
+
+# Contrastive term
+
+contrastive_weight: 0.0   # tissue-supervised cosine contrastive loss; 0 disables
+
+
+# Adversarial term
+# adv_weight > 0 enables the discriminator and uses adv_learning_rate.
+
+adv_weight: 0.0
+adv_learning_rate: 0.001
+
+
+# Optimiser
 
 learning_rate: 0.001
+lr_scheduler: none      # none or step
+lr_step_size: 100       # epochs between StepLR decay steps
+lr_gamma: 0.5           # multiplicative decay factor
+
+
+# Training loop
+
 num_epochs: 200
 batch_size: 64
-weighted_random_sampler: false    # use WeightedRandomSampler to balance model_type in training; set to false to disable
-test_size: 0.1              # fraction held out as validation set; set to 0 to use all data for training
+test_size: 0.1          # validation fraction; 0 disables validation and early stopping
+weighted_random_sampler: false
 random_seed: 42
+n_folds: 5              # reserved for future cross-validation; unused in single-run mode
 
-n_folds: 5                  # reserved for future cross-validation support; not used in single-run mode
-n_batches: 0                # set automatically from the model_type column; leave 0
 
-# ──────────────────────────────────────────────────────────────────
-# TRAINER  (PyTorch Lightning)
-# ──────────────────────────────────────────────────────────────────
+# Trainer
 
 trainer:
-  # Hardware — "auto" lets PyTorch Lightning pick the best available device
-  accelerator: auto         # auto | cpu | gpu | mps
-  devices: auto             # auto | integer number of devices (e.g. 1 for single GPU)
-  precision: "32"           # "32" (full) | "16-mixed" (FP16) | "bf16-mixed" (BF16)
+  accelerator: auto     # auto, cpu, gpu, mps
+  devices: auto         # auto or integer
+  precision: "32"       # 32, 16-mixed, bf16-mixed
 
-  # Optimisation
-  gradient_clip_val: 0.0    # maximum gradient norm; 0 disables clipping
-  accumulate_grad_batches: 1 # increase to simulate a larger effective batch size
+  gradient_clip_val: 0.0
+  accumulate_grad_batches: 1
 
-  # Logging & checkpointing
-  log_every_n_steps: 50     # how often (in steps) metrics are written to the log
-  early_stopping_patience: 20  # stop after this many epochs with no val/loss improvement
-  checkpoint_top_k: 3       # number of best checkpoints to keep on disk
+  log_every_n_steps: 50
+  early_stopping_patience: 20
+  checkpoint_top_k: 3
 
-  # DataLoader
-  num_workers: 0            # parallel data-loading workers; 0 = main process only
-                            # set to 4–8 for large datasets to avoid GPU starvation
+  num_workers: 0        # set to 4-8 for large datasets
 
-# ──────────────────────────────────────────────────────────────────
-# OUTPUT
-# ──────────────────────────────────────────────────────────────────
 
-# Root directory for all saved artefacts.
-#
-# Optional corrected inference (mvae_adv-style):
-#   inference: true  -> run corrected inference by forcing all samples to one model_type
-#   target_batch: ""  -> if empty, first model_type category is used
-#                        otherwise set to one existing model_type value
-#
-# After training the following files are written:
-#
-#   <output_dir>/
-#     mosa-<epoch>-<val_loss>.ckpt        – model checkpoints (top-k by val/loss)
-#     train/
-#       latent.csv                        – joint latent z for the training split
-#       recon_<omic>.csv                  – reconstructed features for the training split
-#     val/
-#       latent.csv                        – joint latent z for the validation split
-#       recon_<omic>.csv                  – reconstructed features for the validation split
-#     full/
-#       latent.csv                        – joint latent z for all samples (original conditionals)
-#       recon_<omic>.csv                  – reconstructed features for all samples (original conditionals)
-#     inference/                           – only when inference: true
-#       latent.csv                        – corrected latent z for all samples
-#       recon_<omic>.csv                  – corrected reconstructed features for all samples
+# Output
 
 output_dir: outputs
-inference: false
-target_batch: ""
+inference: false        # if true, runs corrected inference by forcing all samples to target_batch
+target_batch: ""        # model_type value for corrected inference; empty uses the first category
+                        # e.g. "Organoid", "Cell Line", "Tumor"

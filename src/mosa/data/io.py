@@ -1,12 +1,16 @@
-"""MuData I/O: CSV-to-MuData conversion and file inspection."""
+"""MuData I/O: CSV-to-MuData conversion, file loading, and inspection."""
 
 import logging
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import zarr
 from anndata import AnnData
 from mudata import MuData
+from scipy.sparse import issparse
+
+from mosa.data.dataset import MultiOmicDataset
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +18,204 @@ logger = logging.getLogger(__name__)
 ORIENTATION_ERROR_THRESHOLD = 0.5
 # Fraction of samplesheet IDs found in CSV column names below which a warning is emitted.
 ORIENTATION_WARN_THRESHOLD = 0.10
+
+
+# Zarr encoding helpers (used by load_mudata and LazyZarrDataset)
+
+def _zarr_index_key(group) -> str:
+    """Return the key that stores the index for a zarr obs/var group.
+
+    AnnData/MuData zarr stores record the index column name in the ``_index``
+    attribute. The data lives under ``group[attrs["_index"]]``, not literally
+    under ``group["_index"]`` (unless the DataFrame index was named ``_index``).
+    """
+    return group.attrs.get("_index", "_index")
+
+
+def _read_zarr_column(group) -> np.ndarray:
+    """Decode a single obs/var column from MuData's zarr encoding."""
+    if isinstance(group, zarr.Array):
+        return np.asarray(group)
+
+    keys = set(group.keys())
+    if {"categories", "codes"} <= keys:
+        cats_node = group["categories"]
+        if isinstance(cats_node, zarr.Group) and "values" in cats_node:
+            cats = np.asarray(cats_node["values"])
+        else:
+            cats = np.asarray(cats_node)
+        codes = np.asarray(group["codes"])
+        return cats[codes]
+
+    if "values" in keys:
+        return np.asarray(group["values"])
+
+    raise ValueError(f"Cannot decode zarr column with keys {keys}")
+
+
+# MuData loading
+
+def _verify_mudata_structure(
+    mdata,
+    view_names: list[str],
+    mask_layer_name: str,
+) -> None:
+    """Validate MuData structure has required columns and views. Raises ValueError."""
+    if "model_type" not in mdata.obs.columns:
+        raise ValueError(
+            f"MuData .obs missing 'model_type' column. "
+            f"Available: {list(mdata.obs.columns)}"
+        )
+    for view_name in view_names:
+        if view_name not in mdata.mod:
+            raise ValueError(
+                f"View '{view_name}' not in MuData. Available: {list(mdata.mod.keys())}"
+            )
+        if mask_layer_name not in mdata.mod[view_name].layers:
+            raise ValueError(
+                f"Mask layer '{mask_layer_name}' not in '{view_name}'. "
+                f"Available: {list(mdata.mod[view_name].layers.keys())}"
+            )
+
+
+def _load_h5mu(
+    path: str,
+    view_names: list[str],
+    mask_layer_name: str,
+) -> MultiOmicDataset:
+    """Load an h5mu file into a MultiOmicDataset."""
+    import time
+    import mudata
+
+    logger.info("Loading MuData from %s", path)
+    t0 = time.perf_counter()
+    mdata = mudata.read(path)
+    logger.debug("h5mu read took %.2fs", time.perf_counter() - t0)
+    _verify_mudata_structure(mdata, view_names, mask_layer_name)
+
+    views: dict[str, np.ndarray] = {}
+    masks: dict[str, np.ndarray] = {}
+    feature_names: dict[str, list[str]] = {}
+
+    for view_name in view_names:
+        tv = time.perf_counter()
+        adata = mdata.mod[view_name]
+        X = adata.X
+        if issparse(X):
+            X = X.toarray()
+        X = X.astype(np.float32)
+
+        mask = adata.layers[mask_layer_name]
+        if issparse(mask):
+            mask = mask.toarray()
+        mask = mask.astype(bool)
+
+        if view_name in mdata.obsm:
+            presence = np.asarray(mdata.obsm[view_name]).flatten().astype(bool)
+            X[~presence] = 0.0
+            mask[~presence] = False
+
+        views[view_name] = X
+        masks[view_name] = mask
+        feature_names[view_name] = list(adata.var_names)
+        logger.debug("  view '%s': %d samples x %d features (%.2fs)",
+                     view_name, X.shape[0], X.shape[1], time.perf_counter() - tv)
+
+    obs_df = mdata.obs.loc[:, ~mdata.obs.columns.str.match(r"^Unnamed")]
+    n_samples = len(obs_df)
+    view_summary = ", ".join(f"{k}: {v.shape[1]}" for k, v in views.items())
+    logger.info("Loaded %d samples — %s (%.2fs)",
+                n_samples, view_summary, time.perf_counter() - t0)
+
+    return MultiOmicDataset(
+        views=views,
+        masks=masks,
+        metadata=obs_df.copy(),
+        feature_names=feature_names,
+    )
+
+
+def _load_zarr(
+    path: str,
+    view_names: list[str],
+    mask_layer_name: str,
+) -> MultiOmicDataset:
+    """Load a zarr store into a MultiOmicDataset (all data read into memory)."""
+    import time
+
+    logger.info("Loading MuData from %s", path)
+    t0 = time.perf_counter()
+    store = zarr.open_group(path, mode="r")
+
+    obs_group = store["obs"]
+    obs_idx_key = _zarr_index_key(obs_group)
+    sample_names = list(_read_zarr_column(obs_group[obs_idx_key]))
+
+    obs_dict: dict[str, np.ndarray] = {
+        "model_type": _read_zarr_column(obs_group["model_type"])
+    }
+    if "tissue" in obs_group:
+        obs_dict["tissue"] = _read_zarr_column(obs_group["tissue"])
+    for key in obs_group:
+        if key.startswith("mutation_"):
+            obs_dict[key] = _read_zarr_column(obs_group[key])
+    obs_df = pd.DataFrame(obs_dict, index=sample_names)
+
+    views: dict[str, np.ndarray] = {}
+    masks: dict[str, np.ndarray] = {}
+    feature_names: dict[str, list[str]] = {}
+
+    for view_name in view_names:
+        mod_key = f"mod/{view_name}"
+        if mod_key not in store:
+            raise ValueError(f"View '{view_name}' not found in zarr store at {path}")
+
+        views[view_name] = store[f"{mod_key}/X"][:].astype(np.float32)
+        masks[view_name] = store[f"{mod_key}/layers/{mask_layer_name}"][:].astype(bool)
+
+        var_group = store[f"{mod_key}/var"]
+        var_idx_key = _zarr_index_key(var_group)
+        feature_names[view_name] = list(_read_zarr_column(var_group[var_idx_key]))
+
+    view_summary = ", ".join(f"{k}: {v.shape[1]}" for k, v in views.items())
+    n_samples = len(obs_df)
+    logger.info("Loaded %d samples — %s (%.2fs)",
+                n_samples, view_summary, time.perf_counter() - t0)
+
+    return MultiOmicDataset(
+        views=views,
+        masks=masks,
+        metadata=obs_df,
+        feature_names=feature_names,
+    )
+
+
+def load_mudata(
+    path: str,
+    view_names: list[str],
+    mask_layer_name: str = "mask",
+) -> MultiOmicDataset:
+    """Load a MuData file (h5mu or zarr) into a MultiOmicDataset.
+
+    This is the public data loading API. No scaling, no splitting, no config
+    mutation — just reads the file and returns the generic container.
+
+    Supports both h5mu and zarr formats (detected from path extension or
+    directory structure).
+
+    Parameters
+    ----------
+    path : str
+        Path to .h5mu file or zarr directory.
+    view_names : list of str
+        Modality names to load (must exist in the file).
+    mask_layer_name : str
+        Name of the per-feature presence mask layer.
+    """
+    p = Path(path)
+    if p.suffix == ".zarr" or (p.is_dir() and p.suffix != ".h5mu"):
+        return _load_zarr(path, view_names, mask_layer_name)
+    return _load_h5mu(path, view_names, mask_layer_name)
 
 
 # Validation helpers

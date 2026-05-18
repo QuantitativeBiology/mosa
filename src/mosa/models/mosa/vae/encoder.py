@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from mosa.model.layers import MLP
+from mosa.models.mosa.vae.layers import MLP
 
 
 class ViewDropout(nn.Module):
