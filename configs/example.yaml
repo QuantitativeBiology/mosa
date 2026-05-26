@@ -17,7 +17,9 @@
 
 data_path: data/dataset.h5mu
 mask_layer_name: mask
-scaler_sample_frac: 1.0   # fraction of training data used to fit StandardScaler
+scaler_sample_frac: 1.0   # fraction of training samples used to fit the StandardScaler.
+                          # Only relevant for zarr: reduces memory/I/O when fitting on the
+                          # full training. No effect for h5mu.
 
 # View names must match modality keys in the MuData file.
 # hidden_layer_dims: encoder/decoder MLP sizes; last value sets the per-view embedding dim.

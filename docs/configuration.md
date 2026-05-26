@@ -135,7 +135,7 @@ lr_gamma: 0.5                # multiplicative decay factor
 ```yaml
 data_path: data/data.h5mu        # path to MuData file (.h5mu or .zarr)
 mask_layer_name: mask            # layer name in .layers for per-feature masks
-scaler_sample_frac: 1.0          # fraction of training data to fit scaler on
+scaler_sample_frac: 1.0          # zarr only: fraction of training samples for fitting StandardScaler
 
 num_epochs: 200
 batch_size: 64
@@ -148,7 +148,7 @@ random_seed: 42
 |--------|---------|-------------|
 | `data_path` | `""` | Path to MuData file. See [Data Pipeline](data-pipeline.md#converting-csvs-to-mudata). |
 | `mask_layer_name` | `"mask"` | Layer name in `.layers` for per-feature boolean masks. |
-| `scaler_sample_frac` | `1.0` | Fraction of training data used to fit StandardScaler (e.g., 0.5 for large datasets). |
+| `scaler_sample_frac` | `1.0` | Fraction of training samples used to fit the StandardScaler. Only relevant for zarr datasets — reduces memory and I/O when fitting on millions of samples is expensive (e.g. `0.1`). Has no effect for h5mu, which is already in memory. |
 | `num_epochs` | `200` | Maximum training epochs. |
 | `batch_size` | `64` | Samples per batch. |
 | `test_size` | `0.1` | Validation split fraction. 0 disables validation and early stopping. |
