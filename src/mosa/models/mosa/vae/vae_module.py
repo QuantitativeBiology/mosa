@@ -78,8 +78,10 @@ class MOSAVAE(pl.LightningModule):
             "n_batches": n_batches,
         })
 
-        self.view_latent_dims: dict[str, int] = {
-            name: vc.hidden_layer_dims[-1] for name, vc in config.views.items()
+        use_shared_head = config.fusion_method != "poe" or config.poe_use_shared_head
+        self.view_encoder_dims: dict[str, int] = {
+            name: (vc.hidden_layer_dims[-1] if use_shared_head else config.joint_latent_dim * 2)
+            for name, vc in config.views.items()
         }
         self.view_order = list(config.views.keys())
 
@@ -91,9 +93,10 @@ class MOSAVAE(pl.LightningModule):
                 input_dim=view_input_dims[name],
                 cond_dim=conditional_dim,
                 hidden_dims=vc.hidden_layer_dims,
-                latent_dim=self.view_latent_dims[name],
+                latent_dim=self.view_encoder_dims[name],
                 dropout_p=vc.dropout_p,
                 view_dropout_p=config.view_dropout_prob,
+                output_activation=nn.PReLU if use_shared_head else None,
             )
             self.decoders[name] = OmicDecoder(
                 output_dim=view_input_dims[name],
@@ -105,12 +108,15 @@ class MOSAVAE(pl.LightningModule):
 
         # Joint latent space (fusion method selected via config)
         self.latent_space = BaseLatentSpace.create(
-            config.fusion_method, self.view_latent_dims, config.joint_latent_dim,
+            config.fusion_method,
+            self.view_encoder_dims,
+            config.joint_latent_dim,
             config.shared_hidden_layer_dims,
+            use_shared_head=config.poe_use_shared_head,
         )
 
         logger.debug("Encoders: %s",
-                      {n: f"{view_input_dims[n]}->{self.view_latent_dims[n]}" for n in config.views})
+                      {n: f"{view_input_dims[n]}->{self.view_encoder_dims[n]}" for n in config.views})
         logger.debug("Decoders: %s",
                       {n: f"{config.joint_latent_dim}->{view_input_dims[n]}" for n in config.views})
         logger.debug("Latent space: %s -> joint_latent_dim=%d",

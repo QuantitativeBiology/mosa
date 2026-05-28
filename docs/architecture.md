@@ -62,7 +62,13 @@ mu     = linear_mu(concat)                        # [batch, joint_latent_dim]
 logvar = linear_logvar(concat)                    # [batch, joint_latent_dim]
 ```
 
-Product of Experts (`fusion_method: poe`) has each view produce its own mu and logvar through a shared projection head, combined via precision-weighted averaging. An isotropic N(0, I) prior acts as an additional expert so the posterior remains well-defined when views are missing:
+Product of Experts (`fusion_method: poe`) supports two encoder-to-posterior variants:
+
+`poe_use_shared_head: true` means each view encoder stops at a per-view embedding, typically `hidden_layer_dims[-1]`, and a shared projection head turns that embedding into `mu` and `logvar`.
+
+`poe_use_shared_head: false` means each view encoder emits `mu` and `logvar` directly with a final linear layer of size `2 * joint_latent_dim`, and PoE combines those per-view posteriors via precision-weighted averaging.
+
+An isotropic N(0, I) prior acts as an additional expert so the posterior remains well-defined when views are missing:
 
 ```
 For each view i:
@@ -74,7 +80,7 @@ Joint mu         = sum(mu_i * precision_i * mask_i) / joint_precision
 Joint logvar     = -log(joint_precision)
 ```
 
-PoE requires all views to have the same last hidden dimension so they can share the projection head.
+PoE with a shared head requires all views to have the same last hidden dimension so they can share the projection head. In that case, the shared head itself has no activation on its output layer. Direct per-view `mu/logvar` output only requires that each encoder emits a vector of size `2 * joint_latent_dim`, again with no activation on the final layer that produces the statistics.
 
 ### Decode (per-view)
 

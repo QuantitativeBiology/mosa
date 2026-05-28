@@ -52,12 +52,21 @@ class BaseLatentSpace(ABC, nn.Module):
         return mu
 
     @classmethod
-    def create(cls, method: str, view_dims: dict[str, int], latent_dim: int, shared_hidden_dims: list[int] | None = None) -> BaseLatentSpace:
+    def create(
+        cls,
+        method: str,
+        view_dims: dict[str, int],
+        latent_dim: int,
+        shared_hidden_dims: list[int] | None = None,
+        use_shared_head: bool = True,
+    ) -> BaseLatentSpace:
         if method not in _REGISTRY:
             raise ValueError(
                 f"Unknown fusion method '{method}'. "
                 f"Available: {list(_REGISTRY.keys())}"
             )
+        if method == "poe":
+            return _REGISTRY[method](view_dims, latent_dim, shared_hidden_dims, use_shared_head)
         return _REGISTRY[method](view_dims, latent_dim, shared_hidden_dims)
 
 
@@ -87,9 +96,20 @@ class ConcatLatentSpace(BaseLatentSpace):
 class PoELatentSpace(BaseLatentSpace):
     """Product of Experts: fuses per-view Gaussians via precision-weighted averaging.
 
-    Each view projects to mu/logvar through a shared head, then combined
-    with an isotropic N(0, I) prior.
+    Each view can either project to mu/logvar through a shared head or emit
+    mu/logvar directly. The per-view posteriors are then combined with an
+    isotropic N(0, I) prior.
     """
+
+    def __init__(
+        self,
+        view_dims: dict[str, int],
+        latent_dim: int,
+        shared_hidden_dims: list[int] | None = None,
+        use_shared_head: bool = True,
+    ):
+        self.use_shared_head = use_shared_head
+        super().__init__(view_dims, latent_dim, shared_hidden_dims)
 
     EPS = 1e-8
 
@@ -102,23 +122,29 @@ class PoELatentSpace(BaseLatentSpace):
             )
         shared_dim = next(iter(dims))
 
-        # Build layer sizes: input -> intermediate dims -> 2*latent_dim (mu, logvar)
-        layer_sizes = [shared_dim] + self.shared_hidden_dims + [self.latent_dim * 2]
+        if self.use_shared_head:
+            # Build layer sizes: input -> intermediate dims -> 2*latent_dim (mu, logvar)
+            layer_sizes = [shared_dim] + self.shared_hidden_dims + [self.latent_dim * 2]
 
-        self.shared_head = MLP(
-            layer_sizes=layer_sizes,
-            dropout_p=0.0,
-            use_batch_norm=True,
-            activation=nn.PReLU,
-            output_activation=None,
-            bn_momentum=0.01,
-            bn_eps=0.001,
-        )
+            self.shared_head = MLP(
+                layer_sizes=layer_sizes,
+                dropout_p=0.0,
+                use_batch_norm=True,
+                activation=nn.PReLU,
+                output_activation=None,
+                bn_momentum=0.01,
+                bn_eps=0.001,
+            )
+        elif shared_dim != self.latent_dim * 2:
+            raise ValueError(
+                "PoE with direct per-view mu/logvar requires encoder outputs to have "
+                f"dimension 2 * latent_dim ({self.latent_dim * 2}), got {shared_dim}"
+            )
 
     def _project_view(
         self, embedding: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        stats = self.shared_head(embedding)
+        stats = self.shared_head(embedding) if self.use_shared_head else embedding
         return stats.split(self.latent_dim, dim=1)
 
     def forward(

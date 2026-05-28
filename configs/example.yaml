@@ -50,6 +50,7 @@ fusion_method: concat   # concat or poe
 joint_latent_dim: 64
 view_dropout_prob: 0.2
 shared_hidden_layer_dims: []  # PoE only; hidden dims before the shared projection head
+poe_use_shared_head: true     # PoE only; true = shared head, false = direct mu/logvar from each encoder
 
 
 # KL term

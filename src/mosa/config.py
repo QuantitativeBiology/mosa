@@ -83,6 +83,7 @@ class MOSAConfig:
     fusion_method: str = "concat"  # "concat" or "poe"
     joint_latent_dim: int = 64
     shared_hidden_layer_dims: list[int] = field(default_factory=list)  # intermediate dims for PoE shared head
+    poe_use_shared_head: bool = True  # PoE: True = shared head, False = direct mu/logvar per view
     view_dropout_prob: float = 0.2
     kl_weight: float = 0.01
     kl_weight_final: float = 0.01
@@ -156,7 +157,7 @@ class MOSAConfig:
             )
 
         # --- Cross-field validation ---
-        if self.fusion_method == "poe" and self.views:
+        if self.fusion_method == "poe" and self.views and self.poe_use_shared_head:
             last_dims = {name: vc.hidden_layer_dims[-1] for name, vc in self.views.items()}
             if len(set(last_dims.values())) > 1:
                 raise ValueError(

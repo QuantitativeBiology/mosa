@@ -38,6 +38,7 @@ class OmicEncoder(nn.Module):
         dropout_p: float = 0.1,
         view_dropout_p: float = 0.0,
         use_batch_norm: bool = True,
+        output_activation: type[nn.Module] | None = nn.PReLU,
     ):
         super().__init__()
 
@@ -48,7 +49,7 @@ class OmicEncoder(nn.Module):
             dropout_p=dropout_p,
             use_batch_norm=use_batch_norm,
             activation=nn.PReLU,
-            output_activation=nn.PReLU,
+            output_activation=output_activation,
         )
 
     def forward(

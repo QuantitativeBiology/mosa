@@ -61,14 +61,16 @@ Controls how per-view embeddings are combined into a single latent representatio
 ```yaml
 fusion_method: concat       # "concat" or "poe"
 joint_latent_dim: 64        # dimensionality of the shared latent space
+poe_use_shared_head: true   # only relevant for poe: true = shared head, false = direct mu/logvar output
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `fusion_method` | `"concat"` | `"concat"`: concatenate all view embeddings, then project to mu/logvar. `"poe"`: Product of Experts via precision-weighted averaging with an N(0, I) prior. |
 | `joint_latent_dim` | `64` | Size of the latent vector `z`. |
+| `poe_use_shared_head` | `true` | Only used when `fusion_method: poe`. `true`: each view encoder outputs an embedding and a shared projection head produces `mu/logvar`. `false`: each view encoder ends with a linear layer that outputs `mu/logvar` directly. |
 
-When using `poe`, all views must have the same last value in `hidden_layer_dims`. Validated at config load time.
+When using `poe` with `poe_use_shared_head: true`, all views must have the same last value in `hidden_layer_dims`. Validated at config load time. The shared head then maps that embedding to `2 * joint_latent_dim` with a linear output layer. With `poe_use_shared_head: false`, each encoder must output a vector of size `2 * joint_latent_dim` directly, also with a linear output layer.
 
 ## Conditionals
 
