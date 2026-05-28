@@ -98,7 +98,8 @@ class PoELatentSpace(BaseLatentSpace):
 
     Each view can either project to mu/logvar through a shared head or emit
     mu/logvar directly. The per-view posteriors are then combined with an
-    isotropic N(0, I) prior.
+    isotropic N(0, I) prior, except when only one view is present, in which
+    case that view's posterior is used directly.
     """
 
     def __init__(
@@ -153,6 +154,11 @@ class PoELatentSpace(BaseLatentSpace):
         view_order: list[str],
         sample_masks: dict[str, torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if len(view_order) == 1:
+            mu, logvar = self._project_view(view_embeddings[view_order[0]])
+            z = self.reparameterize(mu, logvar)
+            return mu, logvar, z
+
         B = next(iter(view_embeddings.values())).shape[0]
         device = next(iter(view_embeddings.values())).device
 
