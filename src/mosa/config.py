@@ -106,6 +106,7 @@ class MOSAConfig:
     use_tissue: bool = True                 # include tissue as conditional (model_type always included)
     use_mutations: bool = True              # include mutation_* columns as conditionals
     weighted_random_sampler: bool = True    # use WeightedRandomSampler to balance model_type in training
+    use_adv_class_weights: bool = True      # use class weights in adversarial cross-entropy loss
     output_dir: str = "outputs"
     inference: bool = False
     target_batch: str = ""

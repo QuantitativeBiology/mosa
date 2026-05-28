@@ -71,6 +71,7 @@ contrastive_weight: 0.0   # tissue-supervised cosine contrastive loss; 0 disable
 
 adv_weight: 0.0
 adv_learning_rate: 0.001
+use_adv_class_weights: true
 
 
 # Optimiser
