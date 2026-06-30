@@ -7,7 +7,7 @@ import torch.nn as nn
 class MLP(nn.Module):
     """Reusable multi-layer perceptron.
 
-    Hidden layers: Linear -> BatchNorm1d (optional) -> Dropout (if > 0) -> Activation.
+    Hidden layers: Linear -> BatchNorm1d (optional) -> Activation -> Dropout (if > 0).
     Final layer:   Linear -> output_activation (optional).
     """
 
@@ -35,9 +35,9 @@ class MLP(nn.Module):
                             layer_sizes[i], momentum=bn_momentum, eps=bn_eps,
                         )
                     )
+                layers.append(activation())
                 if dropout_p > 0.0:
                     layers.append(nn.Dropout(p=dropout_p))
-                layers.append(activation())
             else:
                 if output_activation is not None:
                     layers.append(output_activation())
