@@ -188,7 +188,7 @@ def main():
     transform_parser = subparsers.add_parser(
         "transform", help="Project data into the latent space using a saved model",
     )
-    transform_parser.add_argument("--checkpoint", required=True, help="Path to saved model checkpoint (.pt)")
+    transform_parser.add_argument("--checkpoint", required=True, help="Path to saved model checkpoint (.ckpt)")
     transform_parser.add_argument("--input", required=True, help="Path to .h5mu or .zarr input data")
     transform_parser.add_argument("--output", required=True, help="Directory to write latent.parquet (and reconstructions)")
     transform_parser.add_argument("--reconstruct", action="store_true",
