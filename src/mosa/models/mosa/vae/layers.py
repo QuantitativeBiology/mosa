@@ -18,6 +18,8 @@ class MLP(nn.Module):
         use_batch_norm: bool = True,
         activation: type[nn.Module] = nn.PReLU,
         output_activation: type[nn.Module] | None = None,
+        bn_momentum: float = 0.01,
+        bn_eps: float = 0.001,
     ):
         super().__init__()
 
@@ -30,7 +32,7 @@ class MLP(nn.Module):
                 if use_batch_norm:
                     layers.append(
                         nn.BatchNorm1d(
-                            layer_sizes[i],
+                            layer_sizes[i], momentum=bn_momentum, eps=bn_eps,
                         )
                     )
                 layers.append(activation())
