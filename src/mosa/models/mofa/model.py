@@ -10,7 +10,9 @@ import numpy as np
 import pandas as pd
 
 from mosa.api import MultiOmicModel
+from mosa.config import DataConfig
 from mosa.data.dataset import MultiOmicDataset
+from mosa.models.mofa.config import MOFAConfig
 
 
 class MOFAModel(MultiOmicModel):
@@ -22,22 +24,12 @@ class MOFAModel(MultiOmicModel):
 
     def __init__(
         self,
-        n_factors: int = 50,
-        ard_factors: bool = True,
-        drop_r2: float = 0.001,
-        scale_views: bool = False,
-        scale_groups: bool = False,
-        convergence_mode: str = "fast",
-        seed: int = 42,
+        data_cfg: DataConfig | None = None,
+        model_cfg: MOFAConfig | None = None,
         save_path: str | None = None,
     ):
-        self.n_factors = n_factors
-        self.ard_factors = ard_factors
-        self.drop_r2 = drop_r2
-        self.scale_views = scale_views
-        self.scale_groups = scale_groups
-        self.convergence_mode = convergence_mode
-        self.seed = seed
+        self.data_cfg = data_cfg
+        self.model_cfg = model_cfg or MOFAConfig()
         self.save_path = save_path
         self._model = None
 
@@ -75,17 +67,18 @@ class MOFAModel(MultiOmicModel):
         """Train the MOFA model. val is ignored."""
         from mofapy2.run.entry_point import entry_point
 
+        mc = self.model_cfg
         ent = entry_point()
         ent.set_data_options(
-            scale_views=self.scale_views,
-            scale_groups=self.scale_groups,
+            scale_views=mc.scale_views,
+            scale_groups=mc.scale_groups,
         )
         ent.set_data_df(self._to_long_df(train))
-        ent.set_model_options(factors=self.n_factors, ard_factors=self.ard_factors)
+        ent.set_model_options(factors=mc.n_factors, ard_factors=mc.ard_factors)
         ent.set_train_options(
-            dropR2=self.drop_r2,
-            seed=self.seed,
-            convergence_mode=self.convergence_mode,
+            dropR2=mc.drop_r2,
+            seed=mc.random_seed,
+            convergence_mode=mc.convergence_mode,
         )
         ent.build()
         ent.run()

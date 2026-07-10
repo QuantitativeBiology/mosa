@@ -10,8 +10,9 @@ from torch.utils.data import ConcatDataset, DataLoader, Dataset, WeightedRandomS
 import pytorch_lightning as pl
 from sklearn.preprocessing import StandardScaler
 
-from mosa.config import MOSAConfig
+from mosa.config import DataConfig
 from mosa.data.dataset import MultiOmicDataset
+from mosa.models.mosa.config import MOSAVAEConfig
 
 logger = logging.getLogger(__name__)
 
@@ -147,13 +148,15 @@ class MOSADataModule(pl.LightningDataModule):
         self,
         train_data: MultiOmicDataset | None,
         val_data: MultiOmicDataset | None,
-        config: MOSAConfig,
+        data_cfg: DataConfig,
+        model_cfg: MOSAVAEConfig,
         zarr_path: str | None = None,
     ):
         super().__init__()
         self.train_data = train_data
         self.val_data = val_data
-        self.config = config
+        self.data_cfg = data_cfg
+        self.model_cfg = model_cfg
         self.zarr_path = zarr_path
 
         self.scalers: dict[str, StandardScaler | None] = {}
@@ -205,7 +208,7 @@ class MOSADataModule(pl.LightningDataModule):
         omics_train = {}
         for view_name, X in train.views.items():
             tv = time.perf_counter()
-            if self.config.views[view_name].discrete:
+            if view_name in self.data_cfg.discrete_views:
                 X = np.nan_to_num(X, nan=0.0)
                 self.scalers[view_name] = None
             else:
@@ -225,7 +228,7 @@ class MOSADataModule(pl.LightningDataModule):
             source_ids=meta["source_ids"],
             sample_weights=meta["sample_weights"],
             sample_names=train.sample_names,
-            omic_names=list(self.config.views.keys()),
+            omic_names=list(self.data_cfg.views),
         )
 
         if self.val_data is not None:
@@ -246,7 +249,7 @@ class MOSADataModule(pl.LightningDataModule):
                 source_ids=val_meta["source_ids"],
                 sample_weights=val_meta["sample_weights"],
                 sample_names=self.val_data.sample_names,
-                omic_names=list(self.config.views.keys()),
+                omic_names=list(self.data_cfg.views),
             )
 
         n_train = self.train_data.n_samples
@@ -255,15 +258,15 @@ class MOSADataModule(pl.LightningDataModule):
 
     def _setup_lazy_zarr(self, meta: dict) -> None:
         """Set up LazyZarrDataset for large zarr stores."""
-        rng = np.random.RandomState(self.config.random_seed)
-        frac = self.config.scaler_sample_frac
+        rng = np.random.RandomState(self.model_cfg.random_seed)
+        frac = self.model_cfg.scaler_sample_frac
         store = zarr.open_group(self.zarr_path, mode="r")
 
         n_train = self.train_data.n_samples
         all_train_idx = np.arange(n_train)
 
-        for view_name in self.config.views:
-            if self.config.views[view_name].discrete:
+        for view_name in self.data_cfg.views:
+            if view_name in self.data_cfg.discrete_views:
                 self.scalers[view_name] = None
                 continue
 
@@ -293,7 +296,7 @@ class MOSADataModule(pl.LightningDataModule):
             else:
                 scaler_dicts[name] = None
 
-        view_names = list(self.config.views.keys())
+        view_names = list(self.data_cfg.views)
 
         self.train_dataset = LazyZarrDataset(
             zarr_path=self.zarr_path,
@@ -305,7 +308,7 @@ class MOSADataModule(pl.LightningDataModule):
             sample_weights=meta["sample_weights"],
             sample_names=self.train_data.sample_names,
             scalers=scaler_dicts,
-            mask_layer_name=self.config.mask_layer_name,
+            mask_layer_name=self.data_cfg.mask_layer_name,
         )
 
         if self.val_data is not None:
@@ -321,14 +324,14 @@ class MOSADataModule(pl.LightningDataModule):
                 sample_weights=val_meta["sample_weights"],
                 sample_names=self.val_data.sample_names,
                 scalers=scaler_dicts,
-                mask_layer_name=self.config.mask_layer_name,
+                mask_layer_name=self.data_cfg.mask_layer_name,
             )
 
         n_val = self.val_data.n_samples if self.val_data is not None else 0
         logger.info("zarr lazy setup complete: %d train, %d val", n_train, n_val)
 
     def _loader_kwargs(self) -> dict:
-        nw = self.config.trainer.num_workers
+        nw = self.model_cfg.num_workers
         kwargs: dict = {
             "num_workers": nw,
             "pin_memory": True,
@@ -407,12 +410,12 @@ class MOSADataModule(pl.LightningDataModule):
         
         loader_kwargs = self._loader_kwargs()
         
-        if self.config.weighted_random_sampler:
+        if self.model_cfg.weighted_random_sampler:
             # Create weighted sampler to balance model_type categories in each batch
             sampler = self._get_weighted_sampler(self.train_dataset)
             return DataLoader(
                 self.train_dataset,
-                batch_size=self.config.batch_size,
+                batch_size=self.model_cfg.batch_size,
                 sampler=sampler,
                 **loader_kwargs,
             )
@@ -420,7 +423,7 @@ class MOSADataModule(pl.LightningDataModule):
             # Use default sequential sampling with shuffle
             return DataLoader(
                 self.train_dataset,
-                batch_size=self.config.batch_size,
+                batch_size=self.model_cfg.batch_size,
                 shuffle=True,
                 **loader_kwargs,
             )
@@ -430,7 +433,7 @@ class MOSADataModule(pl.LightningDataModule):
             return None
         return DataLoader(
             self.val_dataset,
-            batch_size=self.config.batch_size,
+            batch_size=self.model_cfg.batch_size,
             shuffle=False,
             **self._loader_kwargs(),
         )
@@ -441,7 +444,7 @@ class MOSADataModule(pl.LightningDataModule):
             raise RuntimeError("Call setup() before requesting dataloaders")
         return DataLoader(
             self.train_dataset,
-            batch_size=self.config.batch_size,
+            batch_size=self.model_cfg.batch_size,
             shuffle=False,
             **self._loader_kwargs(),
         )
@@ -456,7 +459,7 @@ class MOSADataModule(pl.LightningDataModule):
             dataset = self.train_dataset
         return DataLoader(
             dataset,
-            batch_size=self.config.batch_size,
+            batch_size=self.model_cfg.batch_size,
             shuffle=False,
             **self._loader_kwargs(),
         )
@@ -488,16 +491,16 @@ class MOSADataModule(pl.LightningDataModule):
         self.batch_categories = list(batch_dummies.columns)
 
         # Tissue (included if use_tissue=True)
-        if self.config.use_tissue and "tissue" in obs_df.columns:
+        if self.data_cfg.use_tissue and "tissue" in obs_df.columns:
             tissue_dummies = pd.get_dummies(obs_df["tissue"])
             self.tissue_categories = list(tissue_dummies.columns)
         else:
             tissue_dummies = pd.DataFrame()
-            if self.config.use_tissue and "tissue" not in obs_df.columns:
+            if self.data_cfg.use_tissue and "tissue" not in obs_df.columns:
                 logger.warning("use_tissue=True but no 'tissue' column found in .obs")
 
         # Mutations (included if use_mutations=True)
-        if self.config.use_mutations:
+        if self.data_cfg.use_mutations:
             mutation_cols = [c for c in obs_df.columns if c.startswith("mutation_")]
             mutations = obs_df[mutation_cols].values.astype(np.float32) if mutation_cols else None
         else:
@@ -558,7 +561,7 @@ class MOSADataModule(pl.LightningDataModule):
         else:
             tissue_dummies = pd.DataFrame()
 
-        if self.config.use_mutations:
+        if self.data_cfg.use_mutations:
             mutation_cols = [c for c in obs_df.columns if c.startswith("mutation_")]
             mutations = obs_df[mutation_cols].values.astype(np.float32) if mutation_cols else None
         else:

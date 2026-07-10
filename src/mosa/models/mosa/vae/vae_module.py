@@ -7,7 +7,8 @@ import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 
-from mosa.config import MOSAConfig
+from mosa.config import DataConfig
+from mosa.models.mosa.config import MOSAVAEConfig
 from mosa.models.mosa.vae.losses import (
     adversarial_loss,
     contrastive_loss,
@@ -35,7 +36,7 @@ def _batch_to_device(batch: dict, device: torch.device) -> dict:
     return result
 
 
-def _kl_weight_for_epoch(epoch: int, config: MOSAConfig) -> float:
+def _kl_weight_for_epoch(epoch: int, config: MOSAVAEConfig) -> float:
     """Compute KL weight for the given epoch via linear warmup schedule."""
     if not config.use_kl_scheduler:
         return config.kl_weight
@@ -60,10 +61,11 @@ class MOSAVAE(pl.LightningModule):
 
     def __init__(
         self,
-        config: MOSAConfig,
+        config: MOSAVAEConfig,
         view_input_dims: dict[str, int],
         conditional_dim: int,
         n_batches: int,
+        data_cfg: DataConfig | None = None,
     ):
         super().__init__()
         self.automatic_optimization = False
@@ -71,12 +73,15 @@ class MOSAVAE(pl.LightningModule):
         self.view_input_dims = view_input_dims
         self.conditional_dim = conditional_dim
         self.n_batches = n_batches
-        self.save_hyperparameters({
-            "config": dataclasses.asdict(config),
+        hp = {
+            "model_cfg": dataclasses.asdict(config),
             "view_input_dims": view_input_dims,
             "conditional_dim": conditional_dim,
             "n_batches": n_batches,
-        })
+        }
+        if data_cfg is not None:
+            hp["data_cfg"] = dataclasses.asdict(data_cfg)
+        self.save_hyperparameters(hp)
 
         use_shared_head = config.fusion_method != "poe" or config.poe_use_shared_head
         self.view_encoder_dims: dict[str, int] = {

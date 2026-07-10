@@ -20,6 +20,16 @@ ORIENTATION_ERROR_THRESHOLD = 0.5
 ORIENTATION_WARN_THRESHOLD = 0.10
 
 
+# Zarr path helpers (shared with datamodule.LazyZarrDataset)
+
+def _zarr_view_x_key(view_name: str) -> str:
+    return f"mod/{view_name}/X"
+
+
+def _zarr_view_mask_key(view_name: str, mask_layer: str) -> str:
+    return f"mod/{view_name}/layers/{mask_layer}"
+
+
 # Zarr encoding helpers (used by load_mudata and LazyZarrDataset)
 
 def _zarr_index_key(group) -> str:

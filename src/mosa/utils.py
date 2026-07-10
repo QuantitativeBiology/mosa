@@ -8,9 +8,17 @@ import pytorch_lightning as pl
 import yaml
 from torch import Tensor
 
-from mosa.config import MOSAConfig, TrainerConfig, ViewConfig
+from mosa.config import Config, DataConfig, ModelConfig
+from mosa.models.mofa.config import MOFAConfig
+from mosa.models.mosa.config import MOSAVAEConfig, MOSAVAEViewConfig
 
 logger = logging.getLogger(__name__)
+
+
+_MODEL_CONFIGS: dict[str, type[ModelConfig]] = {
+    "mosa_vae": MOSAVAEConfig,
+    "mofa": MOFAConfig,
+}
 
 
 def seed_everything(seed: int) -> None:
@@ -19,22 +27,33 @@ def seed_everything(seed: int) -> None:
     logger.debug("Seeded everything with %d", seed)
 
 
-def load_config(yaml_path: str | Path) -> MOSAConfig:
-    """Load and parse a YAML configuration file."""
+def load_config(yaml_path: str | Path) -> Config:
+    """Load a YAML config and return a Config bundling DataConfig + ModelConfig."""
     yaml_path = Path(yaml_path)
     with open(yaml_path) as f:
         raw = yaml.safe_load(f)
 
-    views_raw = raw.pop("views", {})
-    views = {}
-    for name, vcfg in views_raw.items():
-        vcfg.setdefault("name", name)
-        views[name] = ViewConfig(**vcfg)
+    if "data" not in raw or "model" not in raw:
+        raise ValueError(f"Config {yaml_path} must contain top-level 'data:' and 'model:' blocks")
 
-    trainer_raw = raw.pop("trainer", {})
-    trainer = TrainerConfig(**trainer_raw)
+    data = DataConfig(**raw["data"])
 
-    return MOSAConfig(views=views, trainer=trainer, **raw)
+    model_raw = dict(raw["model"])
+    if "type" not in model_raw:
+        raise ValueError("model.type is required (e.g. 'mosa_vae', 'mofa')")
+    mtype = model_raw.pop("type")
+    if mtype not in _MODEL_CONFIGS:
+        raise ValueError(f"unknown model.type '{mtype}'; valid: {list(_MODEL_CONFIGS)}")
+
+    if mtype == "mosa_vae" and "views" in model_raw:
+        model_raw["views"] = {
+            name: MOSAVAEViewConfig(name=name, **vcfg)
+            for name, vcfg in model_raw["views"].items()
+        }
+
+    model_cfg = _MODEL_CONFIGS[mtype](**model_raw)
+
+    return Config(data=data, model=model_cfg)
 
 
 def tensors_to_numpy(t: Tensor) -> np.ndarray:

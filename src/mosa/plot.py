@@ -682,18 +682,19 @@ def _generate_umap_plots(data, views, plots_dir, palette, pca_components):
                             plots_dir / f"umap_recon_corrected_{name}.png", pca_components)
 
 
-def generate_all_plots(output_dir, config, palette=None, pca_components=50):
+def generate_all_plots(output_dir, data_cfg, model_cfg=None, palette=None, pca_components=50):
     """Generate diagnostic plots and clustering metrics.
 
     Parameters
     ----------
     output_dir : str or Path
         Root output directory with training artifacts.
-    config : MOSAConfig
-        Experiment configuration.
+    data_cfg : DataConfig
+        Data configuration (path, views).
+    model_cfg : ModelConfig or None
+        Model configuration (currently unused; reserved for model-specific plots).
     palette : dict or None
-        Base color mapping for known tissues. Missing categories are assigned
-        deterministic colors via build_palette.
+        Base color mapping for known tissues.
     pca_components : int
         PCA dimensions before UMAP.
 
@@ -706,20 +707,22 @@ def generate_all_plots(output_dir, config, palette=None, pca_components=50):
     output_dir = Path(output_dir)
     plots_dir = output_dir / "plots"
 
+    views = list(data_cfg.views)
+
     logger.debug("Loading data files")
-    data = _load_data_files(output_dir, config.views, config.data_path)
+    data = _load_data_files(output_dir, views, data_cfg.path)
 
     tissues = data["samplesheet"]["tissue"].dropna().unique()
     palette = build_palette(tissues, base_palette=palette)
 
     logger.debug("Generating UMAP plots")
-    _generate_umap_plots(data, config.views, plots_dir, palette, pca_components)
+    _generate_umap_plots(data, views, plots_dir, palette, pca_components)
     logger.debug("Generating loss plots")
-    _generate_loss_plots(output_dir, config.views, plots_dir)
+    _generate_loss_plots(output_dir, views, plots_dir)
     logger.debug("Generating reconstruction plots")
-    _generate_reconstruction_plots(data, config.views, plots_dir)
+    _generate_reconstruction_plots(data, views, plots_dir)
 
-    metrics_rows = _compute_all_clustering_metrics(data, config.views, data["samplesheet"])
+    metrics_rows = _compute_all_clustering_metrics(data, views, data["samplesheet"])
     if metrics_rows:
         metrics_out = output_dir / "metrics"
         metrics_out.mkdir(parents=True, exist_ok=True)
