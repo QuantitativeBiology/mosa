@@ -1,3 +1,3 @@
-from mosa.models.mosa.model import MOSAVAEModel
+from mosa.models.mosa.model import MOSAModel
 
-__all__ = ["MOSAVAEModel"]
+__all__ = ["MOSAModel"]

@@ -14,9 +14,9 @@ from pytorch_lightning.strategies import DDPStrategy
 from mosa.api import MultiOmicModel
 from mosa.config import DataConfig
 from mosa.data.dataset import MultiOmicDataset
-from mosa.models.mosa.config import MOSAVAEConfig, MOSAVAEViewConfig
+from mosa.models.mosa.config import MOSAConfig, OmicViewConfig
 from mosa.models.mosa.datamodule import MOSADataModule
-from mosa.models.mosa.vae.vae_module import MOSAVAE
+from mosa.models.mosa.vae.vae_module import VAE
 
 logger = logging.getLogger(__name__)
 
@@ -37,17 +37,17 @@ class _LoggingModelCheckpoint(ModelCheckpoint):
         )
 
 
-class MOSAVAEModel(MultiOmicModel):
-    """MultiOmicModel implementation using the MOSAVAE architecture.
+class MOSAModel(MultiOmicModel):
+    """MultiOmicModel implementation using the VAE architecture.
 
-    Wraps the MOSAVAE Lightning module, MOSADataModule, and training
+    Wraps the VAE Lightning module, MOSADataModule, and training
     orchestration behind the standard MultiOmicModel interface.
     """
 
-    def __init__(self, data_cfg: DataConfig, model_cfg: MOSAVAEConfig):
+    def __init__(self, data_cfg: DataConfig, model_cfg: MOSAConfig):
         self.data_cfg = data_cfg
         self.model_cfg = model_cfg
-        self._model: MOSAVAE | None = None
+        self._model: VAE | None = None
         self._datamodule: MOSADataModule | None = None
         self._trainer: pl.Trainer | None = None
 
@@ -66,7 +66,7 @@ class MOSAVAEModel(MultiOmicModel):
         )
         self._datamodule.setup()
 
-        self._model = MOSAVAE(
+        self._model = VAE(
             config=self.model_cfg,
             view_input_dims=self._datamodule.view_input_dims,
             conditional_dim=self._datamodule.conditional_dim,
@@ -248,7 +248,7 @@ class MOSAVAEModel(MultiOmicModel):
         self._trainer.save_checkpoint(str(path))
 
     @classmethod
-    def load(cls, path: str | Path, **kwargs) -> MOSAVAEModel:
+    def load(cls, path: str | Path, **kwargs) -> MOSAModel:
         """Load a model from a Lightning checkpoint.
 
         Accepts any Lightning .ckpt file: those written by save() and those
@@ -263,12 +263,12 @@ class MOSAVAEModel(MultiOmicModel):
 
         mcfg_raw = dict(hp["model_cfg"])
         mcfg_raw["views"] = {
-            n: MOSAVAEViewConfig(**v) for n, v in mcfg_raw["views"].items()
+            n: OmicViewConfig(**v) for n, v in mcfg_raw["views"].items()
         }
-        model_cfg = MOSAVAEConfig(**mcfg_raw)
+        model_cfg = MOSAConfig(**mcfg_raw)
 
         instance = cls(data_cfg, model_cfg)
-        instance._model = MOSAVAE(
+        instance._model = VAE(
             config=model_cfg,
             view_input_dims=hp["view_input_dims"],
             conditional_dim=hp["conditional_dim"],

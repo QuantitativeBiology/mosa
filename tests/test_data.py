@@ -9,7 +9,7 @@ import pytest
 from mosa.config import DataConfig
 from mosa.data.dataset import MultiOmicDataset
 from mosa.data.io import load_mudata, _dearrow_mudata
-from mosa.models.mosa.config import MOSAVAEConfig, MOSAVAEViewConfig
+from mosa.models.mosa.config import MOSAConfig, OmicViewConfig
 from mosa.models.mosa.datamodule import MOSADataModule
 
 
@@ -90,7 +90,7 @@ def _create_test_zarr(path: Path, n_samples: int, view_specs: dict[str, int]) ->
     return path
 
 
-def _make_configs(view_specs: dict[str, int], n_samples: int, tmp_path: Path, discrete_views: set[str] | None = None) -> tuple[DataConfig, MOSAVAEConfig]:
+def _make_configs(view_specs: dict[str, int], n_samples: int, tmp_path: Path, discrete_views: set[str] | None = None) -> tuple[DataConfig, MOSAConfig]:
     discrete_views = discrete_views or set()
     data_cfg = DataConfig(
         path=str(tmp_path / "dummy.h5mu"),
@@ -98,10 +98,10 @@ def _make_configs(view_specs: dict[str, int], n_samples: int, tmp_path: Path, di
         discrete_views=discrete_views,
     )
     view_configs = {
-        name: MOSAVAEViewConfig(name=name, hidden_layer_dims=[32, 16])
+        name: OmicViewConfig(name=name, hidden_layer_dims=[32, 16])
         for name in view_specs
     }
-    model_cfg = MOSAVAEConfig(
+    model_cfg = MOSAConfig(
         views=view_configs,
         joint_latent_dim=8,
         batch_size=8,

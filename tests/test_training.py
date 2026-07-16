@@ -6,7 +6,7 @@ import pytest
 import torch
 
 from mosa.models.mosa.datamodule import MOSADataModule
-from mosa.models.mosa.vae.vae_module import MOSAVAE
+from mosa.models.mosa.vae.vae_module import VAE
 
 
 # ---------------------------------------------------------------------------
@@ -15,12 +15,12 @@ from mosa.models.mosa.vae.vae_module import MOSAVAE
 
 
 def _make_vae_and_dm(make_multi_omic_dataset, make_mosa_config, tmp_path, **dataset_kwargs):
-    """Return a freshly constructed (MOSAVAE, MOSADataModule) pair after setup()."""
+    """Return a freshly constructed (VAE, MOSADataModule) pair after setup()."""
     dataset = make_multi_omic_dataset(**dataset_kwargs)
     data_cfg, model_cfg = make_mosa_config(dataset, output_dir=str(tmp_path))
     dm = MOSADataModule(train_data=dataset, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg)
     dm.setup()
-    vae = MOSAVAE(
+    vae = VAE(
         config=model_cfg,
         view_input_dims=dm.view_input_dims,
         conditional_dim=dm.conditional_dim,
@@ -30,7 +30,7 @@ def _make_vae_and_dm(make_multi_omic_dataset, make_mosa_config, tmp_path, **data
 
 
 def _make_vae_and_dm_split(make_multi_omic_dataset, make_mosa_config, tmp_path, n_samples=20):
-    """Return (MOSAVAE, MOSADataModule) with a train/val split."""
+    """Return (VAE, MOSADataModule) with a train/val split."""
     dataset = make_multi_omic_dataset(n_samples=n_samples)
     indices = np.arange(n_samples)
     train = dataset.subset(indices[:16])
@@ -38,7 +38,7 @@ def _make_vae_and_dm_split(make_multi_omic_dataset, make_mosa_config, tmp_path, 
     data_cfg, model_cfg = make_mosa_config(dataset, output_dir=str(tmp_path))
     dm = MOSADataModule(train_data=train, val_data=val, data_cfg=data_cfg, model_cfg=model_cfg)
     dm.setup()
-    vae = MOSAVAE(
+    vae = VAE(
         config=model_cfg,
         view_input_dims=dm.view_input_dims,
         conditional_dim=dm.conditional_dim,
@@ -88,7 +88,7 @@ def test_vae_fast_dev_run_poe(make_multi_omic_dataset, make_mosa_config, tmp_pat
     data_cfg, model_cfg = make_mosa_config(dataset, fusion_method="poe", output_dir=str(tmp_path))
     dm = MOSADataModule(train_data=dataset, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg)
     dm.setup()
-    vae = MOSAVAE(
+    vae = VAE(
         config=model_cfg,
         view_input_dims=dm.view_input_dims,
         conditional_dim=dm.conditional_dim,
@@ -201,7 +201,7 @@ def test_vae_can_overfit_single_batch(make_multi_omic_dataset, make_mosa_config,
     )
     dm = MOSADataModule(train_data=dataset, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg)
     dm.setup()
-    vae = MOSAVAE(
+    vae = VAE(
         config=model_cfg,
         view_input_dims=dm.view_input_dims,
         conditional_dim=dm.conditional_dim,

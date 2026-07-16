@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import torch
 
-from mosa.models.mosa import MOSAVAEModel
+from mosa.models.mosa import MOSAModel
 from mosa.models.mosa.datamodule import MOSADataModule
 
 
@@ -43,23 +43,23 @@ def test_datamodule_state_dict_scaler_fidelity(make_multi_omic_dataset, make_mos
 
 
 # ---------------------------------------------------------------------------
-# MOSAVAEModel save / load
+# MOSAModel save / load
 # ---------------------------------------------------------------------------
 
 
-def test_mosavae_save_load_config_preserved(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_vae_save_load_config_preserved(make_multi_omic_dataset, make_mosa_config, tmp_path):
     """Config fields and arch dims are reconstructed exactly from the checkpoint."""
     dataset = make_multi_omic_dataset(n_samples=20)
     train, val = _split(dataset)
     data_cfg, model_cfg = make_mosa_config(dataset, output_dir=str(tmp_path))
 
-    model = MOSAVAEModel(data_cfg, model_cfg)
+    model = MOSAModel(data_cfg, model_cfg)
     model.fit(train, val)
 
     ckpt = tmp_path / "model.pt"
     model.save(ckpt)
 
-    loaded = MOSAVAEModel.load(ckpt)
+    loaded = MOSAModel.load(ckpt)
 
     assert loaded.model_cfg.joint_latent_dim == model_cfg.joint_latent_dim
     assert loaded.model_cfg.fusion_method == model_cfg.fusion_method
@@ -69,13 +69,13 @@ def test_mosavae_save_load_config_preserved(make_multi_omic_dataset, make_mosa_c
     assert loaded._model.n_batches == model._model.n_batches
 
 
-def test_mosavae_save_writes_lightning_format(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_vae_save_writes_lightning_format(make_multi_omic_dataset, make_mosa_config, tmp_path):
     """save() produces a Lightning-shaped checkpoint with state_dict, hparams, datamodule."""
     dataset = make_multi_omic_dataset(n_samples=20)
     train, val = _split(dataset)
     data_cfg, model_cfg = make_mosa_config(dataset, output_dir=str(tmp_path))
 
-    model = MOSAVAEModel(data_cfg, model_cfg)
+    model = MOSAModel(data_cfg, model_cfg)
     model.fit(train, val)
 
     ckpt = tmp_path / "model.ckpt"
@@ -90,37 +90,37 @@ def test_mosavae_save_writes_lightning_format(make_multi_omic_dataset, make_mosa
     assert "view_input_dims" in raw["hyper_parameters"]
 
 
-def test_mosavae_load_reads_auto_checkpoint(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_vae_load_reads_auto_checkpoint(make_multi_omic_dataset, make_mosa_config, tmp_path):
     """load() can read a .ckpt written by Lightning's ModelCheckpoint callback."""
     dataset = make_multi_omic_dataset(n_samples=20)
     train, val = _split(dataset)
     data_cfg, model_cfg = make_mosa_config(dataset, output_dir=str(tmp_path))
 
-    model = MOSAVAEModel(data_cfg, model_cfg)
+    model = MOSAModel(data_cfg, model_cfg)
     model.fit(train, val)
 
     # ModelCheckpoint(save_last=True) writes last.ckpt into output_dir during fit()
     last_ckpt = tmp_path / "last.ckpt"
     assert last_ckpt.exists(), "Lightning should have auto-saved last.ckpt"
 
-    loaded = MOSAVAEModel.load(last_ckpt)
+    loaded = MOSAModel.load(last_ckpt)
     z = loaded.transform(dataset)
     assert z.shape == (dataset.n_samples, model_cfg.joint_latent_dim)
 
 
-def test_mosavae_save_load_scaler_fidelity(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_vae_save_load_scaler_fidelity(make_multi_omic_dataset, make_mosa_config, tmp_path):
     """Scaler state is preserved so loaded model can apply training-time normalisation."""
     dataset = make_multi_omic_dataset(n_samples=20)
     train, val = _split(dataset)
     data_cfg, model_cfg = make_mosa_config(dataset, output_dir=str(tmp_path))
 
-    model = MOSAVAEModel(data_cfg, model_cfg)
+    model = MOSAModel(data_cfg, model_cfg)
     model.fit(train, val)
 
     ckpt = tmp_path / "model.pt"
     model.save(ckpt)
 
-    loaded = MOSAVAEModel.load(ckpt)
+    loaded = MOSAModel.load(ckpt)
 
     for view in model._datamodule.scalers:
         s1 = model._datamodule.scalers[view]
@@ -131,19 +131,19 @@ def test_mosavae_save_load_scaler_fidelity(make_multi_omic_dataset, make_mosa_co
             np.testing.assert_allclose(s1.mean_, s2.mean_, rtol=1e-6)
 
 
-def test_mosavae_transform_after_load(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_vae_transform_after_load(make_multi_omic_dataset, make_mosa_config, tmp_path):
     """transform() on a loaded model returns the correct shape and finite values."""
     dataset = make_multi_omic_dataset(n_samples=20)
     train, val = _split(dataset)
     data_cfg, model_cfg = make_mosa_config(dataset, output_dir=str(tmp_path))
 
-    model = MOSAVAEModel(data_cfg, model_cfg)
+    model = MOSAModel(data_cfg, model_cfg)
     model.fit(train, val)
 
     ckpt = tmp_path / "model.pt"
     model.save(ckpt)
 
-    loaded = MOSAVAEModel.load(ckpt)
+    loaded = MOSAModel.load(ckpt)
     z = loaded.transform(dataset)
 
     assert z.shape == (dataset.n_samples, model_cfg.joint_latent_dim)
@@ -155,20 +155,20 @@ def test_mosavae_transform_after_load(make_multi_omic_dataset, make_mosa_config,
 # ---------------------------------------------------------------------------
 
 
-def test_mosavae_resume_produces_valid_output(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_vae_resume_produces_valid_output(make_multi_omic_dataset, make_mosa_config, tmp_path):
     """Resuming from last.ckpt completes without error and transform() still works."""
     dataset = make_multi_omic_dataset(n_samples=20)
     train, val = _split(dataset)
 
     data_cfg, model_cfg = make_mosa_config(dataset, output_dir=str(tmp_path), num_epochs=2)
-    model = MOSAVAEModel(data_cfg, model_cfg)
+    model = MOSAModel(data_cfg, model_cfg)
     model.fit(train, val)
 
     last_ckpt = tmp_path / "last.ckpt"
     assert last_ckpt.exists(), "ModelCheckpoint(save_last=True) must write last.ckpt"
 
     data_cfg2, model_cfg2 = make_mosa_config(dataset, output_dir=str(tmp_path), num_epochs=4)
-    model2 = MOSAVAEModel(data_cfg2, model_cfg2)
+    model2 = MOSAModel(data_cfg2, model_cfg2)
     model2.fit(train, val, resume_from=last_ckpt)
 
     z = model2.transform(dataset)

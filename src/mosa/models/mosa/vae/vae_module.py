@@ -8,7 +8,7 @@ import torch.nn as nn
 import pytorch_lightning as pl
 
 from mosa.config import DataConfig
-from mosa.models.mosa.config import MOSAVAEConfig
+from mosa.models.mosa.config import MOSAConfig
 from mosa.models.mosa.vae.losses import (
     adversarial_loss,
     contrastive_loss,
@@ -36,7 +36,7 @@ def _batch_to_device(batch: dict, device: torch.device) -> dict:
     return result
 
 
-def _kl_weight_for_epoch(epoch: int, config: MOSAVAEConfig) -> float:
+def _kl_weight_for_epoch(epoch: int, config: MOSAConfig) -> float:
     """Compute KL weight for the given epoch via linear warmup schedule."""
     if not config.use_kl_scheduler:
         return config.kl_weight
@@ -52,7 +52,7 @@ def _kl_weight_for_epoch(epoch: int, config: MOSAVAEConfig) -> float:
     return start + (final - start) * progress
 
 
-class MOSAVAE(pl.LightningModule):
+class VAE(pl.LightningModule):
     """Variational autoencoder for multi-omic data with optional adversarial training.
 
     Uses manual optimization: discriminator is updated first on detached z,
@@ -61,7 +61,7 @@ class MOSAVAE(pl.LightningModule):
 
     def __init__(
         self,
-        config: MOSAVAEConfig,
+        config: MOSAConfig,
         view_input_dims: dict[str, int],
         conditional_dim: int,
         n_batches: int,

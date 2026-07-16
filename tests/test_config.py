@@ -5,7 +5,7 @@ import yaml
 
 from mosa.config import Config, DataConfig
 from mosa.models.mofa.config import MOFAConfig
-from mosa.models.mosa.config import MOSAVAEConfig, MOSAVAEViewConfig
+from mosa.models.mosa.config import MOSAConfig, OmicViewConfig
 from mosa.utils import load_config
 
 
@@ -54,132 +54,132 @@ def test_data_config_validate_paths_empty():
 
 
 # ---------------------------------------------------------------------------
-# MOSAVAEViewConfig
+# OmicViewConfig
 # ---------------------------------------------------------------------------
 
 
 def test_view_config_empty_hidden_dims():
     with pytest.raises(ValueError, match="hidden_layer_dims must not be empty"):
-        MOSAVAEViewConfig(name="x", hidden_layer_dims=[])
+        OmicViewConfig(name="x", hidden_layer_dims=[])
 
 
 def test_view_config_negative_hidden_dim():
     with pytest.raises(ValueError, match="all hidden_layer_dims must be positive"):
-        MOSAVAEViewConfig(name="x", hidden_layer_dims=[256, -1])
+        OmicViewConfig(name="x", hidden_layer_dims=[256, -1])
 
 
 def test_view_config_invalid_loss_type():
     with pytest.raises(ValueError, match="loss_type must be one of"):
-        MOSAVAEViewConfig(name="x", loss_type="invalid")
+        OmicViewConfig(name="x", loss_type="invalid")
 
 
 def test_view_config_invalid_dropout():
     with pytest.raises(ValueError, match="dropout_p must be in"):
-        MOSAVAEViewConfig(name="x", dropout_p=1.5)
+        OmicViewConfig(name="x", dropout_p=1.5)
 
 
 # ---------------------------------------------------------------------------
-# MOSAVAEConfig — defaults and numeric ranges
+# MOSAConfig — defaults and numeric ranges
 # ---------------------------------------------------------------------------
 
 
 def test_mosa_default():
-    cfg = MOSAVAEConfig()
+    cfg = MOSAConfig()
     assert cfg.joint_latent_dim == 64
     assert cfg.output_dir == "outputs"
 
 
 def test_mosa_string_coercion():
-    cfg = MOSAVAEConfig(learning_rate="1e-5")  # type: ignore[arg-type]
+    cfg = MOSAConfig(learning_rate="1e-5")  # type: ignore[arg-type]
     assert isinstance(cfg.learning_rate, float)
     assert cfg.learning_rate == pytest.approx(1e-5)
 
 
 def test_invalid_fusion_method():
     with pytest.raises(ValueError, match="fusion_method must be one of"):
-        MOSAVAEConfig(fusion_method="invalid")
+        MOSAConfig(fusion_method="invalid")
 
 
 @pytest.mark.parametrize("dim", [0, -1])
 def test_invalid_joint_latent_dim(dim):
     with pytest.raises(ValueError, match="joint_latent_dim must be positive"):
-        MOSAVAEConfig(joint_latent_dim=dim)
+        MOSAConfig(joint_latent_dim=dim)
 
 
 def test_invalid_batch_size():
     with pytest.raises(ValueError, match="batch_size must be positive"):
-        MOSAVAEConfig(batch_size=0)
+        MOSAConfig(batch_size=0)
 
 
 def test_invalid_num_epochs():
     with pytest.raises(ValueError, match="num_epochs must be positive"):
-        MOSAVAEConfig(num_epochs=0)
+        MOSAConfig(num_epochs=0)
 
 
 @pytest.mark.parametrize("ts", [-0.1, 1.0])
 def test_invalid_test_size(ts):
     with pytest.raises(ValueError, match="test_size must be in"):
-        MOSAVAEConfig(test_size=ts)
+        MOSAConfig(test_size=ts)
 
 
 @pytest.mark.parametrize("lr", [0, -1e-3])
 def test_invalid_learning_rate(lr):
     with pytest.raises(ValueError, match="learning_rate must be positive"):
-        MOSAVAEConfig(learning_rate=lr)
+        MOSAConfig(learning_rate=lr)
 
 
 @pytest.mark.parametrize("prob", [1.0, -0.1])
 def test_invalid_view_dropout(prob):
     with pytest.raises(ValueError, match="view_dropout_prob must be in"):
-        MOSAVAEConfig(view_dropout_prob=prob)
+        MOSAConfig(view_dropout_prob=prob)
 
 
 @pytest.mark.parametrize("frac", [0.0, 1.5])
 def test_invalid_scaler_sample_frac(frac):
     with pytest.raises(ValueError, match="scaler_sample_frac must be in"):
-        MOSAVAEConfig(scaler_sample_frac=frac)
+        MOSAConfig(scaler_sample_frac=frac)
 
 
 def test_adv_lr_required_when_adv_weight():
     with pytest.raises(ValueError, match="adv_learning_rate must be positive"):
-        MOSAVAEConfig(adv_weight=1.0, adv_learning_rate=0)
+        MOSAConfig(adv_weight=1.0, adv_learning_rate=0)
 
 
 def test_kl_warmup_warning():
     with pytest.warns(UserWarning, match="kl_warmup_epochs"):
-        MOSAVAEConfig(use_kl_scheduler=True, kl_warmup_epochs=500, num_epochs=100)
+        MOSAConfig(use_kl_scheduler=True, kl_warmup_epochs=500, num_epochs=100)
 
 
 def test_invalid_precision():
     with pytest.raises(ValueError, match="precision must be one of"):
-        MOSAVAEConfig(precision="64")
+        MOSAConfig(precision="64")
 
 
 def test_invalid_accelerator():
     with pytest.raises(ValueError, match="accelerator must be one of"):
-        MOSAVAEConfig(accelerator="tpu")
+        MOSAConfig(accelerator="tpu")
 
 
 def test_invalid_devices():
     with pytest.raises(ValueError, match="devices must be"):
-        MOSAVAEConfig(devices=0)
+        MOSAConfig(devices=0)
 
 
 def test_poe_mismatched_hidden_dims():
     views = {
-        "rna": MOSAVAEViewConfig(name="rna", hidden_layer_dims=[256, 128]),
-        "meth": MOSAVAEViewConfig(name="meth", hidden_layer_dims=[256, 64]),
+        "rna": OmicViewConfig(name="rna", hidden_layer_dims=[256, 128]),
+        "meth": OmicViewConfig(name="meth", hidden_layer_dims=[256, 64]),
     }
     with pytest.raises(ValueError, match="PoE fusion requires"):
-        MOSAVAEConfig(views=views, fusion_method="poe")
+        MOSAConfig(views=views, fusion_method="poe")
 
 
 def test_poe_matched_hidden_dims():
     views = {
-        "rna": MOSAVAEViewConfig(name="rna", hidden_layer_dims=[256, 128]),
-        "meth": MOSAVAEViewConfig(name="meth", hidden_layer_dims=[512, 128]),
+        "rna": OmicViewConfig(name="rna", hidden_layer_dims=[256, 128]),
+        "meth": OmicViewConfig(name="meth", hidden_layer_dims=[512, 128]),
     }
-    cfg = MOSAVAEConfig(views=views, fusion_method="poe")
+    cfg = MOSAConfig(views=views, fusion_method="poe")
     assert cfg.fusion_method == "poe"
 
 
@@ -239,7 +239,7 @@ def test_load_config_mosa(tmp_path):
     cfg = load_config(yaml_path)
     assert isinstance(cfg, Config)
     assert isinstance(cfg.data, DataConfig)
-    assert isinstance(cfg.model, MOSAVAEConfig)
+    assert isinstance(cfg.model, MOSAConfig)
     assert cfg.data.views == ["rna"]
     assert cfg.model.joint_latent_dim == 32
     assert cfg.model.views["rna"].hidden_layer_dims == [256, 128]

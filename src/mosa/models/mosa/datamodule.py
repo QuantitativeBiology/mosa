@@ -12,7 +12,7 @@ from sklearn.preprocessing import StandardScaler
 
 from mosa.config import DataConfig
 from mosa.data.dataset import MultiOmicDataset
-from mosa.models.mosa.config import MOSAVAEConfig
+from mosa.models.mosa.config import MOSAConfig
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +149,7 @@ class MOSADataModule(pl.LightningDataModule):
         train_data: MultiOmicDataset | None,
         val_data: MultiOmicDataset | None,
         data_cfg: DataConfig,
-        model_cfg: MOSAVAEConfig,
+        model_cfg: MOSAConfig,
         zarr_path: str | None = None,
     ):
         super().__init__()

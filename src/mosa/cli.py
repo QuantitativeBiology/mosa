@@ -46,11 +46,11 @@ def _setup_logging(debug: bool):
 def _build_model(data_cfg, model_cfg):
     """Instantiate the model class matching the parsed model_cfg type."""
     from mosa.models.mofa.config import MOFAConfig
-    from mosa.models.mosa.config import MOSAVAEConfig
+    from mosa.models.mosa.config import MOSAConfig
 
-    if isinstance(model_cfg, MOSAVAEConfig):
-        from mosa.models.mosa import MOSAVAEModel
-        return MOSAVAEModel(data_cfg, model_cfg)
+    if isinstance(model_cfg, MOSAConfig):
+        from mosa.models.mosa import MOSAModel
+        return MOSAModel(data_cfg, model_cfg)
     if isinstance(model_cfg, MOFAConfig):
         from mosa.models.mofa import MOFAModel
         return MOFAModel(data_cfg, model_cfg)
@@ -118,9 +118,9 @@ def _transform(args):
     import pandas as pd
 
     from mosa.data.io import load_mudata
-    from mosa.models.mosa import MOSAVAEModel
+    from mosa.models.mosa import MOSAModel
 
-    model = MOSAVAEModel.load(args.checkpoint)
+    model = MOSAModel.load(args.checkpoint)
     dataset = load_mudata(
         args.input,
         model.data_cfg.views,
@@ -207,8 +207,8 @@ def _validate(args):
     print(f"  output:  {cfg.model.output_dir}")
     print(f"  seed:    {cfg.model.random_seed}, test_size={cfg.model.test_size}")
 
-    from mosa.models.mosa.config import MOSAVAEConfig
-    if isinstance(cfg.model, MOSAVAEConfig):
+    from mosa.models.mosa.config import MOSAConfig
+    if isinstance(cfg.model, MOSAConfig):
         print(f"  arch:    fusion={cfg.model.fusion_method}, latent={cfg.model.joint_latent_dim}")
         print(f"  train:   epochs={cfg.model.num_epochs}, batch_size={cfg.model.batch_size}")
 

@@ -6,7 +6,7 @@ import pytest
 
 from mosa.config import DataConfig
 from mosa.data.dataset import MultiOmicDataset
-from mosa.models.mosa.config import MOSAVAEConfig, MOSAVAEViewConfig
+from mosa.models.mosa.config import MOSAConfig, OmicViewConfig
 
 
 @pytest.fixture
@@ -68,7 +68,7 @@ def sample_dataset(make_multi_omic_dataset):
 
 @pytest.fixture
 def make_mosa_config():
-    """Build a (DataConfig, MOSAVAEConfig) pair sized to a test dataset."""
+    """Build a (DataConfig, MOSAConfig) pair sized to a test dataset."""
     def _make(
         dataset: MultiOmicDataset,
         joint_latent_dim: int = 16,
@@ -78,7 +78,7 @@ def make_mosa_config():
         discrete_views: set[str] | None = None,
         data_path: str = "unused",
         **overrides,
-    ) -> tuple[DataConfig, MOSAVAEConfig]:
+    ) -> tuple[DataConfig, MOSAConfig]:
         data_cfg = DataConfig(
             path=data_path,
             views=list(dataset.view_names),
@@ -86,13 +86,13 @@ def make_mosa_config():
         )
 
         view_configs = {
-            name: MOSAVAEViewConfig(name=name, hidden_layer_dims=[32, 16])
+            name: OmicViewConfig(name=name, hidden_layer_dims=[32, 16])
             for name in dataset.view_names
         }
 
         output_dir = overrides.pop("output_dir", "/tmp/mosa_test")
 
-        model_cfg = MOSAVAEConfig(
+        model_cfg = MOSAConfig(
             views=view_configs,
             joint_latent_dim=joint_latent_dim,
             fusion_method=fusion_method,

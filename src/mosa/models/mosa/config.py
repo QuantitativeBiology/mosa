@@ -13,7 +13,7 @@ _VALID_ACCELERATORS = ("auto", "cpu", "gpu", "mps")
 
 
 @dataclass
-class MOSAVAEViewConfig:
+class OmicViewConfig:
     """Per-view encoder/decoder architecture for the MOSA VAE."""
 
     name: str
@@ -36,11 +36,11 @@ class MOSAVAEViewConfig:
 
 
 @dataclass
-class MOSAVAEConfig(ModelConfig):
+class MOSAConfig(ModelConfig):
     """All MOSA-VAE hyperparameters: architecture, losses, optimiser, training loop, Lightning."""
 
     # Architecture
-    views: dict[str, MOSAVAEViewConfig] = field(default_factory=dict)
+    views: dict[str, OmicViewConfig] = field(default_factory=dict)
     joint_latent_dim: int = 64
     fusion_method: str = "concat"
     shared_hidden_layer_dims: list[int] = field(default_factory=list)

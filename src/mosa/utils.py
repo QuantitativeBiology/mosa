@@ -10,13 +10,13 @@ from torch import Tensor
 
 from mosa.config import Config, DataConfig, ModelConfig
 from mosa.models.mofa.config import MOFAConfig
-from mosa.models.mosa.config import MOSAVAEConfig, MOSAVAEViewConfig
+from mosa.models.mosa.config import MOSAConfig, OmicViewConfig
 
 logger = logging.getLogger(__name__)
 
 
 _MODEL_CONFIGS: dict[str, type[ModelConfig]] = {
-    "mosa_vae": MOSAVAEConfig,
+    "mosa_vae": MOSAConfig,
     "mofa": MOFAConfig,
 }
 
@@ -47,7 +47,7 @@ def load_config(yaml_path: str | Path) -> Config:
 
     if mtype == "mosa_vae" and "views" in model_raw:
         model_raw["views"] = {
-            name: MOSAVAEViewConfig(name=name, **vcfg)
+            name: OmicViewConfig(name=name, **vcfg)
             for name, vcfg in model_raw["views"].items()
         }
 
