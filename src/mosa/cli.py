@@ -65,7 +65,7 @@ def _train(args):
     from sklearn.model_selection import train_test_split
 
     from mosa.data.io import load_mudata
-    from mosa.utils import load_config, seed_everything
+    from mosa.utils import load_config, seed_everything, validate_config_against_data
 
     torch.set_float32_matmul_precision("high")
     torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(False)
@@ -74,7 +74,8 @@ def _train(args):
         logging.getLogger("mosa").setLevel(logging.WARNING)
 
     cfg = load_config(args.config)
-    cfg.data.validate_paths()
+    for w in validate_config_against_data(cfg):
+        logger.warning(w)
     logger.debug("Config loaded from %s", args.config)
 
     seed_everything(cfg.model.random_seed)
@@ -190,15 +191,18 @@ def _inspect(args):
 
 
 def _validate(args):
-    """Validate a YAML config without training."""
-    from mosa.utils import load_config
+    """Validate a YAML config, including that the data satisfies the model's requirements."""
+    from mosa.utils import load_config, validate_config_against_data
 
     try:
         cfg = load_config(args.config)
-        cfg.data.validate_paths()
+        data_warnings = validate_config_against_data(cfg)
     except (ValueError, FileNotFoundError, KeyError, TypeError) as e:
         print(f"Config invalid: {e}")
         sys.exit(1)
+
+    for w in data_warnings:
+        print(f"Warning: {w}")
 
     print("Config OK")
     print(f"  data:    {cfg.data.path}")

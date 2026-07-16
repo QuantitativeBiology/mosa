@@ -143,3 +143,37 @@ class MOSAConfig(ModelConfig):
                 f"KL weight will never reach kl_weight_final",
                 stacklevel=2,
             )
+
+    def validate_against_data(self, data_cfg, summary: dict) -> list[str]:
+        """Check MOSA-specific value-level requirements against a data summary.
+
+        Hard invariants raise ValueError; soft ones (tissue/mutations/adversarial
+        batch count) degrade silently at fit time, so they are returned as warnings.
+        """
+        obs_columns = summary.get("obs_columns", [])
+        categories = summary.get("model_type_categories") or []
+
+        if self.inference and self.target_batch:
+            target = self.target_batch.strip()
+            if target not in categories:
+                raise ValueError(
+                    f"target_batch '{target}' not in model_type categories: {categories}"
+                )
+
+        result: list[str] = []
+        if (data_cfg.use_tissue or self.contrastive_weight > 0) and "tissue" not in obs_columns:
+            result.append(
+                "No 'tissue' column in data; tissue conditioning will be disabled and "
+                "the contrastive loss will degrade to zero."
+            )
+        if data_cfg.use_mutations and not any(c.startswith("mutation_") for c in obs_columns):
+            result.append(
+                "No 'mutation_*' columns in data; mutation conditioning will be disabled."
+            )
+        if self.adv_weight > 0 and len(categories) < 2:
+            result.append(
+                f"adv_weight > 0 but only {len(categories)} model_type categor"
+                f"{'y' if len(categories) == 1 else 'ies'} in data; adversarial batch "
+                f"correction will have no effect."
+            )
+        return result

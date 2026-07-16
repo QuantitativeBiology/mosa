@@ -26,3 +26,7 @@ class MOFAConfig(ModelConfig):
             raise ValueError(
                 f"convergence_mode must be one of {_VALID_CONVERGENCE}, got '{self.convergence_mode}'"
             )
+
+    def validate_against_data(self, data_cfg, summary: dict) -> list[str]:
+        """MOFA needs only the structural requirements, already checked by DataConfig."""
+        return []

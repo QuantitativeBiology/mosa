@@ -35,6 +35,34 @@ class DataConfig:
         if not (p.is_file() or p.is_dir()):
             raise FileNotFoundError(f"data.path not found: {self.path}")
 
+    def validate_against_data(self, summary: dict) -> list[str]:
+        """Check structural requirements against a data summary (see data/io.py:summarize_structure).
+
+        Shared by the `validate` CLI path and load-time structure checks, so both
+        raise the same errors. Raises ValueError on the first hard failure. No
+        soft/warning-level structural checks exist today; returns [] for a
+        uniform interface with model-specific validate_against_data().
+        """
+        obs_columns = summary.get("obs_columns", [])
+        if "model_type" not in obs_columns:
+            raise ValueError(
+                f"MuData .obs missing 'model_type' column. Available: {obs_columns}"
+            )
+
+        modalities = summary.get("modalities", {})
+        for view in self.views:
+            if view not in modalities:
+                raise ValueError(
+                    f"View '{view}' not in MuData. Available: {list(modalities.keys())}"
+                )
+            layers = modalities[view].get("layers", [])
+            if self.mask_layer_name not in layers:
+                raise ValueError(
+                    f"Mask layer '{self.mask_layer_name}' not in '{view}'. Available: {layers}"
+                )
+
+        return []
+
 
 @dataclass
 class ModelConfig:

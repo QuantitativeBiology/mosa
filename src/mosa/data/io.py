@@ -65,27 +65,33 @@ def _read_zarr_column(group) -> np.ndarray:
 
 # MuData loading
 
+def _summary_from_mdata(mdata) -> dict:
+    """Build a summarize_structure()-shaped dict from an already-loaded MuData."""
+    return {
+        "format": "loaded",
+        "modalities": {
+            name: {"n_features": adata.n_vars, "layers": list(adata.layers.keys())}
+            for name, adata in mdata.mod.items()
+        },
+        "obs_columns": list(mdata.obs.columns),
+        "model_type_categories": None,
+    }
+
+
 def _verify_mudata_structure(
     mdata,
     view_names: list[str],
     mask_layer_name: str,
 ) -> None:
-    """Validate MuData structure has required columns and views. Raises ValueError."""
-    if "model_type" not in mdata.obs.columns:
-        raise ValueError(
-            f"MuData .obs missing 'model_type' column. "
-            f"Available: {list(mdata.obs.columns)}"
-        )
-    for view_name in view_names:
-        if view_name not in mdata.mod:
-            raise ValueError(
-                f"View '{view_name}' not in MuData. Available: {list(mdata.mod.keys())}"
-            )
-        if mask_layer_name not in mdata.mod[view_name].layers:
-            raise ValueError(
-                f"Mask layer '{mask_layer_name}' not in '{view_name}'. "
-                f"Available: {list(mdata.mod[view_name].layers.keys())}"
-            )
+    """Validate MuData structure has required columns and views. Raises ValueError.
+
+    Delegates to DataConfig.validate_against_data so this load-time check and the
+    `mosa validate` data-requirements check share one rule implementation.
+    """
+    from mosa.config import DataConfig
+
+    data_cfg = DataConfig(path="unused", views=view_names, mask_layer_name=mask_layer_name)
+    data_cfg.validate_against_data(_summary_from_mdata(mdata))
 
 
 def _load_h5mu(
@@ -226,6 +232,78 @@ def load_mudata(
     if p.suffix == ".zarr" or (p.is_dir() and p.suffix != ".h5mu"):
         return _load_zarr(path, view_names, mask_layer_name)
     return _load_h5mu(path, view_names, mask_layer_name)
+
+
+def summarize_structure(path: str) -> dict:
+    """Read MuData structure metadata without loading any matrix data.
+
+    Used by `mosa validate` (and pre-train checks) to verify config↔data
+    requirements cheaply, before a full `load_mudata()`. Returns:
+
+        {
+          "format": "h5mu" | "zarr",
+          "modalities": {view_name: {"n_features": int, "layers": [str, ...]}},
+          "obs_columns": [str, ...],
+          "model_type_categories": [str, ...] | None,
+        }
+    """
+    p = Path(path)
+    if p.suffix == ".zarr" or (p.is_dir() and p.suffix != ".h5mu"):
+        return _summarize_zarr(path)
+    return _summarize_h5mu(path)
+
+
+def _summarize_h5mu(path: str) -> dict:
+    import mudata
+
+    mdata = mudata.read_h5mu(path, backed=True)
+    modalities = {
+        name: {"n_features": adata.n_vars, "layers": list(adata.layers.keys())}
+        for name, adata in mdata.mod.items()
+    }
+    obs_columns = list(mdata.obs.columns)
+    model_type_categories = None
+    if "model_type" in obs_columns:
+        model_type_categories = list(pd.unique(mdata.obs["model_type"]))
+
+    return {
+        "format": "h5mu",
+        "modalities": modalities,
+        "obs_columns": obs_columns,
+        "model_type_categories": model_type_categories,
+    }
+
+
+def _summarize_zarr(path: str) -> dict:
+    store = zarr.open_group(path, mode="r")
+
+    modalities: dict[str, dict] = {}
+    if "mod" in store:
+        for view_name in store["mod"]:
+            mod_group = store[f"mod/{view_name}"]
+            layers = list(mod_group["layers"].keys()) if "layers" in mod_group else []
+            n_features = 0
+            if "var" in mod_group:
+                var_group = mod_group["var"]
+                var_idx_key = _zarr_index_key(var_group)
+                n_features = len(_read_zarr_column(var_group[var_idx_key]))
+            modalities[view_name] = {"n_features": n_features, "layers": layers}
+
+    obs_columns: list[str] = []
+    model_type_categories = None
+    if "obs" in store:
+        obs_group = store["obs"]
+        idx_key = _zarr_index_key(obs_group)
+        obs_columns = [k for k in obs_group if k != idx_key]
+        if "model_type" in obs_group:
+            model_type_categories = list(pd.unique(_read_zarr_column(obs_group["model_type"])))
+
+    return {
+        "format": "zarr",
+        "modalities": modalities,
+        "obs_columns": obs_columns,
+        "model_type_categories": model_type_categories,
+    }
 
 
 # Validation helpers

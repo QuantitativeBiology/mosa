@@ -56,6 +56,24 @@ def load_config(yaml_path: str | Path) -> Config:
     return Config(data=data, model=model_cfg)
 
 
+def validate_config_against_data(cfg: Config) -> list[str]:
+    """Check that the data at cfg.data.path satisfies the config's requirements.
+
+    Cost-ordered: path existence, then a lazy structure summary (no matrices
+    loaded), then structural and model-specific value checks. Raises on hard
+    failures (missing path/view/mask/model_type/target_batch); returns
+    collected warning strings for soft ones (tissue, mutations, adversarial
+    batch count).
+    """
+    from mosa.data.io import summarize_structure
+
+    cfg.data.validate_paths()
+    summary = summarize_structure(cfg.data.path)
+    warnings = cfg.data.validate_against_data(summary)
+    warnings += cfg.model.validate_against_data(cfg.data, summary)
+    return warnings
+
+
 def tensors_to_numpy(t: Tensor) -> np.ndarray:
     """Convert tensor to numpy array on CPU."""
     return t.detach().cpu().numpy()
