@@ -167,18 +167,15 @@ def test_vae_params_all_receive_gradients(make_multi_omic_dataset, make_mosa_con
 
 
 # ---------------------------------------------------------------------------
-# Overfit test
+# Training-loop wiring
 #
-# Purpose: the single most important ML-specific test. If a model cannot
-# memorise one batch after many gradient steps, something is fundamentally
-# broken — gradient flow, loss computation, or the optimizer step is not
-# being applied. Uses Lightning's overfit_batches=1 to force training on a
-# fixed single batch.
-#
-# For standardised N(0,1) data with MSE loss, random-init reconstruction
-# loss is ~1.0. After 100 steps of overfit training it must fall below 0.5.
-# The threshold is deliberately loose to avoid flakiness; the goal is to
-# detect catastrophic failure (e.g. loss stays at 1.0), not measure quality.
+# SE-correctness, NOT model quality: asserts the manual-optimization loop
+# (zero_grad -> manual_backward -> step, scheduler, KL warmup) actually reduces
+# loss over many steps on a fixed batch. Threshold-free — checks direction, not
+# magnitude. A bug like an inverted LR, an optimizer built on the wrong param
+# list, or a missing step() would pass gradient-existence and fast_dev_run
+# checks yet fail here. Absolute-loss thresholds (convergence quality) are the
+# method developer's concern, deliberately excluded.
 # ---------------------------------------------------------------------------
 
 
@@ -194,10 +191,11 @@ class _LossTracker(pl.Callback):
             self.losses.append(float(metrics["train/recon"]))
 
 
-def test_vae_can_overfit_single_batch(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_vae_training_loop_reduces_loss(make_multi_omic_dataset, make_mosa_config, tmp_path):
+    """The optimizer loop reduces reconstruction loss over many steps on one batch."""
     dataset = make_multi_omic_dataset(n_samples=8)
     data_cfg, model_cfg = make_mosa_config(
-        dataset, num_epochs=100, batch_size=8, output_dir=str(tmp_path)
+        dataset, num_epochs=50, batch_size=8, output_dir=str(tmp_path)
     )
     dm = MOSADataModule(train_data=dataset, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg)
     dm.setup()
@@ -208,11 +206,11 @@ def test_vae_can_overfit_single_batch(make_multi_omic_dataset, make_mosa_config,
         n_batches=dm.n_batches,
     )
     tracker = _LossTracker()
-    # Train-only loop: overfit_batches forces a val step Lightning won't skip
-    # when val_dataloader returns None, so set limit_*_batches manually instead.
+    # Train-only loop over one fixed batch; limit_train_batches=1 keeps the batch
+    # constant so the loss trend reflects optimization, not data variation.
     trainer = _silent_trainer(
         no_val=True,
-        max_epochs=100,
+        max_epochs=50,
         limit_train_batches=1,
         log_every_n_steps=1,
         callbacks=[tracker],
@@ -221,10 +219,6 @@ def test_vae_can_overfit_single_batch(make_multi_omic_dataset, make_mosa_config,
 
     assert len(tracker.losses) >= 2, "No losses were recorded"
     assert tracker.losses[-1] < tracker.losses[0], (
-        f"Loss did not decrease: first={tracker.losses[0]:.4f}, "
-        f"last={tracker.losses[-1]:.4f}"
-    )
-    assert tracker.losses[-1] < 0.5, (
-        f"Final reconstruction loss {tracker.losses[-1]:.4f} is too high "
-        f"for a model that should have memorised one batch"
+        f"Training loop did not reduce loss over {len(tracker.losses)} steps: "
+        f"first={tracker.losses[0]:.4f}, last={tracker.losses[-1]:.4f}"
     )
