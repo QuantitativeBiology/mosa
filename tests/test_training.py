@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import copy
+
 import numpy as np
 import pytorch_lightning as pl
 import pytest
 import torch
 
 from mosa.models.mosa.datamodule import MOSADataModule
+from mosa.models.mosa.vae.losses import adversarial_loss
 from mosa.models.mosa.vae.vae_module import VAE
 
 
@@ -135,6 +138,40 @@ def test_vae_forward_no_nan_with_missing_data(make_multi_omic_dataset, make_mosa
 
 
 # ---------------------------------------------------------------------------
+# Missing-view zeroing
+#
+# Purpose: verify a fully-missing view's embedding is force-zeroed before
+# fusion (vae_module.py:172, emb[~sample_mask]=0.0), so arbitrary encoder
+# input values for a missing sample cannot leak into its latent. Uses
+# fusion_method="concat" (the datamodule default); the zeroing happens before
+# fusion so the contract holds for poe as well.
+# ---------------------------------------------------------------------------
+
+
+def test_missing_view_embedding_zeroed(make_multi_omic_dataset, make_mosa_config, tmp_path):
+    vae, dm = _make_vae_and_dm(make_multi_omic_dataset, make_mosa_config, tmp_path)
+    vae.eval()
+
+    batch = next(iter(dm.train_dataloader()))
+    view = vae.view_order[0]
+    sample_idx = 0
+
+    batch1 = copy.deepcopy(batch)
+    batch1["missing_masks"][view][sample_idx, :] = False
+
+    batch2 = copy.deepcopy(batch1)
+    batch2["encoder_inputs"][view][sample_idx] = torch.randn_like(
+        batch2["encoder_inputs"][view][sample_idx]
+    )
+
+    with torch.no_grad():
+        out1 = vae(batch1)
+        out2 = vae(batch2)
+
+    assert torch.equal(out1["mu"][sample_idx], out2["mu"][sample_idx])
+
+
+# ---------------------------------------------------------------------------
 # Gradient flow
 #
 # Purpose: verify that every trainable parameter in the encoder, decoder,
@@ -164,6 +201,102 @@ def test_vae_params_all_receive_gradients(make_multi_omic_dataset, make_mosa_con
         if p.requires_grad and p.grad is None and "discriminator" not in name
     ]
     assert not no_grad, f"Parameters with no gradient: {no_grad}"
+
+
+# ---------------------------------------------------------------------------
+# Adversarial / discriminator wiring
+#
+# Purpose: verify the two-optimizer manual-optimization path (training_step
+# phase 1: discriminator trained on detached z) actually wires gradients where
+# intended and nowhere else — the detach must isolate the encoder/decoder/
+# latent space from the discriminator's own loss.
+# ---------------------------------------------------------------------------
+
+
+def _make_adversarial_vae_and_dm(make_multi_omic_dataset, make_mosa_config, tmp_path):
+    """VAE + datamodule with adv_weight>0 (conftest default gives 2 model_type
+    categories, so n_batches=2 and self.discriminator is not None)."""
+    dataset = make_multi_omic_dataset()
+    data_cfg, model_cfg = make_mosa_config(
+        dataset, adv_weight=1.0, adv_learning_rate=1e-3, output_dir=str(tmp_path)
+    )
+    dm = MOSADataModule(train_data=dataset, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg)
+    dm.setup()
+    vae = VAE(
+        config=model_cfg,
+        view_input_dims=dm.view_input_dims,
+        conditional_dim=dm.conditional_dim,
+        n_batches=dm.n_batches,
+    )
+    return vae, dm
+
+
+def test_vae_fast_dev_run_adversarial(make_multi_omic_dataset, make_mosa_config, tmp_path):
+    vae, dm = _make_adversarial_vae_and_dm(make_multi_omic_dataset, make_mosa_config, tmp_path)
+    assert vae.discriminator is not None
+    trainer = _silent_trainer(no_val=True, max_epochs=1, limit_train_batches=1)
+    trainer.fit(vae, dm)
+
+
+def test_discriminator_params_receive_gradients(make_multi_omic_dataset, make_mosa_config, tmp_path):
+    vae, dm = _make_adversarial_vae_and_dm(make_multi_omic_dataset, make_mosa_config, tmp_path)
+    vae.train()
+
+    batch = next(iter(dm.train_dataloader()))
+    out = vae(batch)
+    disc_loss = adversarial_loss(
+        vae.discriminator(out["z"].detach()), batch["source_ids"], vae.class_weights
+    )
+    vae.zero_grad()
+    disc_loss.backward()
+
+    no_grad = [
+        name
+        for name, p in vae.discriminator.named_parameters()
+        if p.requires_grad and p.grad is None
+    ]
+    assert not no_grad, f"Discriminator parameters with no gradient: {no_grad}"
+
+
+def test_adversarial_z_detach_wiring(make_multi_omic_dataset, make_mosa_config, tmp_path):
+    """Guards the real training_step call sites (vae_module.py:245, 254): phase 1
+    calls the discriminator on a detached z, phase 2 on a non-detached z. A hook
+    on the discriminator captures both inputs during one real training step."""
+    vae, dm = _make_adversarial_vae_and_dm(make_multi_omic_dataset, make_mosa_config, tmp_path)
+    assert vae.discriminator is not None
+
+    captured: list[torch.Tensor] = []
+    vae.discriminator.register_forward_pre_hook(lambda module, args: captured.append(args[0]))
+
+    trainer = _silent_trainer(no_val=True, max_epochs=1, limit_train_batches=1)
+    trainer.fit(vae, dm)
+
+    assert len(captured) >= 2, f"Discriminator called {len(captured)} times, expected >= 2"
+    # Phase 1 (line 245): disc_pred = self.discriminator(out["z"].detach())
+    assert captured[0].grad_fn is None and not captured[0].requires_grad, (
+        "Phase-1 discriminator input is not detached from the VAE graph"
+    )
+    # Phase 2 (line 254): adv_pred = self.discriminator(out["z"])
+    assert captured[1].grad_fn is not None, (
+        "Phase-2 discriminator input is unexpectedly detached from the VAE graph"
+    )
+
+
+def test_vae_fast_dev_run_contrastive(make_multi_omic_dataset, make_mosa_config, tmp_path):
+    dataset = make_multi_omic_dataset()
+    data_cfg, model_cfg = make_mosa_config(
+        dataset, contrastive_weight=1.0, output_dir=str(tmp_path)
+    )
+    dm = MOSADataModule(train_data=dataset, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg)
+    dm.setup()
+    vae = VAE(
+        config=model_cfg,
+        view_input_dims=dm.view_input_dims,
+        conditional_dim=dm.conditional_dim,
+        n_batches=dm.n_batches,
+    )
+    trainer = _silent_trainer(no_val=True, max_epochs=1, limit_train_batches=1)
+    trainer.fit(vae, dm)
 
 
 # ---------------------------------------------------------------------------

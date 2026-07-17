@@ -120,6 +120,51 @@ def test_poe_masks_missing_view():
     assert torch.isfinite(z).all()
 
 
+def test_poe_masked_view_contributes_zero():
+    """A masked view's embedding must not affect mu/logvar (latent.py:174-180:
+    precision_v*mask and mu_v*mask zero its contribution before accumulation)."""
+    torch.manual_seed(0)
+    latent = BaseLatentSpace.create("poe", {"a": 16, "b": 16}, latent_dim=8)
+    latent.eval()
+
+    B = 6
+    emb_a = torch.randn(B, 16)
+    emb_b = torch.randn(B, 16)
+    masks = {
+        "a": torch.ones(B, dtype=torch.bool),
+        "b": torch.tensor([False, False, False, True, True, True]),
+    }
+
+    mu1, logvar1, _ = latent({"a": emb_a, "b": emb_b}, ["a", "b"], sample_masks=masks)
+
+    # Change view "b"'s embedding only for the masked samples (first 3 rows).
+    emb_b_changed = emb_b.clone()
+    emb_b_changed[:3] = torch.randn(3, 16)
+    mu2, logvar2, _ = latent({"a": emb_a, "b": emb_b_changed}, ["a", "b"], sample_masks=masks)
+
+    assert torch.equal(mu1[:3], mu2[:3])
+    assert torch.equal(logvar1[:3], logvar2[:3])
+
+
+def test_poe_fully_missing_sample_prior_fallback():
+    """A sample with every view masked out falls back to the isotropic prior:
+    mu=0 exactly, logvar=-log(1+EPS)~=0 (latent.py:166-183)."""
+    torch.manual_seed(0)
+    latent = BaseLatentSpace.create("poe", {"a": 16, "b": 16}, latent_dim=8)
+    latent.eval()
+
+    B = 4
+    embeddings = {"a": torch.randn(B, 16), "b": torch.randn(B, 16)}
+    masks = {
+        "a": torch.tensor([False, True, True, True]),
+        "b": torch.tensor([False, True, True, False]),
+    }
+    mu, logvar, _ = latent(embeddings, ["a", "b"], sample_masks=masks)
+
+    assert torch.allclose(mu[0], torch.zeros(8), atol=1e-6)
+    assert torch.allclose(logvar[0], torch.zeros(8), atol=1e-6)
+
+
 def test_latent_registry_unknown():
     with pytest.raises(ValueError, match="Unknown fusion method"):
         BaseLatentSpace.create("nonexistent", {"a": 16}, latent_dim=8)
