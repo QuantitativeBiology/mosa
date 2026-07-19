@@ -272,20 +272,20 @@ def _try_read(parquet_path, csv_path):
     return None
 
 
-def _load_samplesheet(path):
-    """Load samplesheet CSV with model_id as index."""
-    ss = pd.read_csv(path, index_col=0)
-    if "model_id" in ss.columns:
-        ss = ss.set_index("model_id")
-    return ss
+def _load_conditionals(path):
+    """Load conditionals CSV with model_id as index."""
+    conditionals = pd.read_csv(path, index_col=0)
+    if "model_id" in conditionals.columns:
+        conditionals = conditionals.set_index("model_id")
+    return conditionals
 
 
-def _align_to_samplesheet(df, samplesheet):
+def _align_to_conditionals(df, conditionals):
     """Keep only samples present in both DataFrames."""
-    common = df.index.intersection(samplesheet.index)
+    common = df.index.intersection(conditionals.index)
     if common.empty:
-        return df, samplesheet
-    return df.loc[common], samplesheet.loc[common]
+        return df, conditionals
+    return df.loc[common], conditionals.loc[common]
 
 
 def _save_fig(fig, out_path):
@@ -468,7 +468,7 @@ def _plot_feature_scatter(plot_df, out_path, xlabel, ylabel):
 
 def _generate_reconstruction_plots(data, views, plots_dir):
     """Generate input vs reconstruction scatter plots."""
-    samplesheet = data["samplesheet"]
+    conditionals = data["conditionals"]
 
     for name in views:
         omic_data = data["omics"].get(name, {})
@@ -494,10 +494,10 @@ def _generate_reconstruction_plots(data, views, plots_dir):
                 "input_mean": inp.mean(axis=1),
                 "recon_mean": rec.mean(axis=1),
             })
-            common_ss = sample_df.index.intersection(samplesheet.index)
-            if not common_ss.empty:
-                sample_df = sample_df.loc[common_ss]
-                sample_df["model_type"] = samplesheet.loc[common_ss, "model_type"]
+            common_conditionals = sample_df.index.intersection(conditionals.index)
+            if not common_conditionals.empty:
+                sample_df = sample_df.loc[common_conditionals]
+                sample_df["model_type"] = conditionals.loc[common_conditionals, "model_type"]
 
                 tag = recon_key.replace("recon_inf", "corrected").replace("recon", "recon")
                 _plot_sample_scatter(
@@ -553,13 +553,13 @@ def _try_compute_metrics(df, labels_series, dataset_name, label_type):
     )
 
 
-def _compute_all_clustering_metrics(data, views, samplesheet):
+def _compute_all_clustering_metrics(data, views, conditionals):
     """Compute clustering metrics for all datasets and label types."""
-    label_cols = [c for c in ("tissue", "model_type") if c in samplesheet.columns]
+    label_cols = [c for c in ("tissue", "model_type") if c in conditionals.columns]
     rows = []
 
     for label_col in label_cols:
-        labels = samplesheet[label_col].dropna()
+        labels = conditionals[label_col].dropna()
 
         for key in ("z", "z_inf"):
             result = _try_compute_metrics(data.get(key), labels, key, label_col)
@@ -583,7 +583,7 @@ def _compute_all_clustering_metrics(data, views, samplesheet):
 def _load_data_files(output_dir, views, data_path):
     """Load latents, reconstructions, and inputs for plotting.
 
-    Samplesheet and input data are from the MuData file at data_path.
+    Conditionals and input data are from the MuData file at data_path.
     """
     import mudata
     from scipy.sparse import issparse
@@ -595,7 +595,7 @@ def _load_data_files(output_dir, views, data_path):
         mdata = mudata.read_zarr(str(data_path))
     else:
         mdata = mudata.read(str(data_path))
-    data = {"omics": {}, "samplesheet": mdata.obs}
+    data = {"omics": {}, "conditionals": mdata.obs}
 
     z_full_pq = output_dir / "full" / "latent.parquet"
     z_full_csv = output_dir / "full" / "latent.csv"
@@ -649,35 +649,35 @@ def _load_data_files(output_dir, views, data_path):
 
 # UMAP plot generation
 
-def _make_umap_plot(df, samplesheet, palette, title, out_path, pca_components):
+def _make_umap_plot(df, conditionals, palette, title, out_path, pca_components):
     """Compute UMAP and save scatter plot."""
     logger.debug("Computing UMAP: %s (%d samples x %d features)", title, *df.shape)
-    df, ss = _align_to_samplesheet(df, samplesheet)
+    df, conditionals = _align_to_conditionals(df, conditionals)
     pca_comp = pca_components if df.shape[1] > pca_components else None
     embedding = compute_umap_embedding(df, pca_components=pca_comp)
-    plot_df = pd.concat([embedding, ss], axis=1)
+    plot_df = pd.concat([embedding, conditionals], axis=1)
     fig, _ = plot_umap(plot_df, palette, title=title)
     _save_fig(fig, out_path)
 
 
 def _generate_umap_plots(data, views, plots_dir, palette, pca_components):
     """Generate UMAP plots for latent and per-view reconstructions."""
-    samplesheet = data["samplesheet"]
+    conditionals = data["conditionals"]
 
     if "z" in data:
-        _make_umap_plot(data["z"], samplesheet, palette,
+        _make_umap_plot(data["z"], conditionals, palette,
                         "Latent UMAP", plots_dir / "umap_z.png", pca_components)
 
     for name in views:
         omic_data = data["omics"].get(name, {})
 
         if "recon" in omic_data:
-            _make_umap_plot(omic_data["recon"], samplesheet, palette,
+            _make_umap_plot(omic_data["recon"], conditionals, palette,
                             f"Reconstructed {name.upper()} UMAP",
                             plots_dir / f"umap_recon_{name}.png", pca_components)
 
         if "recon_inf" in omic_data:
-            _make_umap_plot(omic_data["recon_inf"], samplesheet, palette,
+            _make_umap_plot(omic_data["recon_inf"], conditionals, palette,
                             f"Reconstructed corrected {name.upper()} UMAP",
                             plots_dir / f"umap_recon_corrected_{name}.png", pca_components)
 
@@ -712,7 +712,7 @@ def generate_all_plots(output_dir, data_cfg, model_cfg=None, palette=None, pca_c
     logger.debug("Loading data files")
     data = _load_data_files(output_dir, views, data_cfg.path)
 
-    tissues = data["samplesheet"]["tissue"].dropna().unique()
+    tissues = data["conditionals"]["tissue"].dropna().unique()
     palette = build_palette(tissues, base_palette=palette)
 
     logger.debug("Generating UMAP plots")
@@ -722,7 +722,7 @@ def generate_all_plots(output_dir, data_cfg, model_cfg=None, palette=None, pca_c
     logger.debug("Generating reconstruction plots")
     _generate_reconstruction_plots(data, views, plots_dir)
 
-    metrics_rows = _compute_all_clustering_metrics(data, views, data["samplesheet"])
+    metrics_rows = _compute_all_clustering_metrics(data, views, data["conditionals"])
     if metrics_rows:
         metrics_out = output_dir / "metrics"
         metrics_out.mkdir(parents=True, exist_ok=True)

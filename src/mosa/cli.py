@@ -174,7 +174,7 @@ def _convert(args):
     logger.debug("Output file: %s", args.output)
 
     csv_to_mudata(
-        samplesheet_path=args.samplesheet,
+        conditionals_path=args.conditionals,
         view_specs=view_specs,
         output_path=args.output,
         mutations_path=args.mutations,
@@ -253,8 +253,8 @@ def main():
         "convert", help="Convert CSV files to MuData (.h5mu or .zarr)",
     )
     convert_parser.add_argument(
-        "--samplesheet", required=True,
-        help="Path to samplesheet CSV (required columns: model_id, model_type; optional: tissue)",
+        "--conditionals", required=True,
+        help="Path to conditionals CSV (required columns: model_id, model_type; optional: tissue)",
     )
     convert_parser.add_argument(
         "--view", required=True, action="append",

@@ -8,7 +8,7 @@
 #   Architecture       docs/architecture.md
 #
 # To convert CSVs to MuData:
-#   mosa convert --samplesheet data/samplesheet.csv \
+#   mosa convert --conditionals data/conditionals.csv \
 #                --view transcriptomics:data/transcriptomics.csv \
 #                --output data/dataset.h5mu
 

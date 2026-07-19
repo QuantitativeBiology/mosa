@@ -14,9 +14,9 @@ from mosa.data.dataset import MultiOmicDataset
 
 logger = logging.getLogger(__name__)
 
-# Fraction of samplesheet IDs found in CSV row index that triggers an orientation error.
+# Fraction of conditionals IDs found in CSV row index that triggers an orientation error.
 ORIENTATION_ERROR_THRESHOLD = 0.5
-# Fraction of samplesheet IDs found in CSV column names below which a warning is emitted.
+# Fraction of conditionals IDs found in CSV column names below which a warning is emitted.
 ORIENTATION_WARN_THRESHOLD = 0.10
 
 
@@ -308,55 +308,55 @@ def _summarize_zarr(path: str) -> dict:
 
 # Validation helpers
 
-def _validate_samplesheet(path: str) -> pd.DataFrame:
+def _validate_conditionals(path: str) -> pd.DataFrame:
     p = Path(path)
     if not p.exists():
-        raise FileNotFoundError(f"Samplesheet not found: {path}")
+        raise FileNotFoundError(f"Conditionals not found: {path}")
 
     try:
-        ss = pd.read_csv(path)
+        conditionals = pd.read_csv(path)
     except Exception as e:
-        raise ValueError(f"Cannot read samplesheet '{path}': {e}") from e
+        raise ValueError(f"Cannot read conditionals '{path}': {e}") from e
 
-    if "model_id" not in ss.columns:
+    if "model_id" not in conditionals.columns:
         raise ValueError(
-            f"Samplesheet '{path}' is missing required column 'model_id'.\n"
-            f"  Found columns: {list(ss.columns)}\n"
+            f"Conditionals '{path}' is missing required column 'model_id'.\n"
+            f"  Found columns: {list(conditionals.columns)}\n"
             f"  'model_id' must contain unique sample identifiers that match the "
             f"column headers of your omic CSVs (e.g. 'ACH-000001', 'TCGA-A1-A0SO')."
         )
 
-    if "model_type" not in ss.columns:
+    if "model_type" not in conditionals.columns:
         raise ValueError(
-            f"Samplesheet '{path}' is missing required column 'model_type'.\n"
-            f"  Found columns: {list(ss.columns)}\n"
+            f"Conditionals '{path}' is missing required column 'model_type'.\n"
+            f"  Found columns: {list(conditionals.columns)}\n"
             f"  'model_type' is used for conditional encoding, class balancing, and "
             f"batch correction. Add the column even if all samples share the same value."
         )
 
-    if "tissue" not in ss.columns:
+    if "tissue" not in conditionals.columns:
         logger.warning(
-            "Samplesheet '%s' has no 'tissue' column. Tissue conditioning will be "
+            "Conditionals '%s' has no 'tissue' column. Tissue conditioning will be "
             "disabled. Add a 'tissue' column if you want to condition on tissue of origin.",
             path,
         )
 
-    ss = ss.set_index("model_id")
-    ss = ss.loc[:, ~ss.columns.str.match(r"^Unnamed")]
+    conditionals = conditionals.set_index("model_id")
+    conditionals = conditionals.loc[:, ~conditionals.columns.str.match(r"^Unnamed")]
 
-    if ss.index.duplicated().any():
-        dupes = list(ss.index[ss.index.duplicated(keep=False)].unique())
+    if conditionals.index.duplicated().any():
+        dupes = list(conditionals.index[conditionals.index.duplicated(keep=False)].unique())
         raise ValueError(
-            f"Samplesheet '{path}' has duplicate model_id values: {dupes[:10]}"
+            f"Conditionals '{path}' has duplicate model_id values: {dupes[:10]}"
             + (" (and more)" if len(dupes) > 10 else "")
         )
 
-    return ss
+    return conditionals
 
 
 def _check_view_orientation(
     df_raw: pd.DataFrame,
-    ss_ids: set[str],
+    conditionals_ids: set[str],
     view_name: str,
     csv_path: str,
 ) -> None:
@@ -364,23 +364,23 @@ def _check_view_orientation(
 
     df_raw has NOT been transposed: rows = potential features, cols = potential samples.
     """
-    n_ss = max(len(ss_ids), 1)
-    row_overlap = len(set(df_raw.index) & ss_ids) / n_ss
-    col_overlap = len(set(df_raw.columns) & ss_ids) / n_ss
+    n_conditionals = max(len(conditionals_ids), 1)
+    row_overlap = len(set(df_raw.index) & conditionals_ids) / n_conditionals
+    col_overlap = len(set(df_raw.columns) & conditionals_ids) / n_conditionals
 
     if row_overlap >= ORIENTATION_ERROR_THRESHOLD:
         raise ValueError(
             f"View '{view_name}' ({csv_path}): CSV appears to be samples x features "
-            f"(row overlap with samplesheet IDs: {row_overlap:.0%}, "
+            f"(row overlap with conditionals IDs: {row_overlap:.0%}, "
             f"threshold: {ORIENTATION_ERROR_THRESHOLD:.0%}).\n"
             f"  MOSA expects features x samples: features as rows, samples as columns.\n"
             f"  Fix: transpose your CSV before converting, or re-export from R/Python "
             f"with features as rows and sample IDs as column headers."
         )
 
-    if col_overlap < ORIENTATION_WARN_THRESHOLD and len(ss_ids) > 10:
+    if col_overlap < ORIENTATION_WARN_THRESHOLD and len(conditionals_ids) > 10:
         logger.warning(
-            "View '%s' (%s): only %.0f%% of samplesheet sample IDs found in CSV column "
+            "View '%s' (%s): only %.0f%% of conditionals sample IDs found in CSV column "
             "names (threshold: %.0f%%). If conversion produces 0 samples, check that "
             "sample IDs use the same format in both files (e.g. 'ACH-000001' vs 'ACH000001').",
             view_name, csv_path, col_overlap * 100, ORIENTATION_WARN_THRESHOLD * 100,
@@ -448,7 +448,7 @@ def _dearrow_mudata(mdata: MuData) -> None:
 # Conversion
 
 def csv_to_mudata(
-    samplesheet_path: str,
+    conditionals_path: str,
     view_specs: list[tuple[str, str]],
     output_path: str,
     mutations_path: str | None = None,
@@ -458,8 +458,8 @@ def csv_to_mudata(
 
     Parameters
     ----------
-    samplesheet_path : str
-        Path to samplesheet CSV (requires model_id, model_type; tissue optional).
+    conditionals_path : str
+        Path to conditionals CSV (requires model_id, model_type; tissue optional).
     view_specs : list of tuple
         (view_name, csv_path) tuples; CSVs must be features x samples.
     output_path : str
@@ -477,8 +477,8 @@ def csv_to_mudata(
 
     # Pre-flight validation
     _check_format_extension(output_path, format)
-    samplesheet = _validate_samplesheet(samplesheet_path)
-    ss_ids = set(samplesheet.index)
+    conditionals = _validate_conditionals(conditionals_path)
+    conditionals_ids = set(conditionals.index)
 
     for view_name, csv_path in view_specs:
         if not Path(csv_path).exists():
@@ -492,7 +492,7 @@ def csv_to_mudata(
                 f"View '{view_name}': cannot read '{csv_path}': {e}"
             ) from e
 
-        _check_view_orientation(df_raw, ss_ids, view_name, csv_path)
+        _check_view_orientation(df_raw, conditionals_ids, view_name, csv_path)
         _validate_view_numeric(df_raw, view_name, csv_path)
 
     if mutations_path and not Path(mutations_path).exists():
@@ -512,20 +512,20 @@ def csv_to_mudata(
     all_view_samples: set[str] = set()
     for s in view_sample_sets.values():
         all_view_samples |= s
-    common_samples = sorted(all_view_samples & ss_ids)
+    common_samples = sorted(all_view_samples & conditionals_ids)
 
     if not common_samples:
-        ss_examples = list(ss_ids)[:5]
+        conditionals_examples = list(conditionals_ids)[:5]
         view_name0, _ = view_specs[0]
         view_examples = list(view_sample_sets[view_name0])[:5]
         raise ValueError(
-            f"No samples found in the samplesheet that appear in any view CSV.\n"
-            f"  Samplesheet model_ids (first 5): {ss_examples}\n"
+            f"No samples found in the conditionals that appear in any view CSV.\n"
+            f"  Conditionals model_ids (first 5): {conditionals_examples}\n"
             f"  View '{view_name0}' column names (first 5): {view_examples}\n"
             f"  Check that sample IDs use the same format in both files."
         )
 
-    logger.debug("Union samples (with samplesheet metadata): %d", len(common_samples))
+    logger.debug("Union samples (with conditionals metadata): %d", len(common_samples))
     for view_name, ss in view_sample_sets.items():
         n_present = len(ss & set(common_samples))
         logger.debug("  view '%s': %d / %d samples present",
@@ -536,7 +536,7 @@ def csv_to_mudata(
         mutations_df = pd.read_csv(mutations_path, index_col=0).T
 
     # Align to common samples
-    samplesheet = samplesheet.loc[common_samples]
+    conditionals = conditionals.loc[common_samples]
     for name in omics:
         omics[name] = omics[name].reindex(common_samples)
     if mutations_df is not None:
@@ -551,7 +551,7 @@ def csv_to_mudata(
         # Do NOT impute here; keep NaN for z-score in datamodule
         # Only mask layer records which values are missing
         adata = AnnData(X=X.astype(np.float32), var=pd.DataFrame(index=df.columns), dtype=np.float32)
-        adata.obs_names = samplesheet.index
+        adata.obs_names = conditionals.index
         adata.layers["mask"] = mask
         adatas[view_name] = adata
 
@@ -571,7 +571,7 @@ def csv_to_mudata(
             view_name, presence.sum(), len(presence),
         )
 
-    mdata.obs = samplesheet.copy()
+    mdata.obs = conditionals.copy()
 
     if mutations_df is not None:
         mutations_df = mutations_df.add_prefix("mutation_")
