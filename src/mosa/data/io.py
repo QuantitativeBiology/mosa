@@ -126,11 +126,6 @@ def _load_h5mu(
             mask = mask.toarray()
         mask = mask.astype(bool)
 
-        if view_name in mdata.obsm:
-            presence = np.asarray(mdata.obsm[view_name]).flatten().astype(bool)
-            X[~presence] = 0.0
-            mask[~presence] = False
-
         views[view_name] = X
         masks[view_name] = mask
         feature_names[view_name] = list(adata.var_names)
@@ -559,13 +554,11 @@ def csv_to_mudata(
     logger.debug("Creating MuData object")
     mdata = MuData(adatas)
 
-    # Set obsm presence flags based on actual mask (≥1 feature present), not CSV presence
+    # Presence is derived from the mask layer at load time, not persisted here.
     for view_name in omics:
         adata = adatas[view_name]
         mask = adata.layers["mask"]
-        # True if sample has ≥1 non-missing feature
-        presence = mask.any(axis=1).reshape(-1, 1)
-        mdata.obsm[view_name] = presence
+        presence = mask.any(axis=1)
         logger.debug(
             "  %s: %d / %d samples have ≥1 feature present",
             view_name, presence.sum(), len(presence),
@@ -673,17 +666,11 @@ def inspect_mudata(path: str) -> None:
     suffix = f"  ... ({n_obs} total)" if n_obs > 5 else ""
     print(f"\nSample IDs (first 5): {', '.join(sample_ids)}{suffix}")
 
-    obsm_keys = [k for k in mdata.obsm.keys() if k in mdata.mod]
-    if obsm_keys:
-        print("\nPer-view sample presence (obsm):")
-        for key in obsm_keys:
-            arr = mdata.obsm[key]
-            n = int(arr.sum()) if arr.dtype == bool else int((arr > 0).sum())
-            print(f"  {key}: {n}/{n_obs} samples")
-            adata = mdata.mod[key]
-            if "mask" in adata.layers:
-                mask_present = int(adata.layers["mask"].any(axis=1).sum())
-                if n > mask_present:
-                    print(f"    [WARNING: {n - mask_present} samples present in obsm but have all-NaN data — they contribute nothing to this modality]")
+    print("\nPer-view sample presence:")
+    for key, adata in mdata.mod.items():
+        if "mask" not in adata.layers:
+            continue
+        n = int(adata.layers["mask"].any(axis=1).sum())
+        print(f"  {key}: {n}/{n_obs} samples")
 
     print()
