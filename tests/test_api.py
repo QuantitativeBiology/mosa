@@ -58,6 +58,23 @@ def test_vae_transform_shape(make_multi_omic_dataset, make_mosa_config, tmp_path
     assert not np.isnan(z).any()
 
 
+def test_transform_unseen_model_type_raises(make_multi_omic_dataset, make_mosa_config, tmp_path):
+    """Inference data with a model_type absent from the fit-time categories must
+    raise, not silently miscode it (previously a negative-index wrap)."""
+    dataset = make_multi_omic_dataset(n_samples=20)
+    train, _ = _split(dataset)
+    data_cfg, model_cfg = make_mosa_config(dataset, output_dir=str(tmp_path))
+    model = MOSAModel(data_cfg, model_cfg)
+    model.fit(train, None)
+
+    unseen = make_multi_omic_dataset(n_samples=8, seed=1)
+    unseen.metadata["model_type"] = ["NovelType"] * unseen.n_samples
+    with pytest.raises(ValueError, match="not seen during fit"):
+        model.transform(unseen)
+    with pytest.raises(ValueError, match="not seen during fit"):
+        model.reconstruct(unseen)
+
+
 def test_vae_reconstruct_shapes(make_multi_omic_dataset, make_mosa_config, tmp_path):
     dataset = make_multi_omic_dataset(n_samples=20)
     train, val = _split(dataset)

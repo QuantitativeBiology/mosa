@@ -116,6 +116,17 @@ def _load_h5mu(
     for view_name in view_names:
         tv = time.perf_counter()
         adata = mdata.mod[view_name]
+        # MuData does not guarantee a modality's row order matches the global
+        # .obs; pairing X rows with obs positionally would silently mislabel
+        # samples. MOSA-produced files are always aligned (convert reindexes
+        # every view to one order), so require that here rather than corrupt.
+        if not adata.obs_names.equals(mdata.obs_names):
+            raise ValueError(
+                f"View '{view_name}' sample order does not match the global "
+                f".obs order. MOSA requires every modality to be aligned to "
+                f".obs; reindex the modality to mdata.obs_names before loading."
+            )
+        adata.var_names_make_unique()
         X = adata.X
         if issparse(X):
             X = X.toarray()
@@ -162,14 +173,16 @@ def _load_zarr(
     obs_idx_key = _zarr_index_key(obs_group)
     sample_names = list(_read_zarr_column(obs_group[obs_idx_key]))
 
-    obs_dict: dict[str, np.ndarray] = {
-        "model_type": _read_zarr_column(obs_group["model_type"])
-    }
-    if "tissue" in obs_group:
-        obs_dict["tissue"] = _read_zarr_column(obs_group["tissue"])
+    # Read every obs column (not just model_type/tissue/mutation_*), so the
+    # zarr loader preserves the same metadata the h5mu loader does.
+    obs_dict: dict[str, np.ndarray] = {}
     for key in obs_group:
-        if key.startswith("mutation_"):
+        if key == obs_idx_key:
+            continue
+        try:
             obs_dict[key] = _read_zarr_column(obs_group[key])
+        except (ValueError, KeyError) as e:
+            logger.debug("Skipping undecodable obs column '%s': %s", key, e)
     obs_df = pd.DataFrame(obs_dict, index=sample_names)
 
     views: dict[str, np.ndarray] = {}
@@ -180,6 +193,20 @@ def _load_zarr(
         mod_key = f"mod/{view_name}"
         if mod_key not in store:
             raise ValueError(f"View '{view_name}' not found in zarr store at {path}")
+
+        # Same alignment requirement as _load_h5mu: the modality's row order
+        # must match the global obs order, else X rows pair with the wrong
+        # samples. Checked when the modality stores its own obs index.
+        mod_obs_key = f"{mod_key}/obs"
+        if mod_obs_key in store:
+            mod_obs = store[mod_obs_key]
+            mod_idx = list(_read_zarr_column(mod_obs[_zarr_index_key(mod_obs)]))
+            if mod_idx != sample_names:
+                raise ValueError(
+                    f"View '{view_name}' sample order does not match the global "
+                    f".obs order in the zarr store. MOSA requires every modality "
+                    f"to be aligned to .obs."
+                )
 
         views[view_name] = store[f"{mod_key}/X"][:].astype(np.float32)
         masks[view_name] = store[f"{mod_key}/layers/{mask_layer_name}"][:].astype(bool)
@@ -225,8 +252,11 @@ def load_mudata(
     """
     p = Path(path)
     if p.suffix == ".zarr" or (p.is_dir() and p.suffix != ".h5mu"):
-        return _load_zarr(path, view_names, mask_layer_name)
-    return _load_h5mu(path, view_names, mask_layer_name)
+        dataset = _load_zarr(path, view_names, mask_layer_name)
+    else:
+        dataset = _load_h5mu(path, view_names, mask_layer_name)
+    dataset.validate()
+    return dataset
 
 
 def summarize_structure(path: str) -> dict:
@@ -649,7 +679,7 @@ def inspect_mudata(path: str) -> None:
     else:
         for col in obs.columns:
             s = obs[col]
-            if pd.api.types.is_categorical_dtype(s) or s.dtype == object:
+            if isinstance(s.dtype, pd.CategoricalDtype) or s.dtype == object:
                 vc = s.value_counts()
                 if len(vc) <= 8:
                     summary = ", ".join(f"{k}: {v}" for k, v in vc.items())

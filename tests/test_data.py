@@ -169,6 +169,150 @@ def test_load_h5mu_missing_view_raises(tmp_path):
         load_mudata(str(p), ["view_a", "view_missing"])
 
 
+def test_load_h5mu_misaligned_modality_raises(tmp_path):
+    """A modality whose row order differs from global .obs must be rejected,
+    not silently mispaired (positional X-vs-obs pairing would mislabel samples)."""
+    import anndata
+    import mudata
+
+    anndata.settings.allow_write_nullable_strings = True
+    names = ["S0", "S1", "S2"]
+    a = anndata.AnnData(
+        X=np.array([[0.0], [1.0], [2.0]], dtype=np.float32),
+        var=pd.DataFrame(index=pd.Index(["fa"], dtype=object)),
+    )
+    a.obs_names = pd.Index(names, dtype=object)
+    a.layers["mask"] = np.ones((3, 1), dtype=bool)
+    # Modality b holds the same samples in reversed order.
+    b = anndata.AnnData(
+        X=np.array([[2.0], [1.0], [0.0]], dtype=np.float32),
+        var=pd.DataFrame(index=pd.Index(["fb"], dtype=object)),
+    )
+    b.obs_names = pd.Index(["S2", "S1", "S0"], dtype=object)
+    b.layers["mask"] = np.ones((3, 1), dtype=bool)
+    mdata = mudata.MuData({"a": a, "b": b})
+    mdata.obs["model_type"] = ["T", "T", "T"]
+    _dearrow_mudata(mdata)
+    p = tmp_path / "misaligned.h5mu"
+    mdata.write(str(p))
+
+    with pytest.raises(ValueError, match="sample order does not match"):
+        load_mudata(str(p), ["a", "b"])
+
+
+def _build_two_view_mdata(reverse_b: bool, extra_obs: dict | None = None):
+    import anndata
+    import mudata
+
+    anndata.settings.allow_write_nullable_strings = True
+    names = ["S0", "S1", "S2"]
+    a = anndata.AnnData(
+        X=np.array([[0.0], [1.0], [2.0]], dtype=np.float32),
+        var=pd.DataFrame(index=pd.Index(["fa"], dtype=object)),
+    )
+    a.obs_names = pd.Index(names, dtype=object)
+    a.layers["mask"] = np.ones((3, 1), dtype=bool)
+    b_order = ["S2", "S1", "S0"] if reverse_b else names
+    b_vals = [[2.0], [1.0], [0.0]] if reverse_b else [[0.0], [1.0], [2.0]]
+    b = anndata.AnnData(
+        X=np.array(b_vals, dtype=np.float32),
+        var=pd.DataFrame(index=pd.Index(["fb"], dtype=object)),
+    )
+    b.obs_names = pd.Index(b_order, dtype=object)
+    b.layers["mask"] = np.ones((3, 1), dtype=bool)
+    mdata = mudata.MuData({"a": a, "b": b})
+    mdata.obs["model_type"] = ["T", "T", "T"]
+    if extra_obs:
+        for k, v in extra_obs.items():
+            mdata.obs[k] = v
+    _dearrow_mudata(mdata)
+    return mdata
+
+
+def test_load_zarr_misaligned_modality_raises(tmp_path):
+    mdata = _build_two_view_mdata(reverse_b=True)
+    p = tmp_path / "misaligned.zarr"
+    mdata.write_zarr(str(p))
+    with pytest.raises(ValueError, match="sample order does not match"):
+        load_mudata(str(p), ["a", "b"])
+
+
+def test_load_zarr_preserves_extra_obs_column(tmp_path):
+    mdata = _build_two_view_mdata(reverse_b=False, extra_obs={"age": [30, 40, 50]})
+    p = tmp_path / "extra.zarr"
+    mdata.write_zarr(str(p))
+    ds = load_mudata(str(p), ["a", "b"])
+    assert "age" in ds.metadata.columns
+    assert list(ds.metadata["age"]) == [30, 40, 50]
+
+
+def test_load_h5mu_deduplicates_var_names(tmp_path):
+    import anndata
+    import mudata
+
+    anndata.settings.allow_write_nullable_strings = True
+    a = anndata.AnnData(
+        X=np.array([[1.0, 2.0, 3.0]], dtype=np.float32),
+        var=pd.DataFrame(index=pd.Index(["GENE1", "GENE1", "GENE2"], dtype=object)),
+    )
+    a.obs_names = pd.Index(["S0"], dtype=object)
+    a.layers["mask"] = np.ones((1, 3), dtype=bool)
+    mdata = mudata.MuData({"a": a})
+    mdata.obs["model_type"] = ["T"]
+    _dearrow_mudata(mdata)
+    p = tmp_path / "dup.h5mu"
+    mdata.write(str(p))
+    ds = load_mudata(str(p), ["a"])
+    feats = ds.feature_names["a"]
+    assert len(feats) == 3
+    assert len(set(feats)) == 3  # duplicates made unique
+
+
+def test_load_h5mu_aligned_values_land_on_right_sample(tmp_path):
+    """Adversarial positive: each row carries a unique signature so a positional
+    mix-up would be detectable; aligned data must load each row onto its sample."""
+    import anndata
+    import mudata
+
+    anndata.settings.allow_write_nullable_strings = True
+    samples = [f"s_{i}" for i in range(6)]
+    Xa = np.arange(6 * 4, dtype=np.float32).reshape(6, 4)      # row i encodes i
+    Xb = np.arange(6 * 3, dtype=np.float32).reshape(6, 3) + 100.0
+    a = anndata.AnnData(X=Xa, var=pd.DataFrame(index=pd.Index([f"a{j}" for j in range(4)], dtype=object)))
+    a.obs_names = pd.Index(samples, dtype=object)
+    a.layers["mask"] = np.ones((6, 4), dtype=bool)
+    b = anndata.AnnData(X=Xb, var=pd.DataFrame(index=pd.Index([f"b{j}" for j in range(3)], dtype=object)))
+    b.obs_names = pd.Index(samples, dtype=object)
+    b.layers["mask"] = np.ones((6, 3), dtype=bool)
+    mdata = mudata.MuData({"a": a, "b": b})
+    mdata.obs["model_type"] = ["T"] * 6
+    _dearrow_mudata(mdata)
+    p = tmp_path / "aligned.h5mu"
+    mdata.write(str(p))
+
+    ds = load_mudata(str(p), ["a", "b"])
+    assert list(ds.metadata.index) == samples
+    np.testing.assert_allclose(ds.views["a"], Xa)
+    np.testing.assert_allclose(ds.views["b"], Xb)
+
+
+def test_load_mudata_invokes_validate(tmp_path, monkeypatch):
+    """load_mudata must call MultiOmicDataset.validate() before returning."""
+    import mosa.data.dataset as dataset_mod
+
+    p = _create_test_h5mu(tmp_path / "v.h5mu", 8, {"view_a": 5})
+    calls = {"n": 0}
+    real = dataset_mod.MultiOmicDataset.validate
+
+    def spy(self):
+        calls["n"] += 1
+        return real(self)
+
+    monkeypatch.setattr(dataset_mod.MultiOmicDataset, "validate", spy)
+    load_mudata(str(p), ["view_a"])
+    assert calls["n"] >= 1
+
+
 def test_load_h5mu_sparse_data(tmp_path):
     import anndata
     import mudata

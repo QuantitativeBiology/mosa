@@ -57,7 +57,14 @@ class MOSADataset(Dataset):
 
 
 class LazyZarrDataset(Dataset):
-    """Lazy-loading dataset from MuData zarr store; each worker opens its own handle."""
+    """Lazy-loading dataset from MuData zarr store; each worker opens its own handle.
+
+    NOTE: currently unwired — no caller passes ``zarr_path`` to MOSADataModule,
+    so this path is never exercised. Before enabling it, verify the index logic:
+    ``__getitems__`` reads ``store[...][sorted_real]`` by absolute store
+    position, while the train/val split produces randomized/stratified indices,
+    so the two must be reconciled or rows will misalign with their labels.
+    """
 
     def __init__(
         self,
@@ -620,6 +627,15 @@ class MOSADataModule(pl.LightningDataModule):
             ordered=True,
         )
         label_codes = np.asarray(model_type_cats.codes, dtype=np.intp)
+        # code -1 marks a model_type absent from the training categories; left
+        # unchecked it would negative-index class_weights (wrapping to the last
+        # class) and misalign the conditional block. Fail clearly instead.
+        if (label_codes < 0).any():
+            unseen = sorted(set(obs_df["model_type"][label_codes < 0]))
+            raise ValueError(
+                f"model_type value(s) {unseen} not seen during fit; known "
+                f"categories: {self.batch_categories}"
+            )
         if self.class_weights is not None:
             sample_weights = self.class_weights[label_codes].astype(np.float32)
         else:

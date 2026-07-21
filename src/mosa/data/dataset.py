@@ -16,7 +16,9 @@ class MultiOmicDataset:
 
     views: dict[str, np.ndarray]
     """Per-view feature matrices. Keys are view names (e.g. 'gexp_voom'),
-    values are float32 arrays of shape [N, D_view]. Missing values are 0.0."""
+    values are float32 arrays of shape [N, D_view]. Missing values are NaN
+    (imputed to 0.0 downstream by the datamodule, after the scaler is fit on
+    observed values only)."""
 
     masks: dict[str, np.ndarray]
     """Per-view presence masks. Same keys as views.
