@@ -29,6 +29,9 @@ plot = [
     "seaborn==0.13.2",
     "umap-learn==0.5.11",
 ]
+hpo = [
+    "optuna>=3.0",
+]
 dev = [
     "pytest>=8.0",
     "generative-multi-omics-data-integration-library[plot]",

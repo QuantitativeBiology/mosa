@@ -43,18 +43,16 @@ def _setup_logging(debug: bool):
         logging.getLogger("pytorch_lightning").setLevel(logging.WARNING)
 
 
-def _build_model(data_cfg, model_cfg):
-    """Instantiate the model class matching the parsed model_cfg type."""
-    from mosa.models.mofa.config import MOFAConfig
-    from mosa.models.mosa.config import MOSAConfig
+def _load_config_and_data(config_path):
+    """Load a config and its MuData, emitting data-validation warnings."""
+    from mosa.data.io import load_mudata
+    from mosa.utils import load_config, validate_config_against_data
 
-    if isinstance(model_cfg, MOSAConfig):
-        from mosa.models.mosa import MOSAModel
-        return MOSAModel(data_cfg, model_cfg)
-    if isinstance(model_cfg, MOFAConfig):
-        from mosa.models.mofa import MOFAModel
-        return MOFAModel(data_cfg, model_cfg)
-    raise TypeError(f"Unsupported model_cfg type: {type(model_cfg).__name__}")
+    cfg = load_config(config_path)
+    for w in validate_config_against_data(cfg):
+        logger.warning(w)
+    dataset = load_mudata(cfg.data.path, cfg.data.views, cfg.data.mask_layer_name)
+    return cfg, dataset
 
 
 def _train(args):
@@ -64,8 +62,8 @@ def _train(args):
     import torch
     from sklearn.model_selection import train_test_split
 
-    from mosa.data.io import load_mudata
-    from mosa.utils import load_config, seed_everything, validate_config_against_data
+    from mosa.models.registry import build_model
+    from mosa.utils import seed_everything
 
     torch.set_float32_matmul_precision("high")
     torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(False)
@@ -73,18 +71,8 @@ def _train(args):
     if int(os.environ.get("LOCAL_RANK", 0)) != 0:
         logging.getLogger("mosa").setLevel(logging.WARNING)
 
-    cfg = load_config(args.config)
-    for w in validate_config_against_data(cfg):
-        logger.warning(w)
-    logger.debug("Config loaded from %s", args.config)
-
+    cfg, dataset = _load_config_and_data(args.config)
     seed_everything(cfg.model.random_seed)
-
-    dataset = load_mudata(
-        cfg.data.path,
-        cfg.data.views,
-        cfg.data.mask_layer_name,
-    )
 
     train_data = dataset
     val_data = None
@@ -104,13 +92,11 @@ def _train(args):
         train_data = dataset.subset(train_idx)
         val_data = dataset.subset(val_idx)
 
-    model = _build_model(cfg.data, cfg.model)
-    if "resume_from" in model.fit.__code__.co_varnames:
-        model.fit(train_data, val_data, resume_from=args.resume)
-    else:
-        model.fit(train_data, val_data)
+    model = build_model(cfg.data, cfg.model)
+    model.fit(train_data, val_data, resume_from=args.resume)
 
     if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+        model.save_outputs()
         logger.debug("Training complete")
 
 
@@ -119,9 +105,9 @@ def _transform(args):
     import pandas as pd
 
     from mosa.data.io import load_mudata
-    from mosa.models.mosa import MOSAModel
+    from mosa.models.registry import load_model
 
-    model = MOSAModel.load(args.checkpoint)
+    model = load_model(args.checkpoint)
     dataset = load_mudata(
         args.input,
         model.data_cfg.views,
@@ -141,6 +127,48 @@ def _transform(args):
             df = pd.DataFrame(arr, index=dataset.sample_names)
             df.to_parquet(out_dir / f"recon_{omic}.parquet")
         print(f"Reconstructions saved to {out_dir}/")
+
+
+def _cross_validate(args):
+    """Load config and data, run stratified k-fold cross-validation, and print scores."""
+    from mosa.models.evaluation import cross_validate
+
+    cfg, dataset = _load_config_and_data(args.config)
+    results = cross_validate(dataset, cfg.data, cfg.model, n_folds=args.folds)
+
+    views = list(results["per_fold"][0]["per_view"].keys())
+    header = f"{'fold':<6}" + "".join(f"{v + ' (NMSE)':<20}" for v in views) + f"{'aggregate':<12}"
+    print(header)
+    for i, fold in enumerate(results["per_fold"]):
+        row = f"{i:<6}"
+        for v in views:
+            row += f"{fold['per_view'][v]['nmse']:<20.4f}"
+        row += f"{fold['aggregate']:<12.4f}"
+        print(row)
+    print(f"\nmean ± std (aggregate NMSE): {results['mean']:.4f} ± {results['std']:.4f}")
+
+
+def _optimize(args):
+    """Load config and data, run Optuna hyperparameter search, and print the best trial."""
+    from mosa.models.optimize import load_search_space, optimize
+
+    cfg, dataset = _load_config_and_data(args.config)
+    search_space = load_search_space(args.search_space)
+
+    results = optimize(
+        dataset, cfg.data, cfg.model, search_space,
+        n_trials=args.trials, n_folds=args.folds,
+    )
+    study = results["study"]
+
+    print(f"Trials: {len(study.trials)} (n_trials={args.trials})")
+    pruned = sum(1 for t in study.trials if t.state.name == "PRUNED")
+    completed = sum(1 for t in study.trials if t.state.name == "COMPLETE")
+    print(f"  completed: {completed}, pruned: {pruned}")
+    print(f"\nBest value (mean aggregate NMSE): {results['best_value']:.4f}")
+    print("Best params:")
+    for name, value in results["best_params"].items():
+        print(f"  {name}: {value}")
 
 
 def _plot(args):
@@ -240,6 +268,26 @@ def main():
                                   help="Also write per-omic reconstruction parquets")
     transform_parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
 
+    cv_parser = subparsers.add_parser(
+        "cross-validate", help="Run stratified k-fold cross-validation",
+    )
+    cv_parser.add_argument("--config", required=True, help="Path to YAML config file")
+    cv_parser.add_argument(
+        "--folds", type=int, default=5, help="Number of stratified folds (default: 5)",
+    )
+    cv_parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
+
+    optimize_parser = subparsers.add_parser(
+        "optimize", help="Run Optuna hyperparameter search over a config",
+    )
+    optimize_parser.add_argument("--config", required=True, help="Path to YAML config file")
+    optimize_parser.add_argument(
+        "--search-space", required=True, help="Path to search-space YAML (see configs/search_space.yaml)",
+    )
+    optimize_parser.add_argument("--trials", type=int, default=20, help="Number of Optuna trials (default: 20)")
+    optimize_parser.add_argument("--folds", type=int, default=3, help="Folds per trial's cross_validate (default: 3)")
+    optimize_parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
+
     plot_parser = subparsers.add_parser("plot", help="Generate diagnostic plots from training outputs")
     plot_parser.add_argument("--config", required=True, help="Path to YAML config file")
     plot_parser.add_argument(
@@ -290,6 +338,10 @@ def main():
         _train(args)
     elif args.command == "transform":
         _transform(args)
+    elif args.command == "cross-validate":
+        _cross_validate(args)
+    elif args.command == "optimize":
+        _optimize(args)
     elif args.command == "plot":
         _plot(args)
     elif args.command == "convert":

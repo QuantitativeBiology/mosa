@@ -82,6 +82,17 @@ class MOSAConfig(ModelConfig):
     checkpoint_top_k: int = 3
     num_workers: int = 0
 
+    @classmethod
+    def from_yaml_dict(cls, raw: dict) -> "MOSAConfig":
+        """Parse the per-view mapping into OmicViewConfig objects before construction."""
+        raw = dict(raw)
+        if "views" in raw:
+            raw["views"] = {
+                name: OmicViewConfig(name=name, **vcfg)
+                for name, vcfg in raw["views"].items()
+            }
+        return cls(**raw)
+
     def __post_init__(self):
         super().__post_init__()
 

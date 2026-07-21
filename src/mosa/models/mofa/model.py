@@ -9,12 +9,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from mosa.api import MultiOmicModel
+from mosa.models.api import MultiOmicModel
 from mosa.config import DataConfig
 from mosa.data.dataset import MultiOmicDataset
 from mosa.models.mofa.config import MOFAConfig
+from mosa.models.registry import register_model
 
 
+@register_model("mofa", MOFAConfig)
 class MOFAModel(MultiOmicModel):
     """MultiOmicModel implementation using MOFA+ (mofapy2 / mofax).
 
@@ -32,6 +34,7 @@ class MOFAModel(MultiOmicModel):
         self.model_cfg = model_cfg or MOFAConfig()
         self.save_path = save_path
         self._model = None
+        self._ent = None
 
     def _to_long_df(self, data: MultiOmicDataset) -> pd.DataFrame:
         """Convert MultiOmicDataset to MOFA long-format DataFrame."""
@@ -63,8 +66,13 @@ class MOFAModel(MultiOmicModel):
             ["sample", "feature", "value", "view", "group"]
         ]
 
-    def fit(self, train: MultiOmicDataset, val: MultiOmicDataset | None = None) -> None:
-        """Train the MOFA model. val is ignored."""
+    def fit(
+        self,
+        train: MultiOmicDataset,
+        val: MultiOmicDataset | None = None,
+        resume_from: str | Path | None = None,
+    ) -> None:
+        """Train the MOFA model. val and resume_from are ignored."""
         from mofapy2.run.entry_point import entry_point
 
         mc = self.model_cfg
@@ -83,16 +91,15 @@ class MOFAModel(MultiOmicModel):
         ent.build()
         ent.run()
 
-        save_path = self.save_path or "mofa_model.hdf5"
-        ent.save(save_path, save_data=True)
-
-        import mofax as mfx
-        self._model = mfx.mofa_model(save_path)
+        self._ent = ent
+        self._model = None
 
     def transform(self, data: MultiOmicDataset) -> np.ndarray:
         """Latent factors for training samples. Raises NotImplementedError for unseen data."""
         if self._model is None:
-            raise RuntimeError("Model must be fit before calling transform()")
+            raise RuntimeError(
+                "Model must be fit and save_outputs() called before calling transform()"
+            )
 
         factors_df = self._model.get_factors(df=True)
         missing = [s for s in data.sample_names if s not in factors_df.index]
@@ -116,6 +123,28 @@ class MOFAModel(MultiOmicModel):
             result[view_name] = Z @ W_df.values.T
         return result
 
+    def save_outputs(self, output_dir: str | Path | None = None) -> None:
+        """Write the HDF5 model file, which holds both the trained model and its outputs.
+
+        Constructs the mofax reader used by transform()/reconstruct(); those
+        methods raise until this has been called at least once after fit().
+        """
+        if self._ent is None:
+            raise RuntimeError("Model must be fit before calling save_outputs()")
+
+        if self.save_path is not None:
+            save_path = self.save_path
+        elif output_dir is not None:
+            save_path = str(Path(output_dir) / "mofa_model.hdf5")
+        else:
+            save_path = "mofa_model.hdf5"
+        self.save_path = save_path
+
+        self._ent.save(save_path, save_data=True)
+
+        import mofax as mfx
+        self._model = mfx.mofa_model(save_path)
+
     def save(self, path: str | Path) -> None:
         """Copy the HDF5 model file to path."""
         if self._model is None:
@@ -127,10 +156,16 @@ class MOFAModel(MultiOmicModel):
             shutil.copy2(src, dst)
 
     @classmethod
-    def load(cls, path: str | Path) -> MOFAModel:
-        """Load a trained MOFA model from an HDF5 file."""
+    def load(cls, path: str | Path, **kwargs) -> MOFAModel:
+        """Load a trained MOFA model from an HDF5 file.
+
+        Reconstructs data_cfg.views from the model's view names; other
+        DataConfig fields (path, mask_layer_name, tissue/mutation flags) are
+        not recoverable from the HDF5 and are left at defaults.
+        """
         import mofax as mfx
 
         instance = cls(save_path=str(path))
         instance._model = mfx.mofa_model(str(path))
+        instance.data_cfg = DataConfig(path=str(path), views=list(instance._model.views))
         return instance

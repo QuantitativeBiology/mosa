@@ -8,17 +8,9 @@ import pytorch_lightning as pl
 import yaml
 from torch import Tensor
 
-from mosa.config import Config, DataConfig, ModelConfig
-from mosa.models.mofa.config import MOFAConfig
-from mosa.models.mosa.config import MOSAConfig, OmicViewConfig
+from mosa.config import Config, DataConfig
 
 logger = logging.getLogger(__name__)
-
-
-_MODEL_CONFIGS: dict[str, type[ModelConfig]] = {
-    "mosa_vae": MOSAConfig,
-    "mofa": MOFAConfig,
-}
 
 
 def seed_everything(seed: int) -> None:
@@ -29,6 +21,8 @@ def seed_everything(seed: int) -> None:
 
 def load_config(yaml_path: str | Path) -> Config:
     """Load a YAML config and return a Config bundling DataConfig + ModelConfig."""
+    from mosa.models.registry import model_config_classes
+
     yaml_path = Path(yaml_path)
     with open(yaml_path) as f:
         raw = yaml.safe_load(f)
@@ -42,16 +36,11 @@ def load_config(yaml_path: str | Path) -> Config:
     if "type" not in model_raw:
         raise ValueError("model.type is required (e.g. 'mosa_vae', 'mofa')")
     mtype = model_raw.pop("type")
-    if mtype not in _MODEL_CONFIGS:
-        raise ValueError(f"unknown model.type '{mtype}'; valid: {list(_MODEL_CONFIGS)}")
+    model_configs = model_config_classes()
+    if mtype not in model_configs:
+        raise ValueError(f"unknown model.type '{mtype}'; valid: {list(model_configs)}")
 
-    if mtype == "mosa_vae" and "views" in model_raw:
-        model_raw["views"] = {
-            name: OmicViewConfig(name=name, **vcfg)
-            for name, vcfg in model_raw["views"].items()
-        }
-
-    model_cfg = _MODEL_CONFIGS[mtype](**model_raw)
+    model_cfg = model_configs[mtype].from_yaml_dict(model_raw)
 
     return Config(data=data, model=model_cfg)
 

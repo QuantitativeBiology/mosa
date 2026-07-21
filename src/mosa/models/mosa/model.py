@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
 import numpy as np
@@ -11,12 +10,13 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.strategies import DDPStrategy
 
-from mosa.api import MultiOmicModel
+from mosa.models.api import MultiOmicModel
 from mosa.config import DataConfig
 from mosa.data.dataset import MultiOmicDataset
 from mosa.models.mosa.config import MOSAConfig, OmicViewConfig
 from mosa.models.mosa.datamodule import MOSADataModule
 from mosa.models.mosa.vae.vae_module import VAE
+from mosa.models.registry import register_model
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,7 @@ class _LoggingModelCheckpoint(ModelCheckpoint):
         )
 
 
+@register_model("mosa_vae", MOSAConfig)
 class MOSAModel(MultiOmicModel):
     """MultiOmicModel implementation using the VAE architecture.
 
@@ -126,14 +127,14 @@ class MOSAModel(MultiOmicModel):
         self._trainer = pl.Trainer(**trainer_kwargs)
         self._trainer.fit(self._model, self._datamodule, ckpt_path=str(resume_from) if resume_from else None)
 
-        if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-            self._save_outputs()
-
-    def _save_outputs(self) -> None:
+    def save_outputs(self, output_dir: str | Path | None = None) -> None:
         """Save latent representations and reconstructions for all splits."""
         import time
 
-        output_dir = Path(self.model_cfg.output_dir)
+        if self._model is None or self._datamodule is None:
+            raise RuntimeError("Model must be fit before calling save_outputs()")
+
+        output_dir = Path(output_dir) if output_dir is not None else Path(self.model_cfg.output_dir)
         dm = self._datamodule
 
         logger.info("Saving outputs to %s", output_dir)
@@ -211,15 +212,14 @@ class MOSAModel(MultiOmicModel):
             data_cfg=self.data_cfg,
             model_cfg=self.model_cfg,
         )
-        inf_dm.scalers = self._datamodule.scalers
-        inf_dm.setup()
+        inf_dm.setup_inference(self._datamodule)
 
         loader = inf_dm.train_eval_dataloader()
         results = self._model.predict(loader)
         return results["z"]
 
     def reconstruct(self, data: MultiOmicDataset) -> dict[str, np.ndarray]:
-        """Reconstruct omic views from data passed through the model."""
+        """Reconstruct omic views from data passed through the model, in original scale."""
         if self._model is None or self._datamodule is None:
             raise RuntimeError("Model must be fit before calling reconstruct()")
 
@@ -229,12 +229,16 @@ class MOSAModel(MultiOmicModel):
             data_cfg=self.data_cfg,
             model_cfg=self.model_cfg,
         )
-        inf_dm.scalers = self._datamodule.scalers
-        inf_dm.setup()
+        inf_dm.setup_inference(self._datamodule)
 
         loader = inf_dm.train_eval_dataloader()
         results = self._model.predict(loader)
-        return results["x_hat"]
+
+        x_hat = {}
+        for omic, recon in results["x_hat"].items():
+            scaler = inf_dm.scalers.get(omic)
+            x_hat[omic] = scaler.inverse_transform(recon) if scaler is not None else recon
+        return x_hat
 
     def save(self, path: str | Path) -> None:
         """Save model state to a Lightning checkpoint.
@@ -245,6 +249,11 @@ class MOSAModel(MultiOmicModel):
         """
         if self._trainer is None:
             raise RuntimeError("Model must be fit before saving")
+
+        # Embed the registered model-type name in the module's hyperparameters
+        # before writing, so registry.load_model can dispatch polymorphically
+        # and the checkpoint is serialized in a single pass.
+        self._model.hparams["model_type_name"] = self.registered_name
         self._trainer.save_checkpoint(str(path))
 
     @classmethod

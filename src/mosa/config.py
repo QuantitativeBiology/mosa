@@ -76,6 +76,16 @@ class ModelConfig:
         if not 0.0 <= self.test_size < 1.0:
             raise ValueError(f"test_size must be in [0, 1), got {self.test_size}")
 
+    @classmethod
+    def from_yaml_dict(cls, raw: dict) -> "ModelConfig":
+        """Build from a raw YAML mapping (model.type already stripped).
+
+        Base implementation passes the mapping straight through. Subclasses
+        with nested config objects (e.g. per-view configs) override this to
+        parse those before construction, so load_config stays model-agnostic.
+        """
+        return cls(**raw)
+
 
 @dataclass
 class Config:

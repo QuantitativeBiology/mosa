@@ -1,0 +1,35 @@
+# Example HPO search space for `mosa optimize`.
+#
+# Maps top-level MOSAConfig field names to a distribution. Nested per-view
+# params (e.g. views.<name>.hidden_layer_dims) are out of scope; only
+# top-level fields can be tuned this way.
+#
+# Supported dist types:
+#   loguniform:  { dist: loguniform, low: ..., high: ... }   (float, log-scale)
+#   uniform:     { dist: uniform, low: ..., high: ... }      (float, linear)
+#   int:         { dist: int, low: ..., high: ... }          (integer range)
+#   categorical: { dist: categorical, choices: [...] }
+
+learning_rate:
+  dist: loguniform
+  low: 1.0e-5
+  high: 1.0e-2
+
+joint_latent_dim:
+  dist: categorical
+  choices: [32, 64, 128]
+
+kl_weight:
+  dist: loguniform
+  low: 1.0e-6
+  high: 1.0e-2
+
+view_dropout_prob:
+  dist: uniform
+  low: 0.0
+  high: 0.5
+
+batch_size:
+  dist: int
+  low: 16
+  high: 128

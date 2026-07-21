@@ -201,6 +201,51 @@ class MOSADataModule(pl.LightningDataModule):
         else:
             self._setup_inmemory(train, meta)
 
+    def setup_inference(self, source: "MOSADataModule") -> None:
+        """Set up a dataset for inference using another datamodule's fitted state.
+
+        Applies `source`'s scalers, feature names, and batch/tissue categories
+        without refitting anything and without mutating `source`. Use this
+        instead of `setup()` for transform()/reconstruct() calls so that new
+        data is standardized with the training statistics.
+        """
+        if self.train_dataset is not None:
+            return
+        if self.zarr_path is not None:
+            raise NotImplementedError("Inference setup for lazy zarr data is not implemented")
+
+        self.scalers = source.scalers
+        self.feature_names = source.feature_names
+        self.batch_categories = source.batch_categories
+        self.tissue_categories = source.tissue_categories
+        self.class_weights = source.class_weights
+
+        train = self.train_data
+        meta = self._process_obs_readonly(train.metadata)
+        self._conditionals_train = meta["conditionals"]
+        self.train_dataset = self._build_dataset_readonly(train, meta)
+
+    def _build_dataset_readonly(self, data: MultiOmicDataset, meta: dict) -> "MOSADataset":
+        """Apply already-fitted scalers (no fitting) and build a MOSADataset."""
+        omics = {}
+        for view_name, X in data.views.items():
+            scaler = self.scalers.get(view_name)
+            if scaler is not None:
+                X = scaler.transform(X)
+            X = np.nan_to_num(X, nan=0.0)
+            omics[view_name] = X
+
+        return MOSADataset(
+            omics_data=omics,
+            masks=data.masks,
+            conditionals=meta["conditionals"],
+            tissue_labels=meta["tissue_labels"],
+            source_ids=meta["source_ids"],
+            sample_weights=meta["sample_weights"],
+            sample_names=data.sample_names,
+            omic_names=list(self.data_cfg.views),
+        )
+
     def _setup_inmemory(self, train: MultiOmicDataset, meta: dict) -> None:
         import time
         t0 = time.perf_counter()
@@ -232,25 +277,8 @@ class MOSADataModule(pl.LightningDataModule):
         )
 
         if self.val_data is not None:
-            omics_val = {}
-            for view_name, X in self.val_data.views.items():
-                scaler = self.scalers.get(view_name)
-                if scaler is not None:
-                    X = scaler.transform(X)
-                X = np.nan_to_num(X, nan=0.0)
-                omics_val[view_name] = X
-
             val_meta = self._process_obs_readonly(self.val_data.metadata)
-            self.val_dataset = MOSADataset(
-                omics_data=omics_val,
-                masks=self.val_data.masks,
-                conditionals=val_meta["conditionals"],
-                tissue_labels=val_meta["tissue_labels"],
-                source_ids=val_meta["source_ids"],
-                sample_weights=val_meta["sample_weights"],
-                sample_names=self.val_data.sample_names,
-                omic_names=list(self.data_cfg.views),
-            )
+            self.val_dataset = self._build_dataset_readonly(self.val_data, val_meta)
 
         n_train = self.train_data.n_samples
         n_val = self.val_data.n_samples if self.val_data is not None else 0
@@ -386,6 +414,9 @@ class MOSADataModule(pl.LightningDataModule):
             "batch_categories": self.batch_categories,
             "tissue_categories": self.tissue_categories,
             "feature_names": self.feature_names,
+            "class_weights": (
+                self.class_weights.tolist() if self.class_weights is not None else None
+            ),
         }
 
     def load_state_dict(self, state: dict) -> None:
@@ -393,6 +424,10 @@ class MOSADataModule(pl.LightningDataModule):
         self.batch_categories = state["batch_categories"]
         self.tissue_categories = state["tissue_categories"]
         self.feature_names = state["feature_names"]
+        class_weights = state.get("class_weights")
+        self.class_weights = (
+            np.array(class_weights, dtype=np.float32) if class_weights is not None else None
+        )
         self.scalers = {}
         for name, s in state["scalers"].items():
             if s is None:
@@ -585,7 +620,10 @@ class MOSADataModule(pl.LightningDataModule):
             ordered=True,
         )
         label_codes = np.asarray(model_type_cats.codes, dtype=np.intp)
-        sample_weights = self.class_weights[label_codes].astype(np.float32)
+        if self.class_weights is not None:
+            sample_weights = self.class_weights[label_codes].astype(np.float32)
+        else:
+            sample_weights = np.ones(len(label_codes), dtype=np.float32)
 
         return dict(
             conditionals=conditionals,
