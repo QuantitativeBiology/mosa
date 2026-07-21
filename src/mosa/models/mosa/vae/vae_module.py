@@ -268,24 +268,29 @@ class VAE(pl.LightningModule):
         self.manual_backward(total)
         opt_vae.step()
 
-        # Logging
-        self.log("train/loss", total, prog_bar=True)
-        self.log("train/recon", losses["recon"])
-        self.log("train/kl", losses["kl"])
-        self.log("train/kl_weight", current_kl_weight)
+        # Logging: epoch-reduced (on_step=False, on_epoch=True) so metrics are
+        # written once per epoch regardless of log_every_n_steps, with an
+        # explicit batch_size so the epoch mean is weighted correctly across a
+        # ragged last batch. sync_dist mirrors validation_step for DDP parity.
+        bs = batch["conditionals"].shape[0]
+        log_kw = dict(on_step=False, on_epoch=True, batch_size=bs, sync_dist=True)
+        self.log("train/loss", total, prog_bar=True, **log_kw)
+        self.log("train/recon", losses["recon"], **log_kw)
+        self.log("train/kl", losses["kl"], **log_kw)
+        self.log("train/kl_weight", current_kl_weight, **log_kw)
         for omic_name, omic_loss in losses["recon_metrics"]["omic_losses"].items():
-            self.log(f"train/recon_{omic_name}", omic_loss)
+            self.log(f"train/recon_{omic_name}", omic_loss, **log_kw)
         for omic_name, group_losses in losses["recon_metrics"]["group_omic_losses"].items():
             for g_idx, g_loss in group_losses.items():
                 g_name = (self.model_type_names[g_idx]
                           if self.model_type_names and g_idx < len(self.model_type_names)
                           else str(g_idx))
-                self.log(f"train/recon_{omic_name}_{g_name}", g_loss)
+                self.log(f"train/recon_{omic_name}_{g_name}", g_loss, **log_kw)
         if self.config.contrastive_weight > 0:
-            self.log("train/contrastive", losses["contrastive"])
+            self.log("train/contrastive", losses["contrastive"], **log_kw)
         if self.discriminator is not None:
-            self.log("train/disc_loss", disc_loss_val)
-            self.log("train/adv_loss", adv_loss_val)
+            self.log("train/disc_loss", disc_loss_val, **log_kw)
+            self.log("train/adv_loss", adv_loss_val, **log_kw)
 
 
     def on_train_epoch_end(self) -> None:
