@@ -96,7 +96,6 @@ class VAE(pl.LightningModule):
         for name, vc in config.views.items():
             self.encoders[name] = OmicEncoder(
                 input_dim=view_input_dims[name],
-                cond_dim=conditional_dim,
                 hidden_dims=vc.hidden_layer_dims,
                 latent_dim=self.view_encoder_dims[name],
                 dropout_p=vc.dropout_p,
@@ -168,7 +167,7 @@ class VAE(pl.LightningModule):
             sample_mask = batch["missing_masks"][name].any(dim=1)
             sample_masks[name] = sample_mask
 
-            emb = self.encoders[name](x, batch["conditionals"])
+            emb = self.encoders[name](x)
             emb[~sample_mask] = 0.0
             view_embeddings[name] = emb
 

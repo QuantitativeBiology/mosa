@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import numpy as np
 import torch
 import torch.nn as nn
 
@@ -25,14 +24,13 @@ class ViewDropout(nn.Module):
 class OmicEncoder(nn.Module):
     """Maps omic features and conditionals to a per-view embedding.
 
-    Architecture: ``[input_dim + cond_dim] -> hidden_dims -> view_latent_dim``
+    Architecture: ``[input_dim] -> hidden_dims -> view_latent_dim``
     with BatchNorm, PReLU, and dropout at each hidden layer.
     """
 
     def __init__(
         self,
         input_dim: int,
-        cond_dim: int,
         hidden_dims: list[int],
         latent_dim: int,
         dropout_p: float = 0.1,
@@ -45,7 +43,7 @@ class OmicEncoder(nn.Module):
         self.view_dropout = ViewDropout(p=view_dropout_p) if view_dropout_p > 0 else None
 
         self.net = MLP(
-            layer_sizes=[input_dim + cond_dim] + hidden_dims + [latent_dim],
+            layer_sizes=[input_dim] + hidden_dims + [latent_dim],
             dropout_p=dropout_p,
             use_batch_norm=use_batch_norm,
             activation=nn.PReLU,
@@ -55,16 +53,13 @@ class OmicEncoder(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        conditionals: torch.Tensor,
     ) -> torch.Tensor:
-        """Encode omic features with conditional metadata.
+        """Encode omic features.
 
         Parameters
         ----------
         x : Tensor [B, input_dim]
             Omic feature values for this view.
-        conditionals : Tensor [B, cond_dim]
-            Conditional metadata (model_type, tissue, mutations).
 
         Returns
         -------
@@ -73,5 +68,5 @@ class OmicEncoder(nn.Module):
         """
         if self.view_dropout is not None:
             x = self.view_dropout(x)
-        h = torch.cat([x, conditionals], dim=1)
-        return self.net(h)
+
+        return self.net(x)
