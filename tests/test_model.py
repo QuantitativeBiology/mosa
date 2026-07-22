@@ -19,41 +19,31 @@ from mosa.models.mosa.vae.vae_module import _kl_weight_for_epoch
 
 
 def test_encoder_output_shape():
-    encoder = OmicEncoder(input_dim=50, cond_dim=10, hidden_dims=[32, 16], latent_dim=16)
+    encoder = OmicEncoder(input_dim=50, hidden_dims=[32, 16], latent_dim=16)
     x = torch.randn(8, 50)
-    cond = torch.randn(8, 10)
-    out = encoder(x, cond)
-    assert out.shape == (8, 16)
-
-
-def test_encoder_no_cond():
-    encoder = OmicEncoder(input_dim=50, cond_dim=0, hidden_dims=[32, 16], latent_dim=16)
-    x = torch.randn(8, 50)
-    cond = torch.zeros(8, 0)
-    out = encoder(x, cond)
+    out = encoder(x)
     assert out.shape == (8, 16)
 
 
 def test_encoder_view_dropout():
     torch.manual_seed(0)
     encoder = OmicEncoder(
-        input_dim=50, cond_dim=0, hidden_dims=[32, 16], latent_dim=16,
+        input_dim=50, hidden_dims=[32, 16], latent_dim=16,
         view_dropout_p=1.0,
     )
     x = torch.randn(8, 50)
-    cond = torch.zeros(8, 0)
     x_zero = torch.zeros(8, 50)
 
     # p=1.0: training always zeros x, so output equals the zero-input forward pass
     encoder.train()
-    out_train = encoder(x, cond)
-    out_zero = encoder(x_zero, cond)
+    out_train = encoder(x)
+    out_zero = encoder(x_zero)
     assert torch.equal(out_train, out_zero)
 
     # eval: dropout is skipped, so non-zero x produces different output than x_zero
     encoder.eval()
-    out_eval = encoder(x, cond)
-    out_eval_zero = encoder(x_zero, cond)
+    out_eval = encoder(x)
+    out_eval_zero = encoder(x_zero)
     assert not torch.equal(out_eval, out_eval_zero)
 
 
@@ -163,6 +153,38 @@ def test_poe_fully_missing_sample_prior_fallback():
 
     assert torch.allclose(mu[0], torch.zeros(8), atol=1e-6)
     assert torch.allclose(logvar[0], torch.zeros(8), atol=1e-6)
+
+
+@pytest.mark.xfail(
+    reason="Unbounded logvar overflows exp(-logvar) in PoE fusion; whether to "
+           "clamp is a modelling decision, not resolved yet.",
+    strict=True,
+)
+def test_poe_extreme_logvar_stays_finite():
+    """Extreme per-view logvar must not overflow exp(-logvar) into inf/nan mu.
+
+    Reproducer for the CV/HPO eval-mode nan: logvar goes far negative,
+    precision = exp(-logvar) overflows float32 to inf, and the fused
+    mu = mu_precision_sum / precision_sum comes out inf/inf = nan.
+    """
+    torch.manual_seed(0)
+    latent = BaseLatentSpace.create("poe", {"a": 16, "b": 16}, latent_dim=8)
+    latent.eval()
+
+    # Force the logvar half of the shared head to a hugely negative constant.
+    last_linear = [m for m in latent.shared_head.net if isinstance(m, torch.nn.Linear)][-1]
+    with torch.no_grad():
+        last_linear.weight.zero_()
+        last_linear.bias[:8] = 1e3     # mu
+        last_linear.bias[8:] = -1e3    # logvar
+
+    embeddings = {"a": torch.randn(4, 16), "b": torch.randn(4, 16)}
+    masks = {"a": torch.ones(4, dtype=torch.bool), "b": torch.ones(4, dtype=torch.bool)}
+    mu, logvar, z = latent(embeddings, ["a", "b"], sample_masks=masks)
+
+    assert torch.isfinite(mu).all()
+    assert torch.isfinite(logvar).all()
+    assert torch.isfinite(z).all()
 
 
 def test_latent_registry_unknown():

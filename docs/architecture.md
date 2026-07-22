@@ -37,11 +37,10 @@ The forward pass lives in `model/mosavae.py` and follows three stages.
 
 ### Encode (per-view)
 
-For each omic view, the encoder receives the omic data concatenated with conditional metadata:
+For each omic view, the encoder receives the omic data only; conditional metadata enters on the decoder side:
 
 ```
-input = [omic_features; conditionals]   # shape: [batch, input_dim + cond_dim]
-embedding = encoder(input)              # shape: [batch, view_latent_dim]
+embedding = encoder(omic_features)   # shape: [batch, view_latent_dim]
 ```
 
 During training, entire views are randomly zeroed with probability `view_dropout_prob` (view dropout), forcing the model to learn useful representations even when some omics are missing. Samples where a view is entirely absent produce a zero embedding and are masked during fusion.
