@@ -113,7 +113,8 @@ class MOSAModel(MultiOmicModel):
             accelerator=mc.accelerator,
             devices=mc.devices,
             precision=mc.precision,
-            gradient_clip_val=mc.gradient_clip_val,
+            # gradient_clip_val is applied manually in VAE.training_step;
+            # Lightning forbids it on the Trainer under manual optimization.
             accumulate_grad_batches=mc.accumulate_grad_batches,
             log_every_n_steps=mc.log_every_n_steps,
             sync_batchnorm=use_multi_gpu,

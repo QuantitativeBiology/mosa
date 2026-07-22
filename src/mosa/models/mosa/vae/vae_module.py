@@ -220,6 +220,19 @@ class VAE(pl.LightningModule):
             "recon_metrics": recon_metrics,
         }
 
+    def _clip_grads(self, optimizer) -> None:
+        """Clip gradients under manual optimization.
+
+        Lightning's Trainer(gradient_clip_val=...) is unsupported with manual
+        optimization, so clipping is applied here after manual_backward.
+        """
+        if self.config.gradient_clip_val > 0:
+            self.clip_gradients(
+                optimizer,
+                gradient_clip_val=self.config.gradient_clip_val,
+                gradient_clip_algorithm="norm",
+            )
+
     def training_step(self, batch: dict, batch_idx: int):
         """Two-phase training step: discriminator update, then VAE update."""
         optimizers = self.optimizers()
@@ -248,6 +261,7 @@ class VAE(pl.LightningModule):
             )
             opt_disc.zero_grad()
             self.manual_backward(disc_loss_val)
+            self._clip_grads(opt_disc)
             opt_disc.step()
 
             # Phase 2: adversarial component for VAE (fool discriminator)
@@ -266,6 +280,7 @@ class VAE(pl.LightningModule):
 
         opt_vae.zero_grad()
         self.manual_backward(total)
+        self._clip_grads(opt_vae)
         opt_vae.step()
 
         # Logging: epoch-reduced (on_step=False, on_epoch=True) so metrics are
