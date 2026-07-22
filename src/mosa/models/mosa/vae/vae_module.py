@@ -317,11 +317,12 @@ class VAE(pl.LightningModule):
             + self.config.contrastive_weight * losses["contrastive"]
         )
 
-        self.log("val/loss", total, prog_bar=True, sync_dist=True)
-        self.log("val/recon", losses["recon"], sync_dist=True)
-        self.log("val/kl", losses["kl"], sync_dist=True)
+        bs = batch["conditionals"].shape[0]
+        self.log("val/loss", total, prog_bar=True, sync_dist=True, batch_size=bs)
+        self.log("val/recon", losses["recon"], sync_dist=True, batch_size=bs)
+        self.log("val/kl", losses["kl"], sync_dist=True, batch_size=bs)
         for omic_name, omic_loss in losses["recon_metrics"]["omic_losses"].items():
-            self.log(f"val/recon_{omic_name}", omic_loss, sync_dist=True)
+            self.log(f"val/recon_{omic_name}", omic_loss, sync_dist=True, batch_size=bs)
 
     def on_validation_epoch_end(self) -> None:
         """Log combined train + val epoch summary on rank 0."""

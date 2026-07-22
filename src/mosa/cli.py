@@ -130,9 +130,15 @@ def _transform(args):
 
 def _cross_validate(args):
     """Load config and data, run stratified k-fold cross-validation, and print scores."""
+    import torch
+
     from mosa.models.evaluation import cross_validate
+    from mosa.utils import seed_everything
+
+    torch.set_float32_matmul_precision("high")
 
     cfg, dataset = _load_config_and_data(args.config)
+    seed_everything(cfg.model.random_seed)
     results = cross_validate(dataset, cfg.data, cfg.model, n_folds=args.folds)
 
     views = list(results["per_fold"][0]["per_view"].keys())
@@ -149,9 +155,15 @@ def _cross_validate(args):
 
 def _optimize(args):
     """Load config and data, run Optuna hyperparameter search, and print the best trial."""
+    import torch
+
     from mosa.models.optimize import load_search_space, optimize
+    from mosa.utils import seed_everything
+
+    torch.set_float32_matmul_precision("high")
 
     cfg, dataset = _load_config_and_data(args.config)
+    seed_everything(cfg.model.random_seed)
     search_space = load_search_space(args.search_space)
 
     results = optimize(
