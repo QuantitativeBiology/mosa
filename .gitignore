@@ -1,4 +1,4 @@
-# Virtual environments (Where your thousands of installation files are)
+# Virtual environments
 .mosa_venv/
 venv/
 env/
@@ -12,6 +12,6 @@ __pycache__/
 
 *.egg-info/
 
-# Data and Logs (Careful: only if you don't want to take your outputs to GitHub)
+# Data and Logs
 *.log
 outputs/
