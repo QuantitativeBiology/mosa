@@ -17,12 +17,11 @@ logger = logging.getLogger(__name__)
 def _score_fold(model, val: MultiOmicDataset) -> dict:
     """Score a fitted model on a held-out fold via masked, variance-normalized MSE.
 
-    Uses only ABC methods (reconstruct), so this works for any encoder-based
-    model, not just MOSA. Per view: MSE over observed entries (val.masks),
-    normalized by the variance of the observed targets (fraction of variance
-    unexplained) so views on different scales are comparable. Aggregate is
-    the mean of the per-view normalized errors across views with nonzero
-    variance.
+    Uses only the ABC's reconstruct(), so this works for any model implementing
+    the interface. Per view: MSE over observed entries (val.masks), normalized
+    by the variance of the observed targets (fraction of variance unexplained)
+    so views on different scales are comparable. Aggregate is the mean of the
+    per-view normalized errors across views with nonzero variance.
     """
     recon = model.reconstruct(val)
 
@@ -64,9 +63,9 @@ def cross_validate(
     directory, so folds never write to the caller's output_dir and never
     clobber each other.
 
-    Models with no out-of-sample projection (e.g. MOFA) raise
-    NotImplementedError from reconstruct(); this is caught and re-raised as a
-    clear error on the first fold, before the remaining folds are trained.
+    Models with no out-of-sample projection raise NotImplementedError from
+    reconstruct(); this is caught and re-raised as a clear error on the first
+    fold, before the remaining folds are trained.
     """
     labels = dataset.metadata["model_type"].to_numpy()
     classes, counts = np.unique(labels, return_counts=True)
@@ -100,15 +99,11 @@ def cross_validate(
             try:
                 score = _score_fold(model, val)
             except (NotImplementedError, RuntimeError) as e:
-                # Transductive models (e.g. MOFA) reject held-out scoring in
-                # two ways depending on how far they get: reconstruct() may
-                # raise NotImplementedError directly (no out-of-sample
-                # projection), or RuntimeError if it requires an explicit
-                # save_outputs() call before it can predict at all — which
-                # cross_validate deliberately never makes (no artifacts).
-                # Only fold 0 is wrapped this broadly: once fold 0 has scored
-                # successfully, the model supports this workflow, so later
-                # folds' RuntimeErrors are left to propagate as real errors.
+                # Transductive models reject held-out scoring either via
+                # NotImplementedError (no out-of-sample projection) or
+                # RuntimeError (requires save_outputs() first, which
+                # cross_validate never calls). Only fold 0 is wrapped this
+                # broadly; later folds' RuntimeErrors propagate as real errors.
                 if fold_idx != 0:
                     raise
                 name = getattr(model, "registered_name", type(model).__name__)

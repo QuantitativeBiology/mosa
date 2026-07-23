@@ -24,7 +24,7 @@ class ViewDropout(nn.Module):
 class OmicEncoder(nn.Module):
     """Maps omic features and conditionals to a per-view embedding.
 
-    Architecture: ``[input_dim] -> hidden_dims -> view_latent_dim``
+    Architecture: maps input_dim through hidden_dims to view_latent_dim,
     with BatchNorm, PReLU, and dropout at each hidden layer.
     """
 

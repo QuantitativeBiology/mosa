@@ -377,20 +377,14 @@ class MOSADataModule(pl.LightningDataModule):
         return kwargs
 
     def _get_weighted_sampler(self, dataset: Dataset) -> WeightedRandomSampler:
-        """Create a WeightedRandomSampler using pre-computed sample weights.
-        
-        Uses the sample_weights already calculated in _process_obs() to balance
-        model_type categories, ensuring each mini-batch has a balanced distribution
-        of organoids, cell lines, and tumors.
-        """
+        """Build a WeightedRandomSampler from the sample_weights computed in _process_obs()."""
         if isinstance(dataset, MOSADataset):
             sample_weights = dataset.sample_weights.numpy()
         elif isinstance(dataset, LazyZarrDataset):
             sample_weights = dataset.sample_weights
         else:
             raise TypeError(f"Unsupported dataset type: {type(dataset)}")
-        
-        # Create sampler using pre-computed weights
+
         sampler = WeightedRandomSampler(
             weights=sample_weights,
             num_samples=len(dataset),

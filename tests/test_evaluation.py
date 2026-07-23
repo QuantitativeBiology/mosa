@@ -52,9 +52,7 @@ def test_cross_validate_too_many_folds_raises(make_multi_omic_dataset, make_mosa
         cross_validate(dataset, data_cfg, model_cfg, n_folds=10)
 
 
-# ---------------------------------------------------------------------------
 # Transductive (MOFA-like) models: no out-of-sample projection.
-# ---------------------------------------------------------------------------
 
 
 def _make_fake_transductive(name, raised_exc_cls, message):

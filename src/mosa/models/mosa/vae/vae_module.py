@@ -119,11 +119,11 @@ class VAE(pl.LightningModule):
             use_shared_head=config.poe_use_shared_head,
         )
 
-        logger.debug("Encoders: %s",
-                      {n: f"{view_input_dims[n]}->{self.view_encoder_dims[n]}" for n in config.views})
-        logger.debug("Decoders: %s",
-                      {n: f"{config.joint_latent_dim}->{view_input_dims[n]}" for n in config.views})
-        logger.debug("Latent space: %s -> joint_latent_dim=%d",
+        logger.debug("Encoders (in, out): %s",
+                      {n: (view_input_dims[n], self.view_encoder_dims[n]) for n in config.views})
+        logger.debug("Decoders (in, out): %s",
+                      {n: (config.joint_latent_dim, view_input_dims[n]) for n in config.views})
+        logger.debug("Latent space: %s, joint_latent_dim=%d",
                       config.fusion_method, config.joint_latent_dim)
 
         # Optional adversarial discriminator

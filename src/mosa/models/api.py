@@ -52,10 +52,10 @@ class MultiOmicModel(ABC):
 
         Notes
         -----
-        Implementations that fit a persisted artifact lazily (e.g. MOFA, which
-        builds its reader in save_outputs()) may require save_outputs() to be
-        called after fit() before transform()/reconstruct() will work.
-        Inductive models (e.g. the VAE) are usable immediately after fit().
+        Implementations that fit a persisted artifact lazily may require
+        save_outputs() to be called after fit() before transform()/
+        reconstruct() will work. Inductive models are usable immediately
+        after fit().
         """
 
     @abstractmethod

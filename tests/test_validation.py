@@ -1,4 +1,4 @@
-"""Tests for config <-> data requirements validation (mosa validate + pre-train path)."""
+"""Tests for config/data requirements validation (mosa validate + pre-train path)."""
 
 from __future__ import annotations
 
@@ -15,9 +15,7 @@ from mosa.models.mosa.config import MOSAConfig, OmicViewConfig
 from mosa.utils import validate_config_against_data
 
 
-# ---------------------------------------------------------------------------
 # Helper: build a custom h5mu file with controllable obs columns.
-# ---------------------------------------------------------------------------
 
 
 def _write_h5mu(
@@ -76,9 +74,7 @@ def _data_and_model_cfg(path, views, **data_overrides):
     return data_cfg, model_cfg
 
 
-# ---------------------------------------------------------------------------
-# 1. Valid config + matching data -> no error, no warnings.
-# ---------------------------------------------------------------------------
+# 1. Valid config + matching data: no error, no warnings.
 
 
 def test_valid_config_matching_data_no_warnings(tmp_path):
@@ -90,9 +86,7 @@ def test_valid_config_matching_data_no_warnings(tmp_path):
     assert warnings == []
 
 
-# ---------------------------------------------------------------------------
-# 2. Wrong-case view name -> ValueError naming available modalities.
-# ---------------------------------------------------------------------------
+# 2. Wrong-case view name: ValueError naming available modalities.
 
 
 def test_view_name_wrong_case_raises(tmp_path):
@@ -104,9 +98,7 @@ def test_view_name_wrong_case_raises(tmp_path):
         validate_config_against_data(cfg)
 
 
-# ---------------------------------------------------------------------------
-# 3. mask_layer_name not present in a view -> ValueError.
-# ---------------------------------------------------------------------------
+# 3. mask_layer_name not present in a view: ValueError.
 
 
 def test_mask_layer_missing_raises(tmp_path):
@@ -118,9 +110,7 @@ def test_mask_layer_missing_raises(tmp_path):
         validate_config_against_data(cfg)
 
 
-# ---------------------------------------------------------------------------
-# 4. model_type column absent -> ValueError.
-# ---------------------------------------------------------------------------
+# 4. model_type column absent: ValueError.
 
 
 def test_model_type_column_absent_raises(tmp_path):
@@ -132,9 +122,7 @@ def test_model_type_column_absent_raises(tmp_path):
         validate_config_against_data(cfg)
 
 
-# ---------------------------------------------------------------------------
-# 5. target_batch case-mismatch -> ValueError; correct case passes.
-# ---------------------------------------------------------------------------
+# 5. target_batch case-mismatch: ValueError; correct case passes.
 
 
 def test_target_batch_wrong_case_raises(tmp_path):
@@ -159,9 +147,7 @@ def test_target_batch_correct_case_passes(tmp_path):
     assert warnings == []
 
 
-# ---------------------------------------------------------------------------
-# 6. contrastive_weight > 0 (or use_tissue) with no tissue column -> warning.
-# ---------------------------------------------------------------------------
+# 6. contrastive_weight > 0 (or use_tissue) with no tissue column: warning.
 
 
 def test_contrastive_without_tissue_warns(tmp_path):
@@ -185,9 +171,7 @@ def test_use_tissue_without_tissue_column_warns(tmp_path):
     assert any("tissue" in w for w in warnings)
 
 
-# ---------------------------------------------------------------------------
-# 7. use_mutations=True with no mutation_* column -> warning.
-# ---------------------------------------------------------------------------
+# 7. use_mutations=True with no mutation_* column: warning.
 
 
 def test_use_mutations_without_mutation_columns_warns(tmp_path):
@@ -199,9 +183,7 @@ def test_use_mutations_without_mutation_columns_warns(tmp_path):
     assert any("mutation" in w for w in warnings)
 
 
-# ---------------------------------------------------------------------------
-# 8. adv_weight > 0 with a single model_type category -> warning.
-# ---------------------------------------------------------------------------
+# 8. adv_weight > 0 with a single model_type category: warning.
 
 
 def test_adv_weight_single_batch_warns(tmp_path):
@@ -215,9 +197,7 @@ def test_adv_weight_single_batch_warns(tmp_path):
     assert any("adv" in w.lower() for w in warnings)
 
 
-# ---------------------------------------------------------------------------
 # 9. summarize_structure does not load matrices; returns expected keys.
-# ---------------------------------------------------------------------------
 
 
 def test_summarize_structure_returns_metadata_only(tmp_path):
@@ -265,9 +245,7 @@ def test_summarize_structure_zarr(tmp_path):
     assert set(summary["model_type_categories"]) == {"TypeA", "TypeB"}
 
 
-# ---------------------------------------------------------------------------
 # 10. mosa validate on a config with a missing path still exits 1 cleanly.
-# ---------------------------------------------------------------------------
 
 
 def test_cli_validate_missing_path_exits_1(tmp_path, capsys):
@@ -295,10 +273,8 @@ def test_cli_validate_missing_path_exits_1(tmp_path, capsys):
     assert "data.path not found" in out
 
 
-# ---------------------------------------------------------------------------
 # 11. Existing load-time structural errors are unchanged (regression guard;
 #     also exercised directly in tests/test_data.py).
-# ---------------------------------------------------------------------------
 
 
 def test_load_time_structure_error_unchanged(tmp_path):
@@ -309,9 +285,7 @@ def test_load_time_structure_error_unchanged(tmp_path):
         load_mudata(str(path), ["view_a", "view_missing"])
 
 
-# ---------------------------------------------------------------------------
 # MOFAConfig.validate_against_data — uniform interface, no extra checks.
-# ---------------------------------------------------------------------------
 
 
 def test_mofa_validate_against_data_returns_empty(tmp_path):

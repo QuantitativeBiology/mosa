@@ -36,7 +36,7 @@ def register_model(name: str, config_cls: type[ModelConfig]):
 
 
 def model_config_classes() -> dict[str, type[ModelConfig]]:
-    """Map of registered model-type name -> ModelConfig subclass, for load_config."""
+    """Map of registered model-type name to ModelConfig subclass, for load_config."""
     return {name: reg.config_cls for name, reg in _REGISTRY.items()}
 
 
@@ -51,13 +51,12 @@ def build_model(data_cfg: DataConfig, model_cfg: ModelConfig) -> MultiOmicModel:
 def load_model(path: str | Path) -> MultiOmicModel:
     """Load a saved model, dispatching to the registered class that wrote it.
 
-    MOFA models are plain HDF5 files, dispatched by extension. Everything
-    else is a Lightning checkpoint (.ckpt): MOSAModel.save embeds the
-    registered name under hyper_parameters["model_type_name"], but
-    auto-checkpoints written by Lightning's ModelCheckpoint callback during
-    training (last.ckpt, epoch-NNN.ckpt) go through a different path and
-    carry no such key. MOSA is the only model type that produces .ckpt
-    files today, so absence of the key falls back to "mosa_vae".
+    Artifact-based models are dispatched by file extension. Checkpoint-based
+    models embed their registered name under
+    hyper_parameters["model_type_name"] on save, but auto-checkpoints written
+    by Lightning's ModelCheckpoint callback during training (last.ckpt,
+    epoch-NNN.ckpt) go through a different path and carry no such key;
+    absence of the key falls back to "mosa_vae".
     """
     path = Path(path)
     if path.suffix == ".hdf5":

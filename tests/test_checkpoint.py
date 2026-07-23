@@ -13,9 +13,7 @@ def _split(dataset, n_train=16):
     return dataset.subset(indices[:n_train]), dataset.subset(indices[n_train:])
 
 
-# ---------------------------------------------------------------------------
 # MOSADataModule state serialisation
-# ---------------------------------------------------------------------------
 
 
 def test_datamodule_state_dict_scaler_fidelity(make_multi_omic_dataset, make_mosa_config, tmp_path):
@@ -42,9 +40,7 @@ def test_datamodule_state_dict_scaler_fidelity(make_multi_omic_dataset, make_mos
             np.testing.assert_allclose(s1.scale_, s2.scale_, rtol=1e-6)
 
 
-# ---------------------------------------------------------------------------
 # MOSAModel save / load
-# ---------------------------------------------------------------------------
 
 
 def test_vae_save_load_config_preserved(make_multi_omic_dataset, make_mosa_config, tmp_path):
@@ -150,9 +146,7 @@ def test_vae_transform_after_load(make_multi_omic_dataset, make_mosa_config, tmp
     assert not np.isnan(z).any()
 
 
-# ---------------------------------------------------------------------------
 # Resume training
-# ---------------------------------------------------------------------------
 
 
 def test_vae_resume_produces_valid_output(make_multi_omic_dataset, make_mosa_config, tmp_path):

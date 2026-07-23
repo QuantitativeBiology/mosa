@@ -16,7 +16,7 @@ _SUPPORTED_DISTS = ("loguniform", "uniform", "int", "categorical")
 
 
 def load_search_space(path: str | Path) -> dict:
-    """Load and validate a search-space YAML (top-level ModelConfig field -> distribution)."""
+    """Load and validate a search-space YAML mapping top-level ModelConfig fields to distributions."""
     with open(path) as f:
         raw = yaml.safe_load(f) or {}
     return parse_search_space(raw)
@@ -44,7 +44,7 @@ def _suggest(trial, name: str, spec: dict):
 
 
 def parse_search_space(raw: dict) -> dict:
-    """Validate a raw search-space mapping (name -> {dist, ...}).
+    """Validate a raw search-space mapping of names to {dist, ...} specs.
 
     Only checks structure (each entry has a known 'dist' and its required
     keys); actual sampling happens per-trial in `_suggest`.

@@ -12,9 +12,7 @@ from mosa.models.mosa.vae.losses import adversarial_loss
 from mosa.models.mosa.vae.vae_module import VAE
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_vae_and_dm(make_multi_omic_dataset, make_mosa_config, tmp_path, **dataset_kwargs):
@@ -62,14 +60,9 @@ def _silent_trainer(no_val: bool = False, **kwargs) -> pl.Trainer:
     )
 
 
-# ---------------------------------------------------------------------------
-# Smoke tests — Lightning fast_dev_run
-#
-# Purpose: verify the full training loop (data → forward → loss → backward →
-# optimizer step) runs without error. Catches broken batch keys, shape
-# mismatches inside training_step, and optimizer configuration bugs.
-# One batch, no checkpointing, no logging overhead.
-# ---------------------------------------------------------------------------
+# Smoke tests: one fast_dev_run batch exercises the full training loop
+# (forward, loss, backward, optimizer step) to catch broken batch keys,
+# shape mismatches, and optimizer configuration bugs cheaply.
 
 
 def test_vae_fast_dev_run(make_multi_omic_dataset, make_mosa_config, tmp_path):
@@ -100,13 +93,9 @@ def test_vae_fast_dev_run_poe(make_multi_omic_dataset, make_mosa_config, tmp_pat
     _silent_trainer(no_val=True, max_epochs=1, limit_train_batches=1).fit(vae, dm)
 
 
-# ---------------------------------------------------------------------------
-# Forward pass sanity — no NaN / Inf in outputs
-#
-# Purpose: catch numerical instability before training even starts.
-# Relevant for VAEs because log operations in KL, masked mean reductions,
-# and PoE precision accumulation are all NaN sources with edge-case inputs.
-# ---------------------------------------------------------------------------
+# Forward pass sanity: no NaN/Inf in outputs. Catches numerical instability
+# from KL log operations, masked mean reductions, and PoE precision
+# accumulation before training starts.
 
 
 def test_vae_forward_no_nan(make_multi_omic_dataset, make_mosa_config, tmp_path):
@@ -137,15 +126,11 @@ def test_vae_forward_no_nan_with_missing_data(make_multi_omic_dataset, make_mosa
         assert torch.isfinite(x_hat).all(), f"NaN/Inf in x_hat['{name}'] with missing data"
 
 
-# ---------------------------------------------------------------------------
-# Missing-view zeroing
-#
-# Purpose: verify a fully-missing view's embedding is force-zeroed before
-# fusion (vae_module.py:172, emb[~sample_mask]=0.0), so arbitrary encoder
-# input values for a missing sample cannot leak into its latent. Uses
-# fusion_method="concat" (the datamodule default); the zeroing happens before
-# fusion so the contract holds for poe as well.
-# ---------------------------------------------------------------------------
+# Missing-view zeroing: a fully-missing view's embedding must be force-zeroed
+# before fusion (vae_module.py emb[~sample_mask]=0.0), so arbitrary encoder
+# inputs for a missing sample cannot leak into the latent. Uses
+# fusion_method="concat"; zeroing happens before fusion so the contract holds
+# for poe too.
 
 
 def test_missing_view_embedding_zeroed(make_multi_omic_dataset, make_mosa_config, tmp_path):
@@ -171,18 +156,12 @@ def test_missing_view_embedding_zeroed(make_multi_omic_dataset, make_mosa_config
     assert torch.equal(out1["mu"][sample_idx], out2["mu"][sample_idx])
 
 
-# ---------------------------------------------------------------------------
-# Gradient flow
-#
-# Purpose: verify that every trainable parameter in the encoder, decoder,
-# and latent space receives a non-None gradient after a single backward pass.
-# Catches disconnected computation graphs (a common bug when refactoring
-# modules), misplaced detach() calls, and dead code paths.
-#
-# The discriminator is excluded because it uses a separate optimizer and is
-# only updated on the detached z — its gradient path is tested implicitly
-# by the smoke test (training_step exercises both optimizers).
-# ---------------------------------------------------------------------------
+# Gradient flow: every trainable parameter in the encoder, decoder, and
+# latent space must receive a non-None gradient after one backward pass.
+# Catches disconnected computation graphs, misplaced detach() calls, and
+# dead code paths. The discriminator is excluded: it uses a separate
+# optimizer on the detached z, and its gradient path is exercised by the
+# smoke test instead.
 
 
 def test_vae_params_all_receive_gradients(make_multi_omic_dataset, make_mosa_config, tmp_path):
@@ -203,14 +182,10 @@ def test_vae_params_all_receive_gradients(make_multi_omic_dataset, make_mosa_con
     assert not no_grad, f"Parameters with no gradient: {no_grad}"
 
 
-# ---------------------------------------------------------------------------
-# Adversarial / discriminator wiring
-#
-# Purpose: verify the two-optimizer manual-optimization path (training_step
-# phase 1: discriminator trained on detached z) actually wires gradients where
-# intended and nowhere else — the detach must isolate the encoder/decoder/
-# latent space from the discriminator's own loss.
-# ---------------------------------------------------------------------------
+# Adversarial / discriminator wiring: the two-optimizer manual-optimization
+# path (discriminator trained on detached z) must wire gradients only where
+# intended; the detach must isolate the encoder/decoder/latent space from
+# the discriminator's own loss.
 
 
 def _make_adversarial_vae_and_dm(make_multi_omic_dataset, make_mosa_config, tmp_path):
@@ -299,17 +274,13 @@ def test_vae_fast_dev_run_contrastive(make_multi_omic_dataset, make_mosa_config,
     trainer.fit(vae, dm)
 
 
-# ---------------------------------------------------------------------------
-# Training-loop wiring
-#
-# SE-correctness, NOT model quality: asserts the manual-optimization loop
-# (zero_grad -> manual_backward -> step, scheduler, KL warmup) actually reduces
-# loss over many steps on a fixed batch. Threshold-free — checks direction, not
-# magnitude. A bug like an inverted LR, an optimizer built on the wrong param
-# list, or a missing step() would pass gradient-existence and fast_dev_run
-# checks yet fail here. Absolute-loss thresholds (convergence quality) are the
-# method developer's concern, deliberately excluded.
-# ---------------------------------------------------------------------------
+# Training-loop wiring: SE-correctness, not model quality. Asserts the
+# manual-optimization loop (zero_grad, manual_backward, step, scheduler, KL
+# warmup) reduces loss over many steps on a fixed batch; checks direction,
+# not magnitude. Catches an inverted LR, an optimizer built on the wrong
+# param list, or a missing step(), all of which would still pass
+# gradient-existence and fast_dev_run checks. Absolute-loss thresholds
+# (convergence quality) are out of scope.
 
 
 class _LossTracker(pl.Callback):

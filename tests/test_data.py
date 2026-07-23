@@ -13,9 +13,7 @@ from mosa.models.mosa.config import MOSAConfig, OmicViewConfig
 from mosa.models.mosa.datamodule import MOSADataModule
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 def _make_obs_df(n_samples: int, rng: np.random.RandomState) -> pd.DataFrame:
     index = [f"sample_{i:03d}" for i in range(n_samples)]
@@ -144,9 +142,7 @@ def _make_dataset(
     return MultiOmicDataset(views=views, masks=masks, metadata=metadata, feature_names=feature_names)
 
 
-# ---------------------------------------------------------------------------
 # Tests for load_mudata() — h5mu
-# ---------------------------------------------------------------------------
 
 def test_load_h5mu_basic(tmp_path):
     view_specs = {"view_a": 20, "view_b": 15}
@@ -341,9 +337,7 @@ def test_load_h5mu_sparse_data(tmp_path):
     assert dataset.views["view_a"].shape == (n_samples, n_features)
 
 
-# ---------------------------------------------------------------------------
 # Tests for load_mudata() — zarr
-# ---------------------------------------------------------------------------
 
 def test_load_zarr_basic(tmp_path):
     view_specs = {"view_a": 20, "view_b": 15}
@@ -375,9 +369,7 @@ def test_load_zarr_matches_h5mu(tmp_path):
         assert np.array_equal(ds_h5.masks[view_name], ds_zarr.masks[view_name])
 
 
-# ---------------------------------------------------------------------------
 # Tests for MultiOmicDataset.validate()
-# ---------------------------------------------------------------------------
 
 def test_validate_passes():
     dataset = _make_dataset(10, {"view_a": 5})
@@ -406,9 +398,7 @@ def test_validate_missing_model_type():
         dataset.validate()
 
 
-# ---------------------------------------------------------------------------
 # Tests for MultiOmicDataset.subset()
-# ---------------------------------------------------------------------------
 
 def test_subset_correct_size():
     dataset = _make_dataset(10, {"view_a": 5, "view_b": 3})
@@ -430,9 +420,7 @@ def test_subset_metadata_matches():
     assert list(sub.metadata.index) == list(expected_index)
 
 
-# ---------------------------------------------------------------------------
 # Tests for MOSADataModule
-# ---------------------------------------------------------------------------
 
 def _make_datamodule(
     train_data: MultiOmicDataset,

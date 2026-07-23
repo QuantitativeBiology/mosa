@@ -124,7 +124,7 @@ class PoELatentSpace(BaseLatentSpace):
         shared_dim = next(iter(dims))
 
         if self.use_shared_head:
-            # Build layer sizes: input -> intermediate dims -> 2*latent_dim (mu, logvar)
+            # Layer sizes: input, intermediate dims, 2*latent_dim (mu, logvar)
             layer_sizes = [shared_dim] + self.shared_hidden_dims + [self.latent_dim * 2]
 
             self.shared_head = MLP(

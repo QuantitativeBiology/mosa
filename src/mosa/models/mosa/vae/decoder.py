@@ -9,8 +9,9 @@ from mosa.models.mosa.vae.layers import MLP
 class OmicDecoder(nn.Module):
     """Reconstructs omic features from the joint latent representation.
 
-    Architecture: ``[joint_latent_dim + cond_dim] -> reversed hidden_dims -> output_dim``.
-    Conditionals are projected through a dedicated layer before concatenation with z.
+    Architecture: maps [joint_latent_dim + cond_dim] through reversed hidden_dims
+    to output_dim. Conditionals are projected through a dedicated layer before
+    concatenation with z.
     """
 
     def __init__(

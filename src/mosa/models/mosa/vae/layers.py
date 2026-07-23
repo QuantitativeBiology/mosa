@@ -7,8 +7,8 @@ import torch.nn as nn
 class MLP(nn.Module):
     """Reusable multi-layer perceptron.
 
-    Hidden layers: Linear -> BatchNorm1d (optional) -> Activation -> Dropout (if > 0).
-    Final layer:   Linear -> output_activation (optional).
+    Hidden layers: Linear, optional BatchNorm1d, Activation, optional Dropout.
+    Final layer: Linear, optional output_activation.
     """
 
     def __init__(

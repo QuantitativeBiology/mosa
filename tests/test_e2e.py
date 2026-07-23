@@ -18,9 +18,7 @@ import pytest
 import yaml
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _write_config(path: Path, data_path: Path, output_dir: Path, view_specs: dict[str, int]) -> Path:
@@ -52,9 +50,7 @@ def _write_config(path: Path, data_path: Path, output_dir: Path, view_specs: dic
     return config_path
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 
 def test_cli_train_creates_output_files(make_h5mu_file, tmp_path):

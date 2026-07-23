@@ -307,7 +307,7 @@ def _load_lightning_metrics(output_dir):
     Returns
     -------
     dict
-        Metric name -> DataFrame with columns [epoch, value].
+        Metric name to DataFrame with columns [epoch, value].
     """
     log_dir = Path(output_dir) / "lightning_logs"
     if not log_dir.exists():

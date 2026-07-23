@@ -19,9 +19,7 @@ from mosa.data.dataset import MultiOmicDataset
 from mosa.data.io import csv_to_mudata, load_mudata
 
 
-# ---------------------------------------------------------------------------
 # CSV-writing helpers
-# ---------------------------------------------------------------------------
 
 def _write_view_csv(path, features, samples, nan_cells=None):
     """Write a features x samples view CSV (rows=features, cols=sample IDs)."""
@@ -47,9 +45,7 @@ def _write_mutations_csv(path, features, samples, values):
     return path
 
 
-# ===========================================================================
-# Group A -- format-agnostic contract
-# ===========================================================================
+# Group A: format-agnostic contract
 
 def test_output_structure(tmp_path):
     samples = [f"S{i:02d}" for i in range(6)]
@@ -113,13 +109,13 @@ def test_sample_alignment_and_ordering(tmp_path):
     expected = ["S00", "S01", "S02", "S03", "S04"]  # sorted intersection; S05 excluded
     assert list(mdata.obs_names) == expected
 
-    # S00: present in view_a, absent from view_b -> NaN row + mask False (absent).
+    # S00: present in view_a, absent from view_b: NaN row + mask False (absent).
     idx_s00 = expected.index("S00")
     adata_b = mdata.mod["view_b"]
     assert np.all(np.isnan(adata_b.X[idx_s00]))
     assert not adata_b.layers["mask"][idx_s00].any()
 
-    # S01: present in both views -> mask True (present) in view_b.
+    # S01: present in both views: mask True (present) in view_b.
     idx_s01 = expected.index("S01")
     assert adata_b.layers["mask"][idx_s01].any()
 
@@ -177,7 +173,7 @@ def test_mutations_reindexed_with_zero_fill(tmp_path):
     assert "mutation_mut1" in obs.columns
     assert "mutation_mut2" in obs.columns
     assert obs.loc["S00", "mutation_mut1"] == 1
-    assert obs.loc["S03", "mutation_mut1"] == 0  # not in mutations CSV -> filled 0
+    assert obs.loc["S03", "mutation_mut1"] == 0  # not in mutations CSV, filled 0
     assert obs.loc["S04", "mutation_mut2"] == 0
 
 
@@ -218,7 +214,7 @@ def test_h5mu_zarr_parity(tmp_path):
     cond_path = _write_conditionals_csv(
         tmp_path / "conditionals.csv", model_ids=samples, model_types=["TypeA"] * 6
     )
-    # S02: single partial-NaN cell. S04: fully missing (every feature NaN) --
+    # S02: single partial-NaN cell. S04: fully missing (every feature NaN);
     # exercises the h5mu/zarr divergence around fully-missing-sample handling.
     nan_cells = [("gA_0", "S02")] + [(f, "S04") for f in features_a]
     view_a_path = _write_view_csv(
@@ -240,9 +236,7 @@ def test_h5mu_zarr_parity(tmp_path):
     assert ds_h5.feature_names["view_a"] == ds_zarr.feature_names["view_a"]
 
 
-# ===========================================================================
-# Group B -- CSV-adapter specifics
-# ===========================================================================
+# Group B: CSV-adapter specifics
 
 def test_conditionals_missing_model_id_column(tmp_path):
     cond_path = tmp_path / "conditionals.csv"

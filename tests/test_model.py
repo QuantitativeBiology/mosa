@@ -13,9 +13,7 @@ from mosa.models.mosa.vae.losses import adversarial_loss, kl_divergence, reconst
 from mosa.models.mosa.vae.vae_module import _kl_weight_for_epoch
 
 
-# ---------------------------------------------------------------------------
 # Encoder
-# ---------------------------------------------------------------------------
 
 
 def test_encoder_output_shape():
@@ -47,9 +45,7 @@ def test_encoder_view_dropout():
     assert not torch.equal(out_eval, out_eval_zero)
 
 
-# ---------------------------------------------------------------------------
 # Decoder
-# ---------------------------------------------------------------------------
 
 
 def test_decoder_output_shape():
@@ -68,9 +64,7 @@ def test_decoder_no_cond():
     assert out.shape == (8, 50)
 
 
-# ---------------------------------------------------------------------------
 # Latent space
-# ---------------------------------------------------------------------------
 
 
 def test_concat_latent_shapes():
@@ -202,9 +196,7 @@ def test_reparameterize_eval_returns_mu():
     assert torch.equal(out, mu)
 
 
-# ---------------------------------------------------------------------------
 # Losses
-# ---------------------------------------------------------------------------
 
 
 def test_reconstruction_loss_full_mask():
@@ -292,9 +284,7 @@ def test_adversarial_loss_shape():
     assert torch.isfinite(loss)
 
 
-# ---------------------------------------------------------------------------
 # Discriminator
-# ---------------------------------------------------------------------------
 
 
 def test_discriminator_output_shape():
@@ -304,9 +294,7 @@ def test_discriminator_output_shape():
     assert out.shape == (8, 3)
 
 
-# ---------------------------------------------------------------------------
 # KL weight schedule
-# ---------------------------------------------------------------------------
 
 
 def _make_kl_config(**kwargs) -> types.SimpleNamespace:

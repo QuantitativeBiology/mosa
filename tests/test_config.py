@@ -9,9 +9,7 @@ from mosa.models.mosa.config import MOSAConfig, OmicViewConfig
 from mosa.utils import load_config
 
 
-# ---------------------------------------------------------------------------
 # DataConfig
-# ---------------------------------------------------------------------------
 
 
 def test_data_config_basic():
@@ -53,9 +51,7 @@ def test_data_config_validate_paths_empty():
         cfg.validate_paths()
 
 
-# ---------------------------------------------------------------------------
 # OmicViewConfig
-# ---------------------------------------------------------------------------
 
 
 def test_view_config_empty_hidden_dims():
@@ -78,9 +74,7 @@ def test_view_config_invalid_dropout():
         OmicViewConfig(name="x", dropout_p=1.5)
 
 
-# ---------------------------------------------------------------------------
 # MOSAConfig — defaults and numeric ranges
-# ---------------------------------------------------------------------------
 
 
 def test_mosa_default():
@@ -183,9 +177,7 @@ def test_poe_matched_hidden_dims():
     assert cfg.fusion_method == "poe"
 
 
-# ---------------------------------------------------------------------------
 # MOFAConfig
-# ---------------------------------------------------------------------------
 
 
 def test_mofa_default():
@@ -204,9 +196,7 @@ def test_mofa_invalid_convergence_mode():
         MOFAConfig(convergence_mode="invalid")
 
 
-# ---------------------------------------------------------------------------
 # load_config — YAML parsing and dispatch
-# ---------------------------------------------------------------------------
 
 
 def _write_yaml(path, payload):

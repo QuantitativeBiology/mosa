@@ -20,9 +20,7 @@ skip_mofa = pytest.mark.skipif(
 )
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _split(dataset, n_train=16):
@@ -30,9 +28,7 @@ def _split(dataset, n_train=16):
     return dataset.subset(indices[:n_train]), dataset.subset(indices[n_train:])
 
 
-# ---------------------------------------------------------------------------
 # MOSAModel tests
-# ---------------------------------------------------------------------------
 
 
 def test_vae_fit(make_multi_omic_dataset, make_mosa_config, tmp_path):
@@ -116,9 +112,7 @@ def test_vae_concat_and_poe(
     assert z.shape == (train.n_samples, model_cfg.joint_latent_dim)
 
 
-# ---------------------------------------------------------------------------
 # MOFAModel tests
-# ---------------------------------------------------------------------------
 
 
 def _mofa_data_cfg(dataset):
@@ -185,9 +179,7 @@ def test_mofa_unseen_data_raises(make_multi_omic_dataset, tmp_path):
         model.transform(other)
 
 
-# ---------------------------------------------------------------------------
 # Interface compliance
-# ---------------------------------------------------------------------------
 
 
 def test_all_models_are_multi_omic_model(sample_dataset, make_mosa_config, tmp_path):
@@ -196,9 +188,7 @@ def test_all_models_are_multi_omic_model(sample_dataset, make_mosa_config, tmp_p
     assert isinstance(MOFAModel(), MultiOmicModel)
 
 
-# ---------------------------------------------------------------------------
-# Error handling — calling API before fit()
-# ---------------------------------------------------------------------------
+# Error handling: calling API before fit()
 
 
 def test_transform_before_fit_raises(make_multi_omic_dataset, make_mosa_config, tmp_path):
@@ -225,9 +215,7 @@ def test_save_before_fit_raises(make_multi_omic_dataset, make_mosa_config, tmp_p
         model.save(tmp_path / "model.pt")
 
 
-# ---------------------------------------------------------------------------
-# Output quality — no NaN, deterministic eval
-# ---------------------------------------------------------------------------
+# Output quality: no NaN, deterministic eval
 
 
 def test_vae_transform_no_nan(make_multi_omic_dataset, make_mosa_config, tmp_path):
@@ -264,9 +252,7 @@ def test_vae_transform_deterministic(make_multi_omic_dataset, make_mosa_config, 
     np.testing.assert_array_equal(z1, z2)
 
 
-# ---------------------------------------------------------------------------
 # Save / load
-# ---------------------------------------------------------------------------
 
 
 def test_vae_save_creates_checkpoint(make_multi_omic_dataset, make_mosa_config, tmp_path):
@@ -329,9 +315,7 @@ def test_vae_load_preserves_weights(make_multi_omic_dataset, make_mosa_config, t
     np.testing.assert_allclose(result_orig["z"], result_loaded["z"], atol=1e-5)
 
 
-# ---------------------------------------------------------------------------
 # Edge cases
-# ---------------------------------------------------------------------------
 
 
 def test_vae_single_view(make_multi_omic_dataset, make_mosa_config, tmp_path):
@@ -356,9 +340,7 @@ def test_vae_with_missing_data(make_multi_omic_dataset, make_mosa_config, tmp_pa
     assert not np.isnan(z).any()
 
 
-# ---------------------------------------------------------------------------
 # Inference must reuse training scalers/categories, not refit (regression)
-# ---------------------------------------------------------------------------
 
 
 def _shift_dataset(data, shift: float):
