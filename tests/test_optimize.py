@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+import mosa.models.optimize as optimize_module
 from mosa.models.optimize import optimize
 
 optuna = pytest.importorskip("optuna")
@@ -46,3 +47,50 @@ def test_optimize_prunes_invalid_configs_instead_of_crashing(
     assert optuna.trial.TrialState.PRUNED in states or optuna.trial.TrialState.COMPLETE in states
     # No trial should have failed outright.
     assert optuna.trial.TrialState.FAIL not in states
+
+
+def test_optimize_prunes_trials_that_fail_during_training(
+    make_multi_omic_dataset, make_mosa_config, tmp_path, monkeypatch
+):
+    dataset = make_multi_omic_dataset(n_samples=20, n_groups=2)
+    data_cfg, model_cfg = make_mosa_config(dataset, num_epochs=1, output_dir=str(tmp_path))
+
+    search_space = {
+        "joint_latent_dim": {"dist": "categorical", "choices": [8, 16]},
+    }
+
+    def flaky_cross_validate(dataset, data_cfg, trial_model_cfg, n_folds):
+        if trial_model_cfg.joint_latent_dim == 8:
+            raise RuntimeError("simulated training divergence")
+        return {"mean": 0.5}
+
+    monkeypatch.setattr(optimize_module, "cross_validate", flaky_cross_validate)
+
+    results = optimize(dataset, data_cfg, model_cfg, search_space, n_trials=5, n_folds=2)
+
+    study = results["study"]
+    assert len(study.trials) == 5
+    states = {t.state for t in study.trials}
+    assert optuna.trial.TrialState.COMPLETE in states
+    assert optuna.trial.TrialState.PRUNED in states
+    assert optuna.trial.TrialState.FAIL not in states
+    assert results["best_value"] == 0.5
+
+
+def test_optimize_raises_when_every_trial_fails(
+    make_multi_omic_dataset, make_mosa_config, tmp_path, monkeypatch
+):
+    dataset = make_multi_omic_dataset(n_samples=20, n_groups=2)
+    data_cfg, model_cfg = make_mosa_config(dataset, num_epochs=1, output_dir=str(tmp_path))
+
+    search_space = {
+        "joint_latent_dim": {"dist": "categorical", "choices": [8, 16]},
+    }
+
+    def always_fails(dataset, data_cfg, trial_model_cfg, n_folds):
+        raise RuntimeError("simulated training divergence")
+
+    monkeypatch.setattr(optimize_module, "cross_validate", always_fails)
+
+    with pytest.raises(RuntimeError, match="No trial completed"):
+        optimize(dataset, data_cfg, model_cfg, search_space, n_trials=3, n_folds=2)

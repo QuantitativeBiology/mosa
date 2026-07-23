@@ -79,7 +79,9 @@ def optimize(
     `cross_validate(..., n_folds)` (lower is better). If the sampled combo is
     invalid, the config's own __post_init__ raises ValueError; this is caught
     and turned into optuna.TrialPruned so the trial is pruned instead of
-    crashing the whole study.
+    crashing the whole study. Any exception raised during cross_validate
+    itself is caught the same way, with the full traceback logged, so one
+    failing trial does not abort the remaining trials.
 
     Requires optuna (`pip install '.[hpo]'`); imported lazily so importing
     mosa never requires it.
@@ -103,7 +105,11 @@ def optimize(
             logger.debug("Trial %d pruned: invalid config (%s)", trial.number, e)
             raise optuna.TrialPruned(str(e)) from e
 
-        result = cross_validate(dataset, data_cfg, trial_model_cfg, n_folds=n_folds)
+        try:
+            result = cross_validate(dataset, data_cfg, trial_model_cfg, n_folds=n_folds)
+        except Exception as e:
+            logger.exception("Trial %d failed", trial.number)
+            raise optuna.TrialPruned(f"trial {trial.number} failed: {e}") from e
         return result["mean"]
 
     # Seed the sampler from the config so a search is reproducible run to run.
@@ -112,6 +118,9 @@ def optimize(
         direction="minimize", sampler=optuna.samplers.TPESampler(seed=seed)
     )
     study.optimize(objective, n_trials=n_trials)
+
+    if not any(t.state == optuna.trial.TrialState.COMPLETE for t in study.trials):
+        raise RuntimeError(f"No trial completed out of {n_trials}; see logged tracebacks")
 
     return {
         "best_params": study.best_params,
