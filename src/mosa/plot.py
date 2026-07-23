@@ -591,10 +591,11 @@ def _load_data_files(output_dir, views, data_path):
     output_dir = Path(output_dir)
 
     data_path_obj = Path(data_path)
-    if data_path_obj.suffix == ".zarr" or (data_path_obj.is_dir() and not data_path_obj.suffix):
-        mdata = mudata.read_zarr(str(data_path))
-    else:
-        mdata = mudata.read(str(data_path))
+    with mudata.set_options(pull_on_update=False):
+        if data_path_obj.suffix == ".zarr" or (data_path_obj.is_dir() and not data_path_obj.suffix):
+            mdata = mudata.read_zarr(str(data_path))
+        else:
+            mdata = mudata.read(str(data_path))
     data = {"omics": {}, "conditionals": mdata.obs}
 
     z_full_pq = output_dir / "full" / "latent.parquet"

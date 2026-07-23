@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import mudata
 import numpy as np
 import pandas as pd
 import pytest
@@ -7,6 +8,11 @@ import pytest
 from mosa.config import DataConfig
 from mosa.data.dataset import MultiOmicDataset
 from mosa.models.mosa.config import MOSAConfig, OmicViewConfig
+
+# Test fixtures build MuData objects directly and never rely on the
+# pull-obs/var-on-update behavior; adopt the post-0.4 default to match
+# production code (see mosa/data/io.py) instead of leaving it a FutureWarning.
+mudata.set_options(pull_on_update=False)
 
 
 @pytest.fixture

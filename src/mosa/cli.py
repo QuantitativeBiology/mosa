@@ -12,7 +12,6 @@ logger = logging.getLogger(__name__)
 
 def _setup_logging(debug: bool):
     """Configure logging: debug enables detailed logs, suppresses noisy third-party loggers."""
-    warnings.filterwarnings("ignore", category=FutureWarning, module="mudata")
     warnings.filterwarnings("ignore", message="Cannot join columns with the same name", module="mudata")
     warnings.filterwarnings("ignore", message=".*LeafSpec.*is deprecated", module="pytorch_lightning")
     warnings.filterwarnings("ignore", message=".*tensorboardX.*", module="pytorch_lightning")

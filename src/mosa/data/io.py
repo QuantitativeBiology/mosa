@@ -105,7 +105,8 @@ def _load_h5mu(
 
     logger.info("Loading MuData from %s", path)
     t0 = time.perf_counter()
-    mdata = mudata.read(path)
+    with mudata.set_options(pull_on_update=False):
+        mdata = mudata.read(path)
     logger.debug("h5mu read took %.2fs", time.perf_counter() - t0)
     _verify_mudata_structure(mdata, view_names, mask_layer_name)
 
@@ -281,7 +282,8 @@ def summarize_structure(path: str) -> dict:
 def _summarize_h5mu(path: str) -> dict:
     import mudata
 
-    mdata = mudata.read_h5mu(path, backed=True)
+    with mudata.set_options(pull_on_update=False):
+        mdata = mudata.read_h5mu(path, backed=True)
     modalities = {
         name: {"n_features": adata.n_vars, "layers": list(adata.layers.keys())}
         for name, adata in mdata.mod.items()
@@ -581,8 +583,11 @@ def csv_to_mudata(
         adatas[view_name] = adata
 
     # Build MuData
+    import mudata
+
     logger.debug("Creating MuData object")
-    mdata = MuData(adatas)
+    with mudata.set_options(pull_on_update=False):
+        mdata = MuData(adatas)
 
     # Presence is derived from the mask layer at load time, not persisted here.
     for view_name in omics:
@@ -626,7 +631,8 @@ def inspect_mudata(path: str) -> None:
         raise FileNotFoundError(f"File not found: {path}")
 
     is_zarr = p.is_dir() or path.endswith(".zarr")
-    mdata = mudata.read_zarr(path) if is_zarr else mudata.read(path)
+    with mudata.set_options(pull_on_update=False):
+        mdata = mudata.read_zarr(path) if is_zarr else mudata.read(path)
 
     n_obs = mdata.n_obs
     n_mod = len(mdata.mod)
