@@ -507,3 +507,70 @@ def test_datamodule_batch_categories(tmp_path):
 
     expected = sorted(set(model_types))
     assert dm.batch_categories == expected
+
+
+def test_datamodule_mutation_columns_reindexed_on_inference(tmp_path):
+    """Mutation block at inference must reindex to the training-time column
+    order, not re-derive from whichever mutation_* columns happen to be
+    present — otherwise a reordered input silently misaligns the conditional
+    vector instead of raising or being caught."""
+    view_specs = {"view_a": 5}
+    n = 4
+    train_data = _make_dataset(n, view_specs, model_types=["TypeA"] * n)
+    train_data.metadata["mutation_TP53"] = [1, 0, 1, 0]
+    train_data.metadata["mutation_KRAS"] = [0, 1, 0, 1]
+
+    data_cfg, model_cfg = _make_configs(view_specs, n, tmp_path)
+    dm = MOSADataModule(train_data=train_data, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg)
+    dm.setup()
+
+    assert dm.mutation_columns == ["mutation_TP53", "mutation_KRAS"]
+
+    # Same two mutation columns, reversed order, plus an unseen third column
+    # that must be dropped rather than appended.
+    infer_obs = pd.DataFrame(
+        {
+            "model_type": ["TypeA", "TypeA"],
+            "tissue": ["tissue_0", "tissue_0"],
+            "mutation_KRAS": [1, 1],
+            "mutation_TP53": [0, 0],
+            "mutation_BRAF": [1, 1],
+        },
+        index=["s0", "s1"],
+    )
+
+    result = dm._process_obs_readonly(infer_obs)
+    mutation_block = result["conditionals"][:, -len(dm.mutation_columns):]
+
+    # Must follow the training-time order (TP53, KRAS); a naive re-derivation
+    # from infer_obs's own column order would swap these two columns.
+    expected = np.array([[0, 1], [0, 1]], dtype=np.float32)
+    np.testing.assert_array_equal(mutation_block, expected)
+
+
+def test_datamodule_mutation_column_missing_at_inference_zero_filled(tmp_path):
+    """A mutation column present at fit time but absent at inference is
+    zero-filled, keeping conditional_dim stable instead of shrinking it."""
+    view_specs = {"view_a": 5}
+    n = 4
+    train_data = _make_dataset(n, view_specs, model_types=["TypeA"] * n)
+    train_data.metadata["mutation_TP53"] = [1, 0, 1, 0]
+    train_data.metadata["mutation_KRAS"] = [0, 1, 0, 1]
+
+    data_cfg, model_cfg = _make_configs(view_specs, n, tmp_path)
+    dm = MOSADataModule(train_data=train_data, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg)
+    dm.setup()
+
+    infer_obs = pd.DataFrame(
+        {
+            "model_type": ["TypeA"],
+            "tissue": ["tissue_0"],
+            "mutation_TP53": [1],
+            # mutation_KRAS entirely absent from this inference batch.
+        },
+        index=["s0"],
+    )
+
+    result = dm._process_obs_readonly(infer_obs)
+    mutation_block = result["conditionals"][:, -len(dm.mutation_columns):]
+    np.testing.assert_array_equal(mutation_block, np.array([[1, 0]], dtype=np.float32))

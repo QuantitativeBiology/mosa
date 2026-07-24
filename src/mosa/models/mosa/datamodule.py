@@ -170,6 +170,7 @@ class MOSADataModule(pl.LightningDataModule):
         self.feature_names: dict[str, list[str]] = {}
         self.batch_categories: list[str] = []
         self.tissue_categories: list[str] = []
+        self.mutation_columns: list[str] = []
         self.train_dataset: Dataset | None = None
         self.val_dataset: Dataset | None = None
         self.class_weights: np.ndarray | None = None
@@ -225,6 +226,7 @@ class MOSADataModule(pl.LightningDataModule):
         self.feature_names = source.feature_names
         self.batch_categories = source.batch_categories
         self.tissue_categories = source.tissue_categories
+        self.mutation_columns = source.mutation_columns
         self.class_weights = source.class_weights
 
         train = self.train_data
@@ -414,6 +416,7 @@ class MOSADataModule(pl.LightningDataModule):
             "scalers": scalers,
             "batch_categories": self.batch_categories,
             "tissue_categories": self.tissue_categories,
+            "mutation_columns": self.mutation_columns,
             "feature_names": self.feature_names,
             "class_weights": (
                 self.class_weights.tolist() if self.class_weights is not None else None
@@ -424,6 +427,7 @@ class MOSADataModule(pl.LightningDataModule):
         """Restore preprocessing state from a saved checkpoint."""
         self.batch_categories = state["batch_categories"]
         self.tissue_categories = state["tissue_categories"]
+        self.mutation_columns = state.get("mutation_columns", [])
         self.feature_names = state["feature_names"]
         class_weights = state.get("class_weights")
         self.class_weights = (
@@ -540,7 +544,9 @@ class MOSADataModule(pl.LightningDataModule):
             mutation_cols = [c for c in obs_df.columns if c.startswith("mutation_")]
             mutations = obs_df[mutation_cols].values.astype(np.float32) if mutation_cols else None
         else:
+            mutation_cols = []
             mutations = None
+        self.mutation_columns = mutation_cols
 
         cond_parts = [batch_dummies.values]
         if not tissue_dummies.empty:
@@ -597,9 +603,13 @@ class MOSADataModule(pl.LightningDataModule):
         else:
             tissue_dummies = pd.DataFrame()
 
-        if self.data_cfg.use_mutations:
-            mutation_cols = [c for c in obs_df.columns if c.startswith("mutation_")]
-            mutations = obs_df[mutation_cols].values.astype(np.float32) if mutation_cols else None
+        if self.data_cfg.use_mutations and self.mutation_columns:
+            # Reindex against the training-time column list so a different
+            # order or set of mutation_* columns in new data can't silently
+            # misalign the conditional block (or is cleanly zero-filled).
+            mutations = obs_df.reindex(
+                columns=self.mutation_columns, fill_value=0
+            ).values.astype(np.float32)
         else:
             mutations = None
 
