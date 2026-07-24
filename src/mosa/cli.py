@@ -5,7 +5,6 @@ import logging
 import os
 import sys
 import warnings
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +111,7 @@ def _transform(args):
 
     from mosa.data.io import load_mudata
     from mosa.models.registry import load_model
+    from mosa.utils import ensure_dir
 
     model = load_model(args.checkpoint)
     dataset = load_mudata(
@@ -120,8 +120,7 @@ def _transform(args):
         model.data_cfg.mask_layer_name,
     )
 
-    out_dir = Path(args.output)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = ensure_dir(args.output)
 
     z = model.transform(dataset)
     pd.DataFrame(z, index=dataset.sample_names).to_parquet(out_dir / "latent.parquet")

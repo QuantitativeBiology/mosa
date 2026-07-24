@@ -11,6 +11,7 @@ from mudata import MuData
 from scipy.sparse import issparse
 
 from mosa.data.dataset import MultiOmicDataset
+from mosa.utils import ensure_dir
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,12 @@ ORIENTATION_WARN_THRESHOLD = 0.10
 
 
 # Zarr path helpers (shared with datamodule.LazyZarrDataset)
+
+def is_zarr_path(path: str | Path) -> bool:
+    """Detect zarr vs h5mu from a path: h5mu is always a single file, zarr a directory."""
+    p = Path(path)
+    return p.is_dir() or p.suffix == ".zarr"
+
 
 def _zarr_view_x_key(view_name: str) -> str:
     return f"mod/{view_name}/X"
@@ -251,8 +258,7 @@ def load_mudata(
     mask_layer_name : str
         Name of the per-feature presence mask layer.
     """
-    p = Path(path)
-    if p.suffix == ".zarr" or (p.is_dir() and p.suffix != ".h5mu"):
+    if is_zarr_path(path):
         dataset = _load_zarr(path, view_names, mask_layer_name)
     else:
         dataset = _load_h5mu(path, view_names, mask_layer_name)
@@ -273,8 +279,7 @@ def summarize_structure(path: str) -> dict:
           "model_type_categories": [str, ...] | None,
         }
     """
-    p = Path(path)
-    if p.suffix == ".zarr" or (p.is_dir() and p.suffix != ".h5mu"):
+    if is_zarr_path(path):
         return _summarize_zarr(path)
     return _summarize_h5mu(path)
 
@@ -335,10 +340,16 @@ def _summarize_zarr(path: str) -> dict:
 
 # Validation helpers
 
-def _validate_conditionals(path: str) -> pd.DataFrame:
+def _require_exists(path: str | Path, what: str = "File") -> Path:
+    """Raise a descriptive FileNotFoundError if path is missing."""
     p = Path(path)
     if not p.exists():
-        raise FileNotFoundError(f"Conditionals not found: {path}")
+        raise FileNotFoundError(f"{what} not found: {path}")
+    return p
+
+
+def _validate_conditionals(path: str) -> pd.DataFrame:
+    _require_exists(path, what="Conditionals")
 
     try:
         conditionals = pd.read_csv(path)
@@ -508,10 +519,7 @@ def csv_to_mudata(
     conditionals_ids = set(conditionals.index)
 
     for view_name, csv_path in view_specs:
-        if not Path(csv_path).exists():
-            raise FileNotFoundError(
-                f"View '{view_name}': CSV file not found: {csv_path}"
-            )
+        _require_exists(csv_path, what=f"View '{view_name}': CSV file")
         try:
             df_raw = pd.read_csv(csv_path, index_col=0)
         except Exception as e:
@@ -522,8 +530,8 @@ def csv_to_mudata(
         _check_view_orientation(df_raw, conditionals_ids, view_name, csv_path)
         _validate_view_numeric(df_raw, view_name, csv_path)
 
-    if mutations_path and not Path(mutations_path).exists():
-        raise FileNotFoundError(f"Mutations CSV not found: {mutations_path}")
+    if mutations_path:
+        _require_exists(mutations_path, what="Mutations CSV")
 
     # Load views
     logger.debug("Loading view CSVs")
@@ -609,7 +617,7 @@ def csv_to_mudata(
     _dearrow_mudata(mdata)
 
     output_path_obj = Path(output_path)
-    output_path_obj.parent.mkdir(parents=True, exist_ok=True)
+    ensure_dir(output_path_obj.parent)
 
     logger.info("Saving MuData (%s) to %s", format, output_path)
     if format == "zarr":
@@ -626,13 +634,10 @@ def inspect_mudata(path: str) -> None:
     """Print a human-readable summary of a MuData file for post-conversion verification."""
     import mudata
 
-    p = Path(path)
-    if not p.exists():
-        raise FileNotFoundError(f"File not found: {path}")
+    _require_exists(path, what="File")
 
-    is_zarr = p.is_dir() or path.endswith(".zarr")
     with mudata.set_options(pull_on_update=False):
-        mdata = mudata.read_zarr(path) if is_zarr else mudata.read(path)
+        mdata = mudata.read_zarr(path) if is_zarr_path(path) else mudata.read(path)
 
     n_obs = mdata.n_obs
     n_mod = len(mdata.mod)

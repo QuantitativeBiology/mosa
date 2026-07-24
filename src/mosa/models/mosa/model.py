@@ -17,6 +17,7 @@ from mosa.models.mosa.config import MOSAConfig, OmicViewConfig
 from mosa.models.mosa.datamodule import MOSADataModule
 from mosa.models.mosa.vae.vae_module import VAE
 from mosa.models.registry import register_model
+from mosa.utils import ensure_dir
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +179,7 @@ class MOSAModel(MultiOmicModel):
         """Run predict on a dataloader and write latent/recon parquet files."""
         import time
 
-        out_dir.mkdir(parents=True, exist_ok=True)
+        ensure_dir(out_dir)
         n_batches = len(self._datamodule.batch_categories) if force_source_id is not None else None
 
         t = time.perf_counter()

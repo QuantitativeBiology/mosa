@@ -12,6 +12,7 @@ from sklearn.preprocessing import StandardScaler
 
 from mosa.config import DataConfig
 from mosa.data.dataset import MultiOmicDataset
+from mosa.data.io import _zarr_view_mask_key, _zarr_view_x_key
 from mosa.models.mosa.config import MOSAConfig
 
 logger = logging.getLogger(__name__)
@@ -118,8 +119,8 @@ class LazyZarrDataset(Dataset):
         all_X: dict[str, np.ndarray] = {}
         all_masks: dict[str, np.ndarray] = {}
         for name in self.view_names:
-            X_batch = store[f"mod/{name}/X"][sorted_real].astype(np.float32)
-            mask_batch = store[f"mod/{name}/layers/{self.mask_layer_name}"][sorted_real].astype(bool)
+            X_batch = store[_zarr_view_x_key(name)][sorted_real].astype(np.float32)
+            mask_batch = store[_zarr_view_mask_key(name, self.mask_layer_name)][sorted_real].astype(bool)
 
             scaler = self.scalers.get(name)
             if scaler is not None:
@@ -307,7 +308,7 @@ class MOSADataModule(pl.LightningDataModule):
                 self.scalers[view_name] = None
                 continue
 
-            X_zarr = store[f"mod/{view_name}/X"]
+            X_zarr = store[_zarr_view_x_key(view_name)]
             if frac < 1.0:
                 n_sub = max(1, int(n_train * frac))
                 sub_idx = sorted(rng.choice(all_train_idx, size=n_sub, replace=False))

@@ -19,6 +19,8 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import calinski_harabasz_score, davies_bouldin_score
 
+from mosa.utils import ensure_dir
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_PALETTE = {
@@ -272,6 +274,15 @@ def _try_read(parquet_path, csv_path):
     return None
 
 
+def _read_split(output_dir, splits, filename):
+    """Try reading filename.parquet/csv from each split subdir in order, first hit wins."""
+    for split in splits:
+        data = _try_read(output_dir / split / f"{filename}.parquet", output_dir / split / f"{filename}.csv")
+        if data is not None:
+            return data
+    return None
+
+
 def _load_conditionals(path):
     """Load conditionals CSV with model_id as index."""
     conditionals = pd.read_csv(path, index_col=0)
@@ -290,7 +301,7 @@ def _align_to_conditionals(df, conditionals):
 
 def _save_fig(fig, out_path):
     """Save figure and close it."""
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_dir(out_path.parent)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
         fig.tight_layout()
@@ -588,30 +599,23 @@ def _load_data_files(output_dir, views, data_path):
     import mudata
     from scipy.sparse import issparse
 
+    from mosa.data.io import is_zarr_path
+
     output_dir = Path(output_dir)
 
     data_path_obj = Path(data_path)
     with mudata.set_options(pull_on_update=False):
-        if data_path_obj.suffix == ".zarr" or (data_path_obj.is_dir() and not data_path_obj.suffix):
+        if is_zarr_path(data_path_obj):
             mdata = mudata.read_zarr(str(data_path))
         else:
             mdata = mudata.read(str(data_path))
     data = {"omics": {}, "conditionals": mdata.obs}
 
-    z_full_pq = output_dir / "full" / "latent.parquet"
-    z_full_csv = output_dir / "full" / "latent.csv"
-    z_train_pq = output_dir / "train" / "latent.parquet"
-    z_train_csv = output_dir / "train" / "latent.csv"
-
-    z_data = _try_read(z_full_pq, z_full_csv)
-    if z_data is None:
-        z_data = _try_read(z_train_pq, z_train_csv)
+    z_data = _read_split(output_dir, ["full", "train"], "latent")
     if z_data is not None:
         data["z"] = z_data
 
-    z_inf_pq = output_dir / "inference" / "latent.parquet"
-    z_inf_csv = output_dir / "inference" / "latent.csv"
-    z_inf_data = _try_read(z_inf_pq, z_inf_csv)
+    z_inf_data = _read_split(output_dir, ["inference"], "latent")
     if z_inf_data is not None:
         data["z_inf"] = z_inf_data
 
@@ -626,20 +630,11 @@ def _load_data_files(output_dir, views, data_path):
                 X, index=mdata.mod[name].obs_names, columns=mdata.mod[name].var_names,
             )
 
-        recon_full_pq = output_dir / "full" / f"recon_{name}.parquet"
-        recon_full_csv = output_dir / "full" / f"recon_{name}.csv"
-        recon_train_pq = output_dir / "train" / f"recon_{name}.parquet"
-        recon_train_csv = output_dir / "train" / f"recon_{name}.csv"
-
-        recon_data = _try_read(recon_full_pq, recon_full_csv)
-        if recon_data is None:
-            recon_data = _try_read(recon_train_pq, recon_train_csv)
+        recon_data = _read_split(output_dir, ["full", "train"], f"recon_{name}")
         if recon_data is not None:
             omic_data["recon"] = recon_data
 
-        recon_inf_pq = output_dir / "inference" / f"recon_{name}.parquet"
-        recon_inf_csv = output_dir / "inference" / f"recon_{name}.csv"
-        recon_inf_data = _try_read(recon_inf_pq, recon_inf_csv)
+        recon_inf_data = _read_split(output_dir, ["inference"], f"recon_{name}")
         if recon_inf_data is not None:
             omic_data["recon_inf"] = recon_inf_data
 
@@ -725,8 +720,7 @@ def generate_all_plots(output_dir, data_cfg, model_cfg=None, palette=None, pca_c
 
     metrics_rows = _compute_all_clustering_metrics(data, views, data["conditionals"])
     if metrics_rows:
-        metrics_out = output_dir / "metrics"
-        metrics_out.mkdir(parents=True, exist_ok=True)
+        metrics_out = ensure_dir(output_dir / "metrics")
         pd.DataFrame(metrics_rows).to_csv(metrics_out / "clustering_metrics.csv", index=False)
     else:
         warnings.warn("Clustering metrics not computed: missing labels or data.")

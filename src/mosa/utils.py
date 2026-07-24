@@ -19,13 +19,24 @@ def seed_everything(seed: int) -> None:
     logger.debug("Seeded everything with %d", seed)
 
 
+def ensure_dir(path: str | Path) -> Path:
+    """Create directory (and parents) if missing; return it as a Path."""
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def read_yaml(path: str | Path) -> dict:
+    """Read a YAML file into a dict; empty files return {}."""
+    with open(path) as f:
+        return yaml.safe_load(f) or {}
+
+
 def load_config(yaml_path: str | Path) -> Config:
     """Load a YAML config and return a Config bundling DataConfig + ModelConfig."""
     from mosa.models.registry import model_config_classes
 
-    yaml_path = Path(yaml_path)
-    with open(yaml_path) as f:
-        raw = yaml.safe_load(f)
+    raw = read_yaml(yaml_path)
 
     if "data" not in raw or "model" not in raw:
         raise ValueError(f"Config {yaml_path} must contain top-level 'data:' and 'model:' blocks")

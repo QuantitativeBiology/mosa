@@ -4,11 +4,10 @@ import dataclasses
 import logging
 from pathlib import Path
 
-import yaml
-
 from mosa.config import DataConfig, ModelConfig
 from mosa.data.dataset import MultiOmicDataset
 from mosa.models.evaluation import cross_validate
+from mosa.utils import read_yaml
 
 logger = logging.getLogger(__name__)
 
@@ -17,9 +16,7 @@ _SUPPORTED_DISTS = ("loguniform", "uniform", "int", "categorical")
 
 def load_search_space(path: str | Path) -> dict:
     """Load and validate a search-space YAML mapping top-level ModelConfig fields to distributions."""
-    with open(path) as f:
-        raw = yaml.safe_load(f) or {}
-    return parse_search_space(raw)
+    return parse_search_space(read_yaml(path))
 
 
 def _suggest(trial, name: str, spec: dict):
