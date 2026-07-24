@@ -557,8 +557,10 @@ def _generate_reconstruction_plots(data, views, plots_dir):
 
 def _compute_clustering_metrics(X, labels, dataset_name, label_type):
     """Compute Calinski-Harabasz and Davies-Bouldin scores."""
+    n_samples = len(labels)
     n_unique = len(np.unique(labels))
-    if n_unique < 2:
+    # sklearn's check_number_of_labels requires 2 <= n_labels <= n_samples - 1.
+    if n_unique < 2 or n_unique > n_samples - 1:
         return {"dataset": dataset_name, "label_type": label_type,
                 "calinski_harabasz": np.nan, "davies_bouldin": np.nan}
 

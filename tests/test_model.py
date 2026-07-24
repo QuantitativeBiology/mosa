@@ -32,11 +32,13 @@ def test_encoder_view_dropout():
     x = torch.randn(8, 50)
     x_zero = torch.zeros(8, 50)
 
-    # p=1.0: training always zeros x, so output equals the zero-input forward pass
+    # p=1.0: training always zeros x, so output equals the zero-input forward pass.
+    # allclose (not equal): BatchNorm1d's multi-threaded reduction kernel doesn't
+    # cancel to exactly 0 for a zero-variance batch the way single-threaded does.
     encoder.train()
     out_train = encoder(x)
     out_zero = encoder(x_zero)
-    assert torch.equal(out_train, out_zero)
+    assert torch.allclose(out_train, out_zero, atol=1e-6)
 
     # eval: dropout is skipped, so non-zero x produces different output than x_zero
     encoder.eval()
