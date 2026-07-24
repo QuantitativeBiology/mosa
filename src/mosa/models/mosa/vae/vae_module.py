@@ -193,17 +193,17 @@ class VAE(pl.LightningModule):
         dict
             Keys: recon, kl, contrastive, recon_metrics.
         """
+        loss_types = {name: vc.loss_type for name, vc in self.config.views.items()}
+        recon_weights = {name: vc.recon_weight for name, vc in self.config.views.items()}
+        needs_group = any(lt == "macro" for lt in loss_types.values())
+
         recon_loss, recon_metrics = reconstruction_loss(
             x_hat=out["x_hat"],
             x=batch["decoder_targets"],
             mask=batch["missing_masks"],
-            group=batch["source_ids"] if any(
-                vc.loss_type == "macro" for vc in self.config.views.values()
-            ) else None,
-            sample_weights=batch["sample_weights"],
-            loss_type="macro" if any(
-                vc.loss_type == "macro" for vc in self.config.views.values()
-            ) else "mean",
+            group=batch["source_ids"] if needs_group else None,
+            loss_types=loss_types,
+            recon_weights=recon_weights,
         )
 
         kl_loss = kl_divergence(out["mu"], out["logvar"])
@@ -256,7 +256,8 @@ class VAE(pl.LightningModule):
             class_weights = self.class_weights if self.config.use_adv_class_weights else None
             disc_pred = self.discriminator(out["z"].detach())
             disc_loss_val = adversarial_loss(
-                disc_pred, batch["source_ids"], class_weights
+                disc_pred, batch["source_ids"], class_weights,
+                focal_gamma=self.config.adv_focal_gamma,
             )
             opt_disc.zero_grad()
             self.manual_backward(disc_loss_val)
@@ -266,7 +267,8 @@ class VAE(pl.LightningModule):
             # Phase 2: adversarial component for VAE (fool discriminator)
             adv_pred = self.discriminator(out["z"])
             adv_loss_val = adversarial_loss(
-                adv_pred, batch["source_ids"], class_weights
+                adv_pred, batch["source_ids"], class_weights,
+                focal_gamma=self.config.adv_focal_gamma,
             )
 
         # VAE total loss
@@ -384,6 +386,7 @@ class VAE(pl.LightningModule):
         all_z: list[torch.Tensor] = []
         all_x_hat: dict[str, list[torch.Tensor]] = {}
         all_names: list[str] = []
+        all_source_ids: list[torch.Tensor] = []
 
         for batch in loader:
             batch = _batch_to_device(batch, self.device)
@@ -406,12 +409,14 @@ class VAE(pl.LightningModule):
 
             all_z.append(out["z"].cpu())
             all_names.extend(batch["sample_name"])
+            all_source_ids.append(batch["source_ids"].cpu())
 
             for omic, recon in out["x_hat"].items():
                 all_x_hat.setdefault(omic, []).append(recon.cpu())
 
         return {
             "z": torch.cat(all_z).numpy(),
+            "source_ids": torch.cat(all_source_ids).numpy(),
             "x_hat": {
                 omic: torch.cat(chunks).numpy()
                 for omic, chunks in all_x_hat.items()

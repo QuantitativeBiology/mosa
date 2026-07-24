@@ -10,6 +10,7 @@ _VALID_LOSS_TYPES = ("mean", "macro")
 _VALID_LR_SCHEDULERS = ("none", "step")
 _VALID_PRECISIONS = ("32", "16-mixed", "bf16-mixed")
 _VALID_ACCELERATORS = ("auto", "cpu", "gpu", "mps")
+_VALID_PREPROCESSING_MODES = ("standardize", "center", "none")
 
 
 @dataclass
@@ -20,6 +21,7 @@ class OmicViewConfig:
     hidden_layer_dims: list[int] = field(default_factory=lambda: [512, 256])
     loss_type: str = "mean"
     dropout_p: float = 0.1
+    recon_weight: float = 1.0
 
     def __post_init__(self):
         if not self.hidden_layer_dims:
@@ -33,6 +35,8 @@ class OmicViewConfig:
             )
         if not 0.0 <= self.dropout_p < 1.0:
             raise ValueError(f"View '{self.name}': dropout_p must be in [0, 1), got {self.dropout_p}")
+        if self.recon_weight <= 0:
+            raise ValueError(f"View '{self.name}': recon_weight must be positive, got {self.recon_weight}")
 
 
 @dataclass
@@ -48,12 +52,17 @@ class MOSAConfig(ModelConfig):
     view_dropout_prob: float = 0.2
 
     # Losses
-    kl_weight: float = 0.01
-    kl_weight_final: float = 0.01
+    # kl_divergence sums over joint_latent_dim before averaging over the batch
+    # (textbook VAE KL), so its magnitude scales with joint_latent_dim; these
+    # defaults are 0.01 / 64 (the default joint_latent_dim), matching the old
+    # per-element-mean formula's effective weighting.
+    kl_weight: float = 1.5625e-4
+    kl_weight_final: float = 1.5625e-4
     kl_warmup_epochs: int = 0
     use_kl_scheduler: bool = False
     contrastive_weight: float = 0.0
     adv_weight: float = 0.0
+    adv_focal_gamma: float = 0.0  # focal loss gamma for adversarial CE; 0 disables (plain CE)
 
     # Optimiser
     learning_rate: float = 1e-3
@@ -70,6 +79,7 @@ class MOSAConfig(ModelConfig):
     use_adv_class_weights: bool = True  # use class weights in adversarial cross-entropy loss
     inference: bool = False
     target_batch: str = ""
+    preprocessing_mode: str = "standardize"  # "standardize", "center", or "none" (group-mean imputation)
 
     # Lightning trainer
     accelerator: str = "auto"
@@ -100,7 +110,7 @@ class MOSAConfig(ModelConfig):
         for name in (
             "kl_weight", "kl_weight_final", "contrastive_weight", "adv_weight",
             "learning_rate", "adv_learning_rate", "lr_gamma", "view_dropout_prob",
-            "scaler_sample_frac",
+            "scaler_sample_frac", "adv_focal_gamma",
         ):
             val = getattr(self, name)
             if not isinstance(val, float):
@@ -127,6 +137,13 @@ class MOSAConfig(ModelConfig):
             )
         if not 0.0 < self.scaler_sample_frac <= 1.0:
             raise ValueError(f"scaler_sample_frac must be in (0.0, 1.0], got {self.scaler_sample_frac}")
+        if self.adv_focal_gamma < 0:
+            raise ValueError(f"adv_focal_gamma must be >= 0, got {self.adv_focal_gamma}")
+        if self.preprocessing_mode not in _VALID_PREPROCESSING_MODES:
+            raise ValueError(
+                f"preprocessing_mode must be one of {_VALID_PREPROCESSING_MODES}, "
+                f"got '{self.preprocessing_mode}'"
+            )
 
         # Lightning
         if self.precision not in _VALID_PRECISIONS:

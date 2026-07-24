@@ -251,12 +251,32 @@ def test_reconstruction_loss_macro():
     group = torch.tensor([0, 0, 0, 1])
 
     loss, _ = reconstruction_loss(
-        {"omic": x_hat}, {"omic": x}, mask, group=group, loss_type="macro"
+        {"omic": x_hat}, {"omic": x}, mask, group=group, loss_types={"omic": "macro"}
     )
 
     # Macro: mean of (group0_mean=1.0, group1_mean=4.0) = 2.5
     # Sample-weighted mean would be (3*1.0 + 1*4.0)/4 = 1.75
     assert loss.item() == pytest.approx(2.5, abs=1e-5)
+
+
+def test_reconstruction_loss_recon_weight_scales_omic_contribution():
+    """Per-omic recon_weight scales that omic's contribution to the total loss."""
+    B, D = 4, 5
+    x = torch.zeros(B, D)
+    x_hat_a = torch.ones(B, D)   # per-feature squared error = 1.0
+    x_hat_b = torch.ones(B, D) * 2.0  # per-feature squared error = 4.0
+    mask = {"a": torch.ones(B, D, dtype=torch.bool), "b": torch.ones(B, D, dtype=torch.bool)}
+
+    equal_loss, _ = reconstruction_loss(
+        {"a": x_hat_a, "b": x_hat_b}, {"a": x, "b": x}, mask,
+    )
+    assert equal_loss.item() == pytest.approx(1.0 + 4.0, abs=1e-5)
+
+    weighted_loss, _ = reconstruction_loss(
+        {"a": x_hat_a, "b": x_hat_b}, {"a": x, "b": x}, mask,
+        recon_weights={"a": 2.0, "b": 0.5},
+    )
+    assert weighted_loss.item() == pytest.approx(2.0 * 1.0 + 0.5 * 4.0, abs=1e-5)
 
 
 def test_kl_divergence_standard_normal():
@@ -274,6 +294,14 @@ def test_kl_divergence_positive():
     assert kl.item() > 0.0
 
 
+def test_kl_divergence_clamps_extreme_logvar():
+    """Unstable posteriors (huge logvar) must not blow up to inf/NaN."""
+    mu = torch.zeros(4, 8)
+    logvar = torch.full((4, 8), 1000.0)
+    kl = kl_divergence(mu, logvar)
+    assert torch.isfinite(kl)
+
+
 def test_adversarial_loss_shape():
     torch.manual_seed(0)
     B, C = 8, 3
@@ -282,6 +310,19 @@ def test_adversarial_loss_shape():
     loss = adversarial_loss(pred, target)
     assert loss.shape == ()
     assert torch.isfinite(loss)
+
+
+def test_adversarial_loss_focal_gamma_downweights_easy_examples():
+    """With focal_gamma > 0, confidently-correct (easy) predictions contribute
+    less to the loss than under plain cross-entropy."""
+    B, C = 6, 3
+    target = torch.zeros(B, dtype=torch.long)
+    easy_pred = torch.zeros(B, C)
+    easy_pred[:, 0] = 10.0  # confident, correct logits
+
+    plain = adversarial_loss(easy_pred, target, focal_gamma=0.0)
+    focal = adversarial_loss(easy_pred, target, focal_gamma=2.0)
+    assert focal.item() < plain.item()
 
 
 # Discriminator

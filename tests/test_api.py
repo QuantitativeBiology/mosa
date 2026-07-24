@@ -398,7 +398,7 @@ def test_transform_does_not_mutate_trained_scaler(
     model.fit(train, val=None)
 
     means_before = {
-        name: scaler.mean_.copy()
+        name: scaler["mean"].copy()
         for name, scaler in model._datamodule.scalers.items()
         if scaler is not None
     }
@@ -408,7 +408,7 @@ def test_transform_does_not_mutate_trained_scaler(
     model.reconstruct(shifted)
 
     for name, mean_before in means_before.items():
-        np.testing.assert_array_equal(model._datamodule.scalers[name].mean_, mean_before)
+        np.testing.assert_array_equal(model._datamodule.scalers[name]["mean"], mean_before)
 
 
 def test_reconstruct_returns_original_scale(

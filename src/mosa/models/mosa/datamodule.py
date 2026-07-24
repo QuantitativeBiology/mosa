@@ -8,7 +8,6 @@ import zarr
 from torch.utils.data import ConcatDataset, DataLoader, Dataset, WeightedRandomSampler
 
 import pytorch_lightning as pl
-from sklearn.preprocessing import StandardScaler
 
 from mosa.config import DataConfig
 from mosa.data.dataset import MultiOmicDataset
@@ -16,6 +15,150 @@ from mosa.data.io import _zarr_view_mask_key, _zarr_view_x_key
 from mosa.models.mosa.config import MOSAConfig
 
 logger = logging.getLogger(__name__)
+
+
+# Mask-aware standardization: mean/std computed only from observed entries,
+# so missing values (NaN placeholders) never bias the fitted statistics.
+
+def _feature_mean(X: np.ndarray, masks: np.ndarray) -> np.ndarray:
+    """Compute per-feature mean using only observed values."""
+    observed = np.where(masks, X, 0.0)
+    counts = masks.sum(axis=0).astype(np.float32)
+    sums = observed.sum(axis=0)
+    mean = np.zeros(X.shape[1], dtype=np.float32)
+    valid = counts > 0
+    mean[valid] = sums[valid] / counts[valid]
+    return mean
+
+
+def _feature_std(X: np.ndarray, masks: np.ndarray, mean: np.ndarray) -> np.ndarray:
+    """Compute per-feature standard deviation using only observed values."""
+    observed = np.where(masks, X, 0.0)
+    counts = masks.sum(axis=0).astype(np.float32)
+    centered = observed - mean
+    sq_sums = np.square(centered).sum(axis=0)
+    var = np.zeros(X.shape[1], dtype=np.float32)
+    valid = counts > 0
+    var[valid] = sq_sums[valid] / counts[valid]
+    scale = np.sqrt(var, dtype=np.float32)
+    scale[scale == 0.0] = 1.0
+    return scale
+
+
+def _fit_standardization(X: np.ndarray, masks: np.ndarray) -> dict[str, np.ndarray]:
+    """Fit mask-aware mean/std statistics for per-feature standardization."""
+    mean = _feature_mean(X, masks)
+    scale = _feature_std(X, masks, mean)
+    return {"mean": mean, "scale": scale}
+
+
+def _apply_standardization(
+    X: np.ndarray,
+    masks: np.ndarray,
+    stats: dict[str, np.ndarray],
+) -> np.ndarray:
+    """Standardize observed entries and fill missing entries with zero placeholder."""
+    mean = stats["mean"]
+    scale = stats["scale"]
+    standardized = np.where(masks, (X - mean) / scale, 0.0)
+    np.nan_to_num(standardized, nan=0.0, copy=False)
+    return standardized
+
+
+# Group centering / imputation (per model_type), mirroring MOFA's group handling.
+
+def _fit_group_centering(
+    X: np.ndarray,
+    masks: np.ndarray,
+    source_ids: np.ndarray,
+    n_groups: int,
+) -> dict[str, np.ndarray]:
+    """Fit per-group feature means plus a global fallback mean.
+
+    Falls back to the global (all-groups) mean on a per-feature basis whenever
+    a group has zero observed values for that specific feature (e.g. a group
+    absent from a subsample, or a feature entirely unmeasured within a group,
+    such as CRISPR having no data at all for a model_type that lacks it).
+    """
+    global_mean = _feature_mean(X, masks)
+    group_means = np.tile(global_mean, (n_groups, 1)).astype(np.float32)
+    for g_idx in range(n_groups):
+        sample_mask = source_ids == g_idx
+        if not np.any(sample_mask):
+            continue
+        g_counts = masks[sample_mask].sum(axis=0)
+        g_mean = _feature_mean(X[sample_mask], masks[sample_mask])
+        valid = g_counts > 0
+        group_means[g_idx, valid] = g_mean[valid]
+    return {"group_means": group_means, "global_mean": global_mean}
+
+
+def _group_mean_for(g_idx: int, centering: dict[str, np.ndarray]) -> np.ndarray:
+    group_means = centering["group_means"]
+    if 0 <= int(g_idx) < group_means.shape[0]:
+        return group_means[int(g_idx)]
+    return centering["global_mean"]
+
+
+def _apply_group_centering(
+    X: np.ndarray,
+    masks: np.ndarray,
+    source_ids: np.ndarray,
+    centering: dict[str, np.ndarray],
+) -> np.ndarray:
+    """Center observed entries by the mean of their model_type group."""
+    centered = np.array(X, copy=True)
+    source_ids = np.asarray(source_ids)
+
+    for g_idx in np.unique(source_ids):
+        row_mask = source_ids == g_idx
+        mean = _group_mean_for(g_idx, centering)
+        present = masks[row_mask]
+        centered[row_mask] = np.where(present, centered[row_mask] - mean, 0.0)
+
+    np.nan_to_num(centered, nan=0.0, copy=False)
+    return centered
+
+
+def _apply_group_mean_imputation(
+    X: np.ndarray,
+    masks: np.ndarray,
+    source_ids: np.ndarray,
+    means: dict[str, np.ndarray],
+) -> np.ndarray:
+    """Fill missing entries with their model_type group's mean (raw scale).
+
+    Falls back to the global mean (computed across all other groups) when a
+    group has no observed values for a feature.
+    """
+    filled = np.array(X, copy=True)
+    source_ids = np.asarray(source_ids)
+
+    for g_idx in np.unique(source_ids):
+        row_mask = source_ids == g_idx
+        mean = _group_mean_for(g_idx, means)
+        present = masks[row_mask]
+        filled[row_mask] = np.where(present, filled[row_mask], mean)
+
+    np.nan_to_num(filled, nan=0.0, copy=False)
+    return filled
+
+
+def _apply_group_inverse_centering(
+    X: np.ndarray,
+    source_ids: np.ndarray,
+    centering: dict[str, np.ndarray],
+) -> np.ndarray:
+    """Undo group centering using the sample's model_type group."""
+    restored = np.array(X, copy=True)
+    source_ids = np.asarray(source_ids)
+
+    for g_idx in np.unique(source_ids):
+        row_mask = source_ids == g_idx
+        mean = _group_mean_for(g_idx, centering)
+        restored[row_mask] = restored[row_mask] + mean
+
+    return restored
 
 
 class MOSADataset(Dataset):
@@ -78,6 +221,8 @@ class LazyZarrDataset(Dataset):
         sample_weights: np.ndarray,
         sample_names: list[str],
         scalers: dict[str, dict[str, np.ndarray] | None],
+        group_centering: dict[str, dict[str, np.ndarray] | None] | None = None,
+        impute_means: dict[str, dict[str, np.ndarray] | None] | None = None,
         mask_layer_name: str = "mask",
     ):
         self.zarr_path = zarr_path
@@ -89,6 +234,8 @@ class LazyZarrDataset(Dataset):
         self.sample_weights = sample_weights
         self.sample_names = list(sample_names)
         self.scalers = scalers
+        self.group_centering = group_centering or {}
+        self.impute_means = impute_means or {}
         self.mask_layer_name = mask_layer_name
         self._store = None
 
@@ -122,9 +269,20 @@ class LazyZarrDataset(Dataset):
             X_batch = store[_zarr_view_x_key(name)][sorted_real].astype(np.float32)
             mask_batch = store[_zarr_view_mask_key(name, self.mask_layer_name)][sorted_real].astype(bool)
 
-            scaler = self.scalers.get(name)
-            if scaler is not None:
-                X_batch = (X_batch - scaler["mean"]) / scaler["scale"]
+            centering = self.group_centering.get(name)
+            means = self.impute_means.get(name)
+            if centering is not None:
+                X_batch = _apply_group_centering(
+                    X_batch, mask_batch, self.source_ids[sorted_indices], centering,
+                )
+            elif means is not None:
+                X_batch = _apply_group_mean_imputation(
+                    X_batch, mask_batch, self.source_ids[sorted_indices], means,
+                )
+            else:
+                scaler = self.scalers.get(name)
+                if scaler is not None:
+                    X_batch = (X_batch - scaler["mean"]) / scaler["scale"]
 
             np.nan_to_num(X_batch, nan=0.0, copy=False)
             all_X[name] = X_batch
@@ -167,7 +325,9 @@ class MOSADataModule(pl.LightningDataModule):
         self.model_cfg = model_cfg
         self.zarr_path = zarr_path
 
-        self.scalers: dict[str, StandardScaler | None] = {}
+        self.scalers: dict[str, dict[str, np.ndarray] | None] = {}
+        self.group_centering: dict[str, dict[str, np.ndarray] | None] = {}
+        self.impute_means: dict[str, dict[str, np.ndarray] | None] = {}
         self.feature_names: dict[str, list[str]] = {}
         self.batch_categories: list[str] = []
         self.tissue_categories: list[str] = []
@@ -196,7 +356,7 @@ class MOSADataModule(pl.LightningDataModule):
     # Public API
 
     def setup(self, stage: str | None = None) -> None:
-        """Fit scalers on train_data and create torch Dataset objects."""
+        """Fit preprocessing state on train_data and create torch Dataset objects."""
         if self.train_dataset is not None:
             return
         train = self.train_data
@@ -224,6 +384,8 @@ class MOSADataModule(pl.LightningDataModule):
             raise NotImplementedError("Inference setup for lazy zarr data is not implemented")
 
         self.scalers = source.scalers
+        self.group_centering = source.group_centering
+        self.impute_means = source.impute_means
         self.feature_names = source.feature_names
         self.batch_categories = source.batch_categories
         self.tissue_categories = source.tissue_categories
@@ -235,15 +397,38 @@ class MOSADataModule(pl.LightningDataModule):
         self._conditionals_train = meta["conditionals"]
         self.train_dataset = self._build_dataset_readonly(train, meta)
 
+    def _apply_fitted_preprocessing(
+        self, view_name: str, X: np.ndarray, mask: np.ndarray, source_ids: np.ndarray,
+    ) -> np.ndarray:
+        """Apply this view's already-fitted preprocessing (no fitting)."""
+        if view_name in self.data_cfg.discrete_views:
+            return np.nan_to_num(X, nan=0.0)
+
+        mode = self.model_cfg.preprocessing_mode
+        if mode == "center":
+            centering = self.group_centering.get(view_name)
+            if centering is None:
+                return np.nan_to_num(X, nan=0.0)
+            return _apply_group_centering(X, mask, source_ids, centering)
+        if mode == "none":
+            means = self.impute_means.get(view_name)
+            if means is None:
+                return np.nan_to_num(X, nan=0.0)
+            return _apply_group_mean_imputation(X, mask, source_ids, means)
+
+        stats = self.scalers.get(view_name)
+        if stats is None:
+            return np.nan_to_num(X, nan=0.0)
+        return _apply_standardization(X, mask, stats)
+
     def _build_dataset_readonly(self, data: MultiOmicDataset, meta: dict) -> "MOSADataset":
-        """Apply already-fitted scalers (no fitting) and build a MOSADataset."""
-        omics = {}
-        for view_name, X in data.views.items():
-            scaler = self.scalers.get(view_name)
-            if scaler is not None:
-                X = scaler.transform(X)
-            X = np.nan_to_num(X, nan=0.0)
-            omics[view_name] = X
+        """Apply already-fitted preprocessing (no fitting) and build a MOSADataset."""
+        omics = {
+            view_name: self._apply_fitted_preprocessing(
+                view_name, X, data.masks[view_name], meta["source_ids"],
+            )
+            for view_name, X in data.views.items()
+        }
 
         return MOSADataset(
             omics_data=omics,
@@ -256,24 +441,64 @@ class MOSADataModule(pl.LightningDataModule):
             omic_names=list(self.data_cfg.views),
         )
 
+    def inverse_transform_view(
+        self,
+        view_name: str,
+        values: np.ndarray,
+        source_ids: np.ndarray | None = None,
+    ) -> np.ndarray:
+        """Restore a transformed view to the original scale."""
+        mode = self.model_cfg.preprocessing_mode
+        if mode == "center":
+            centering = self.group_centering.get(view_name)
+            if centering is None:
+                return np.array(values, copy=True)
+            if source_ids is None:
+                raise ValueError("source_ids are required to invert group centering")
+            return _apply_group_inverse_centering(values, source_ids, centering)
+
+        if mode == "none":
+            return np.array(values, copy=True)
+
+        stats = self.scalers.get(view_name)
+        if stats is not None:
+            return values * stats["scale"] + stats["mean"]
+        return np.array(values, copy=True)
+
     def _setup_inmemory(self, train: MultiOmicDataset, meta: dict) -> None:
         import time
         t0 = time.perf_counter()
+        mode = self.model_cfg.preprocessing_mode
 
         omics_train = {}
         for view_name, X in train.views.items():
             tv = time.perf_counter()
+            mask = train.masks[view_name]
             if view_name in self.data_cfg.discrete_views:
                 X = np.nan_to_num(X, nan=0.0)
                 self.scalers[view_name] = None
+                self.group_centering[view_name] = None
+                self.impute_means[view_name] = None
+            elif mode == "center":
+                centering = _fit_group_centering(X, mask, meta["source_ids"], len(self.batch_categories))
+                self.group_centering[view_name] = centering
+                self.scalers[view_name] = None
+                self.impute_means[view_name] = None
+                X = _apply_group_centering(X, mask, meta["source_ids"], centering)
+            elif mode == "none":
+                means = _fit_group_centering(X, mask, meta["source_ids"], len(self.batch_categories))
+                self.impute_means[view_name] = means
+                self.scalers[view_name] = None
+                self.group_centering[view_name] = None
+                X = _apply_group_mean_imputation(X, mask, meta["source_ids"], means)
             else:
-                scaler = StandardScaler()
-                scaler.fit(X)
-                X = scaler.transform(X)
-                X = np.nan_to_num(X, nan=0.0)
-                self.scalers[view_name] = scaler
+                stats = _fit_standardization(X, mask)
+                self.scalers[view_name] = stats
+                self.group_centering[view_name] = None
+                self.impute_means[view_name] = None
+                X = _apply_standardization(X, mask, stats)
             omics_train[view_name] = X
-            logger.debug("  view '%s': scaled and imputed in %.2fs", view_name, time.perf_counter() - tv)
+            logger.debug("  view '%s': preprocessed in %.2fs", view_name, time.perf_counter() - tv)
 
         self.train_dataset = MOSADataset(
             omics_data=omics_train,
@@ -299,6 +524,7 @@ class MOSADataModule(pl.LightningDataModule):
         rng = np.random.RandomState(self.model_cfg.random_seed)
         frac = self.model_cfg.scaler_sample_frac
         store = zarr.open_group(self.zarr_path, mode="r")
+        mode = self.model_cfg.preprocessing_mode
 
         n_train = self.train_data.n_samples
         all_train_idx = np.arange(n_train)
@@ -306,33 +532,52 @@ class MOSADataModule(pl.LightningDataModule):
         for view_name in self.data_cfg.views:
             if view_name in self.data_cfg.discrete_views:
                 self.scalers[view_name] = None
+                self.group_centering[view_name] = None
+                self.impute_means[view_name] = None
                 continue
 
             X_zarr = store[_zarr_view_x_key(view_name)]
+            mask_zarr = store[_zarr_view_mask_key(view_name, self.data_cfg.mask_layer_name)]
             if frac < 1.0:
                 n_sub = max(1, int(n_train * frac))
                 sub_idx = sorted(rng.choice(all_train_idx, size=n_sub, replace=False))
             else:
                 sub_idx = sorted(all_train_idx)
 
-            logger.debug("Fitting scaler for '%s' on %d samples", view_name, len(sub_idx))
             X_sub = np.asarray(X_zarr[sub_idx]).astype(np.float32)
-            X_sub = np.nan_to_num(X_sub, nan=0.0)
-            scaler = StandardScaler()
-            scaler.fit(X_sub)
-            self.scalers[view_name] = scaler
+            M_sub = np.asarray(mask_zarr[sub_idx]).astype(bool)
+
+            if mode == "center":
+                logger.debug("Fitting group centering for '%s' on %d samples", view_name, len(sub_idx))
+                self.group_centering[view_name] = _fit_group_centering(
+                    X_sub, M_sub, meta["source_ids"][sub_idx], len(self.batch_categories),
+                )
+                self.scalers[view_name] = None
+                self.impute_means[view_name] = None
+            elif mode == "none":
+                logger.debug("Fitting group-mean imputation for '%s' on %d samples", view_name, len(sub_idx))
+                self.impute_means[view_name] = _fit_group_centering(
+                    X_sub, M_sub, meta["source_ids"][sub_idx], len(self.batch_categories),
+                )
+                self.scalers[view_name] = None
+                self.group_centering[view_name] = None
+            else:
+                logger.debug("Fitting standardization for '%s' on %d samples", view_name, len(sub_idx))
+                self.scalers[view_name] = _fit_standardization(X_sub, M_sub)
+                self.group_centering[view_name] = None
+                self.impute_means[view_name] = None
 
         del store
 
         scaler_dicts: dict[str, dict[str, np.ndarray] | None] = {}
-        for name, scaler in self.scalers.items():
-            if scaler is not None:
-                scaler_dicts[name] = {
-                    "mean": scaler.mean_.astype(np.float32),
-                    "scale": scaler.scale_.astype(np.float32),
-                }
-            else:
+        for name, stats in self.scalers.items():
+            if stats is None:
                 scaler_dicts[name] = None
+            else:
+                scaler_dicts[name] = {
+                    "mean": stats["mean"].astype(np.float32),
+                    "scale": stats["scale"].astype(np.float32),
+                }
 
         view_names = list(self.data_cfg.views)
 
@@ -346,6 +591,8 @@ class MOSADataModule(pl.LightningDataModule):
             sample_weights=meta["sample_weights"],
             sample_names=self.train_data.sample_names,
             scalers=scaler_dicts,
+            group_centering=self.group_centering,
+            impute_means=self.impute_means,
             mask_layer_name=self.data_cfg.mask_layer_name,
         )
 
@@ -362,6 +609,8 @@ class MOSADataModule(pl.LightningDataModule):
                 sample_weights=val_meta["sample_weights"],
                 sample_names=self.val_data.sample_names,
                 scalers=scaler_dicts,
+                group_centering=self.group_centering,
+                impute_means=self.impute_means,
                 mask_layer_name=self.data_cfg.mask_layer_name,
             )
 
@@ -402,19 +651,45 @@ class MOSADataModule(pl.LightningDataModule):
                 ds._store.store.close()
                 ds._store = None
 
+    def _serialize_group_stats(
+        self, stats: dict[str, dict[str, np.ndarray] | None],
+    ) -> dict:
+        return {
+            name: (
+                None if s is None else {
+                    "group_means": s["group_means"].tolist(),
+                    "global_mean": s["global_mean"].tolist(),
+                }
+            )
+            for name, s in stats.items()
+        }
+
+    def _deserialize_group_stats(self, state: dict) -> dict[str, dict[str, np.ndarray] | None]:
+        return {
+            name: (
+                None if s is None else {
+                    "group_means": np.array(s["group_means"], dtype=np.float32),
+                    "global_mean": np.array(s["global_mean"], dtype=np.float32),
+                }
+            )
+            for name, s in state.items()
+        }
+
     def state_dict(self) -> dict:
         """Return serialisable preprocessing state for checkpoint saving."""
         scalers = {}
-        for name, scaler in self.scalers.items():
-            if scaler is None:
+        for name, stats in self.scalers.items():
+            if stats is None:
                 scalers[name] = None
             else:
                 scalers[name] = {
-                    "mean": scaler.mean_.tolist(),
-                    "scale": scaler.scale_.tolist(),
+                    "mean": stats["mean"].tolist(),
+                    "scale": stats["scale"].tolist(),
                 }
         return {
             "scalers": scalers,
+            "group_centering": self._serialize_group_stats(self.group_centering),
+            "impute_means": self._serialize_group_stats(self.impute_means),
             "batch_categories": self.batch_categories,
             "tissue_categories": self.tissue_categories,
             "mutation_columns": self.mutation_columns,
@@ -439,18 +714,19 @@ class MOSADataModule(pl.LightningDataModule):
             if s is None:
                 self.scalers[name] = None
             else:
-                scaler = StandardScaler()
-                scaler.mean_ = np.array(s["mean"], dtype=np.float64)
-                scaler.scale_ = np.array(s["scale"], dtype=np.float64)
-                scaler.n_features_in_ = len(s["mean"])
-                self.scalers[name] = scaler
+                self.scalers[name] = {
+                    "mean": np.array(s["mean"], dtype=np.float32),
+                    "scale": np.array(s["scale"], dtype=np.float32),
+                }
+        self.group_centering = self._deserialize_group_stats(state.get("group_centering", {}))
+        self.impute_means = self._deserialize_group_stats(state.get("impute_means", {}))
 
     def train_dataloader(self) -> DataLoader:
         if self.train_dataset is None:
             raise RuntimeError("Call setup() before requesting dataloaders")
-        
+
         loader_kwargs = self._loader_kwargs()
-        
+
         if self.model_cfg.weighted_random_sampler:
             # Create weighted sampler to balance model_type categories in each batch
             sampler = self._get_weighted_sampler(self.train_dataset)

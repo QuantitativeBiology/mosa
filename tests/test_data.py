@@ -88,7 +88,13 @@ def _create_test_zarr(path: Path, n_samples: int, view_specs: dict[str, int]) ->
     return path
 
 
-def _make_configs(view_specs: dict[str, int], n_samples: int, tmp_path: Path, discrete_views: set[str] | None = None) -> tuple[DataConfig, MOSAConfig]:
+def _make_configs(
+    view_specs: dict[str, int],
+    n_samples: int,
+    tmp_path: Path,
+    discrete_views: set[str] | None = None,
+    preprocessing_mode: str = "standardize",
+) -> tuple[DataConfig, MOSAConfig]:
     discrete_views = discrete_views or set()
     data_cfg = DataConfig(
         path=str(tmp_path / "dummy.h5mu"),
@@ -106,6 +112,7 @@ def _make_configs(view_specs: dict[str, int], n_samples: int, tmp_path: Path, di
         num_epochs=1,
         output_dir=str(tmp_path / "out"),
         weighted_random_sampler=False,
+        preprocessing_mode=preprocessing_mode,
     )
     return data_cfg, model_cfg
 
@@ -428,8 +435,11 @@ def _make_datamodule(
     tmp_path: Path,
     view_specs: dict[str, int],
     discrete_views: set[str] | None = None,
+    preprocessing_mode: str = "standardize",
 ) -> MOSADataModule:
-    data_cfg, model_cfg = _make_configs(view_specs, train_data.n_samples, tmp_path, discrete_views)
+    data_cfg, model_cfg = _make_configs(
+        view_specs, train_data.n_samples, tmp_path, discrete_views, preprocessing_mode,
+    )
     return MOSADataModule(
         train_data=train_data, val_data=val_data,
         data_cfg=data_cfg, model_cfg=model_cfg,
@@ -459,11 +469,110 @@ def test_datamodule_scaler_train_only(tmp_path):
     # Scaler was fitted on train
     scaler = dm.scalers["view_a"]
     assert scaler is not None
-    assert np.allclose(scaler.mean_, train_X.mean(axis=0), atol=1e-4)
+    assert np.allclose(scaler["mean"], train_X.mean(axis=0), atol=1e-4)
 
     # Train data is standardized (mean ~0 per feature, overall)
     train_tensor = dm.train_dataset.omics["view_a"].numpy()
     assert abs(train_tensor.mean()) < 0.5
+
+
+def test_datamodule_inverse_transform_view_standardize_roundtrip(tmp_path):
+    view_specs = {"view_a": 6}
+    n = 24
+    train_data = _make_dataset(n, view_specs)
+    raw_X = train_data.views["view_a"].copy()
+
+    dm = _make_datamodule(train_data, None, tmp_path, view_specs, preprocessing_mode="standardize")
+    dm.setup()
+
+    transformed = dm.train_dataset.omics["view_a"].numpy()
+    restored = dm.inverse_transform_view("view_a", transformed)
+    np.testing.assert_allclose(restored, raw_X, atol=1e-4)
+
+
+def test_datamodule_preprocessing_mode_center_roundtrip(tmp_path):
+    view_specs = {"view_a": 6}
+    n_features = 6
+
+    # Two model_type groups with deliberately different means.
+    n_a, n_b = 15, 15
+    rng = np.random.RandomState(1)
+    X_a = rng.randn(n_a, n_features).astype(np.float32) + 5.0
+    X_b = rng.randn(n_b, n_features).astype(np.float32) - 5.0
+    model_types = ["TypeA"] * n_a + ["TypeB"] * n_b
+    train_data = _make_dataset(n_a + n_b, view_specs, model_types=model_types)
+    train_data.views["view_a"] = np.concatenate([X_a, X_b], axis=0)
+    raw_X = train_data.views["view_a"].copy()
+
+    # Raw per-group means are far from zero (this is what centering must fix).
+    assert abs(raw_X[:n_a].mean() - 5.0) < 1.0
+    assert abs(raw_X[n_a:].mean() + 5.0) < 1.0
+
+    dm = _make_datamodule(train_data, None, tmp_path, view_specs, preprocessing_mode="center")
+    dm.setup()
+
+    # Each group's centered values should be near zero mean.
+    centered = dm.train_dataset.omics["view_a"].numpy()
+    assert abs(centered[:n_a].mean()) < 1.0
+    assert abs(centered[n_a:].mean()) < 1.0
+
+    source_ids = dm.train_dataset.source_ids.numpy()
+    restored = dm.inverse_transform_view("view_a", centered, source_ids=source_ids)
+    np.testing.assert_allclose(restored, raw_X, atol=1e-3)
+
+
+def test_datamodule_preprocessing_mode_none_imputes_group_mean(tmp_path):
+    view_specs = {"view_a": 4}
+    n_features = 4
+    n_a, n_b = 10, 10
+
+    rng = np.random.RandomState(2)
+    X_a = rng.randn(n_a, n_features).astype(np.float32) + 3.0
+    X_b = rng.randn(n_b, n_features).astype(np.float32) - 3.0
+    X = np.concatenate([X_a, X_b], axis=0)
+    model_types = ["TypeA"] * n_a + ["TypeB"] * n_b
+
+    # Feature 0 is entirely missing for group TypeA.
+    mask = np.ones((n_a + n_b, n_features), dtype=bool)
+    mask[:n_a, 0] = False
+
+    train_data = _make_dataset(n_a + n_b, view_specs, model_types=model_types)
+    train_data.views["view_a"] = X
+    train_data.masks["view_a"] = mask
+
+    dm = _make_datamodule(train_data, None, tmp_path, view_specs, preprocessing_mode="none")
+    dm.setup()
+
+    filled = dm.train_dataset.omics["view_a"].numpy()
+
+    # Observed entries pass through unchanged (no scaling in "none" mode).
+    np.testing.assert_allclose(filled[mask], X[mask], atol=1e-5)
+    # Missing group-TypeA/feature-0 entries are filled with TypeA's own group
+    # mean for that feature, not zero and not TypeB's mean.
+    filled_col0_a = filled[:n_a, 0]
+    assert np.allclose(filled_col0_a, filled_col0_a[0], atol=1e-5)
+    assert not np.isclose(filled_col0_a[0], 0.0, atol=0.5)
+
+    # inverse_transform_view is a no-op copy in "none" mode.
+    restored = dm.inverse_transform_view("view_a", filled)
+    np.testing.assert_array_equal(restored, filled)
+
+
+def test_group_centering_falls_back_to_global_mean_for_absent_group(tmp_path):
+    """A group with zero observed values for a feature uses the global mean."""
+    from mosa.models.mosa.datamodule import _fit_group_centering
+
+    rng = np.random.RandomState(3)
+    X = rng.randn(20, 4).astype(np.float32)
+    mask = np.ones((20, 4), dtype=bool)
+    source_ids = np.array([0] * 10 + [1] * 10)
+
+    # Group 0 has no observed values at all (e.g. a modality entirely absent
+    # for that model_type).
+    mask[source_ids == 0] = False
+
+    centering = _fit_group_centering(X, mask, source_ids, n_groups=2)
+    np.testing.assert_allclose(centering["group_means"][0], centering["global_mean"])
 
 
 def test_datamodule_discrete_view_no_scaling(tmp_path):

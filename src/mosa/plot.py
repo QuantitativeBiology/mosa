@@ -99,13 +99,8 @@ DEFAULT_PALETTE = {
 # Seed for deterministic color generation for unknown categories.
 _PALETTE_COLOR_SEED = 0xA3F1B2C4
 
-# Visual style per known model_type.
-_DEFAULT_LAYER_STYLES = {
-    "Tumor":     {"marker": "o", "alpha": 0.4, "size": 5,  "zorder": 1, "edgecolor": None,    "linewidth": 0.1},
-    "Cell Line": {"marker": "o", "alpha": 0.6, "size": 5,  "zorder": 2, "edgecolor": "black", "linewidth": 0.2},
-    "Organoid":  {"marker": "^", "alpha": 0.9, "size": 10, "zorder": 2, "edgecolor": "black", "linewidth": 0.2},
-}
-_DEFAULT_LAYER_STYLE = {"marker": "o", "alpha": 0.6, "size": 5, "zorder": 2, "edgecolor": None, "linewidth": 0.1}
+# Marker shapes cycled across model_type layers, most-common first.
+_MARKER_CYCLE = ["o", "^", "s", "D", "P", "X", "v", "*", "<", ">"]
 
 
 def _name_to_color(name):
@@ -124,12 +119,35 @@ def build_palette(categories, base_palette=None):
     return {c: base[c] if c in base else _name_to_color(c) for c in categories}
 
 
-def _get_umap_layers(model_types):
-    """Return layer specs for every model_type present in the data."""
-    ordered = [mt for mt in _DEFAULT_LAYER_STYLES if mt in model_types]
-    ordered += sorted(mt for mt in model_types if mt not in _DEFAULT_LAYER_STYLES)
-    return [{"model_type": mt, **_DEFAULT_LAYER_STYLES.get(mt, _DEFAULT_LAYER_STYLE)}
-            for mt in ordered]
+def _infer_layer_styles(plot_df, model_type_col="model_type"):
+    """Infer per-category plotting styles directly from the data.
+
+    Draws the most common category first (background) and the rarest last
+    (foreground), giving rarer categories more visual emphasis (higher alpha,
+    larger markers, an edge outline) instead of relying on hardcoded label
+    names, so this works for any category scheme.
+    """
+    counts = plot_df[model_type_col].dropna().value_counts()
+    if counts.empty:
+        return []
+
+    ordered = counts.sort_values(ascending=False).index.tolist()
+    total = counts.sum()
+
+    layers = []
+    for i, mt in enumerate(ordered):
+        share = counts[mt] / total          # 0..1, larger = more common
+        rarity = 1.0 - share                # larger = rarer -> more emphasis
+        layers.append({
+            "model_type": mt,
+            "marker": _MARKER_CYCLE[i % len(_MARKER_CYCLE)],
+            "alpha": float(np.clip(0.35 + 0.5 * rarity, 0.35, 0.9)),
+            "size": float(np.clip(4 + 6 * rarity, 4, 10)),
+            "zorder": i + 1,
+            "edgecolor": "black" if rarity > 0.5 else None,
+            "linewidth": 0.2 if rarity > 0.5 else 0.1,
+        })
+    return layers
 
 
 def configure_plot_style():
@@ -193,17 +211,21 @@ def compute_umap_embedding(df, n_neighbors=25, min_dist=0.25, metric="euclidean"
                         columns=[f"UMAP{i+1}" for i in range(n_components)])
 
 
-def plot_umap(plot_df, palette, title=None):
+def plot_umap(plot_df, palette, title=None, model_type_col="model_type"):
     """Plot UMAP embedding colored by tissue, shaped by model_type.
 
     Parameters
     ----------
     plot_df : DataFrame
-        Must have columns: UMAP1, UMAP2, tissue, model_type.
+        Must have columns: UMAP1, UMAP2, tissue, and `model_type_col`.
     palette : dict
         Color mapping for tissues and model types.
     title : str or None
         Plot title.
+    model_type_col : str
+        Column used to derive marker/opacity/zorder styling. Styles are
+        inferred from the data (see `_infer_layer_styles`) rather than
+        hardcoded label names, so this works for any category scheme.
 
     Returns
     -------
@@ -211,20 +233,19 @@ def plot_umap(plot_df, palette, title=None):
     """
     fig, ax = plt.subplots()
 
-    model_types_present = plot_df["model_type"].dropna().unique()
-    layers = _get_umap_layers(model_types_present)
+    layers = _infer_layer_styles(plot_df, model_type_col=model_type_col)
     sizes = {layer["model_type"]: layer["size"] for layer in layers}
     markers = {layer["model_type"]: layer["marker"] for layer in layers}
 
     for layer in layers:
-        subset = plot_df[plot_df["model_type"] == layer["model_type"]]
+        subset = plot_df[plot_df[model_type_col] == layer["model_type"]]
         if subset.empty:
             continue
         scatter_kw = dict(
             data=subset, x="UMAP1", y="UMAP2",
             hue="tissue", palette=palette,
-            style="model_type", markers=markers,
-            size="model_type", sizes=sizes,
+            style=model_type_col, markers=markers,
+            size=model_type_col, sizes=sizes,
             alpha=layer["alpha"], zorder=layer["zorder"],
             linewidth=layer["linewidth"], legend=False, ax=ax,
         )

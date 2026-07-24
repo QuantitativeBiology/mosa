@@ -36,8 +36,8 @@ def test_datamodule_state_dict_scaler_fidelity(make_multi_omic_dataset, make_mos
         if s1 is None:
             assert s2 is None
         else:
-            np.testing.assert_allclose(s1.mean_, s2.mean_, rtol=1e-6)
-            np.testing.assert_allclose(s1.scale_, s2.scale_, rtol=1e-6)
+            np.testing.assert_allclose(s1["mean"], s2["mean"], rtol=1e-6)
+            np.testing.assert_allclose(s1["scale"], s2["scale"], rtol=1e-6)
 
 
 # MOSAModel save / load
@@ -124,7 +124,7 @@ def test_vae_save_load_scaler_fidelity(make_multi_omic_dataset, make_mosa_config
         if s1 is None:
             assert s2 is None
         else:
-            np.testing.assert_allclose(s1.mean_, s2.mean_, rtol=1e-6)
+            np.testing.assert_allclose(s1["mean"], s2["mean"], rtol=1e-6)
 
 
 def test_vae_transform_after_load(make_multi_omic_dataset, make_mosa_config, tmp_path):

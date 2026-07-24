@@ -5,8 +5,6 @@ from collections import defaultdict
 import torch
 import torch.nn.functional as F
 from torch import Tensor
-from torch.distributions import Normal, kl_divergence as kl_div
-from torch.nn import CrossEntropyLoss
 
 
 def reconstruction_loss(
@@ -14,8 +12,8 @@ def reconstruction_loss(
     x: dict[str, Tensor],
     mask: dict[str, Tensor],
     group: Tensor | None = None,
-    sample_weights: Tensor | None = None,
-    loss_type: str = "mean",
+    loss_types: dict[str, str] | None = None,
+    recon_weights: dict[str, float] | None = None,
 ) -> tuple[Tensor, dict]:
     """Masked reconstruction loss across omics.
 
@@ -29,10 +27,12 @@ def reconstruction_loss(
         Feature presence masks.
     group : Tensor [B] or None
         Group labels for macro loss averaging.
-    sample_weights : Tensor [B] or None
-        Per-sample weights (used only in mean loss).
-    loss_type : str
-        "mean" for sample-weighted MSE, "macro" for group-balanced MSE.
+    loss_types : dict of str or None
+        Per-omic "mean" (sample-weighted MSE) or "macro" (group-balanced MSE).
+        Omics not present default to "mean".
+    recon_weights : dict of float or None
+        Per-omic weight applied before summing into the total loss.
+        Omics not present default to weight 1.0.
 
     Returns
     -------
@@ -41,6 +41,7 @@ def reconstruction_loss(
     metrics : dict
         Per-omic and per-group losses.
     """
+    loss_types = loss_types or {}
     device = next(iter(x.values())).device
     omic_losses = {}
     group_omic_losses = defaultdict(dict)
@@ -53,15 +54,15 @@ def reconstruction_loss(
         mse_per_feature = F.mse_loss(recon, target, reduction="none")  # [B, D]
         mse_masked = mse_per_feature * feature_mask.float()
 
+        sample_mask = feature_mask.any(dim=1)
+        if not sample_mask.any():
+            continue
+
         n_present = feature_mask.sum(dim=1).clamp(min=1)  # [B]
         per_sample = mse_masked.sum(dim=1) / n_present  # [B]
+        per_sample_valid = per_sample[sample_mask]
 
-        if loss_type == "macro" and group is not None:
-            sample_mask = feature_mask.any(dim=1)
-            if not sample_mask.any():
-                continue
-
-            per_sample_valid = per_sample[sample_mask]
+        if loss_types.get(omic, "mean") == "macro" and group is not None:
             group_valid = group[sample_mask]
             unique_groups = torch.unique(group_valid)
             group_losses = []
@@ -76,25 +77,30 @@ def reconstruction_loss(
             if group_losses:
                 omic_losses[omic] = torch.stack(group_losses).mean()
         else:
-            if sample_weights is not None:
-                per_sample = per_sample * sample_weights
-            omic_losses[omic] = per_sample.mean()
+            omic_losses[omic] = per_sample_valid.mean()
 
     if not omic_losses:
         loss_total = torch.tensor(0.0, device=device)
     else:
-        loss_total = torch.stack(list(omic_losses.values())).mean()
+        loss_total = sum(
+            (recon_weights.get(omic, 1.0) if recon_weights else 1.0) * loss
+            for omic, loss in omic_losses.items()
+        )
 
     metrics = {"omic_losses": omic_losses, "group_omic_losses": dict(group_omic_losses)}
     return loss_total, metrics
 
 
 def kl_divergence(mu: Tensor, logvar: Tensor) -> Tensor:
-    """KL divergence from posterior to standard normal."""
-    std = torch.exp(0.5 * logvar) + 1e-4
-    posterior = Normal(mu, std)
-    prior = Normal(torch.zeros_like(mu), torch.ones_like(std))
-    return kl_div(posterior, prior).mean()
+    """KL divergence from posterior to standard normal, summed over latent dim.
+
+    logvar is clamped before exponentiating; without it, an unstable posterior
+    drives logvar to large values, exp(logvar) overflows to inf, and the
+    resulting NaN propagates into a segfault.
+    """
+    logvar = logvar.clamp(min=-10.0, max=10.0)
+    kl = -0.5 * torch.sum(1.0 + logvar - mu.pow(2) - logvar.exp(), dim=1)
+    return kl.mean()
 
 
 def contrastive_loss(mu: Tensor, labels: Tensor) -> Tensor:
@@ -120,8 +126,9 @@ def adversarial_loss(
     pred: Tensor,
     target: Tensor,
     class_weights: Tensor | None = None,
+    focal_gamma: float = 0.0,
 ) -> Tensor:
-    """Weighted cross-entropy for adversarial training.
+    """Weighted cross-entropy (optionally focal) for adversarial training.
 
     Parameters
     ----------
@@ -130,8 +137,15 @@ def adversarial_loss(
     target : Tensor [B, n_classes] or [B]
         One-hot or class indices.
     class_weights : Tensor [n_classes] or None
+    focal_gamma : float
+        Focal loss exponent; 0 gives plain (weighted) cross-entropy.
+        Larger values down-weight already-well-classified examples, focusing
+        the loss on hard/minority cases (useful under heavy class imbalance).
     """
     if target.dim() == 2:
         target = torch.argmax(target, dim=1)
-    loss_fn = CrossEntropyLoss(weight=class_weights, reduction="mean")
-    return loss_fn(pred, target)
+    ce = F.cross_entropy(pred, target, weight=class_weights, reduction="none")
+    if focal_gamma > 0:
+        pt = torch.exp(-ce)
+        ce = ((1 - pt) ** focal_gamma) * ce
+    return ce.mean()

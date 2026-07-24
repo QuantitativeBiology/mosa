@@ -186,15 +186,17 @@ class MOSAModel(MultiOmicModel):
         results = self._model.predict(loader, force_source_id=force_source_id, n_batches=n_batches)
         logger.debug("  predict %d samples in %.1fs", len(results["sample_names"]), time.perf_counter() - t)
 
+        source_ids = results.get("source_ids")
+        if force_source_id is not None:
+            source_ids = np.full(len(results["sample_names"]), force_source_id, dtype=np.int64)
+
         t = time.perf_counter()
         pd.DataFrame(results["z"], index=results["sample_names"]).to_parquet(out_dir / "latent.parquet")
         logger.debug("  wrote latent.parquet (%.1fs)", time.perf_counter() - t)
 
         for omic, recon in results["x_hat"].items():
             t = time.perf_counter()
-            scaler = self._datamodule.scalers.get(omic)
-            if scaler is not None:
-                recon = scaler.inverse_transform(recon)
+            recon = self._datamodule.inverse_transform_view(omic, recon, source_ids=source_ids)
             cols = self._datamodule.feature_names.get(omic)
             if cols and len(cols) == recon.shape[1]:
                 df = pd.DataFrame(recon, index=results["sample_names"], columns=cols)
@@ -236,11 +238,11 @@ class MOSAModel(MultiOmicModel):
         loader = inf_dm.train_eval_dataloader()
         results = self._model.predict(loader)
 
-        x_hat = {}
-        for omic, recon in results["x_hat"].items():
-            scaler = inf_dm.scalers.get(omic)
-            x_hat[omic] = scaler.inverse_transform(recon) if scaler is not None else recon
-        return x_hat
+        source_ids = results.get("source_ids")
+        return {
+            omic: inf_dm.inverse_transform_view(omic, recon, source_ids=source_ids)
+            for omic, recon in results["x_hat"].items()
+        }
 
     def save(self, path: str | Path) -> None:
         """Save model state to a Lightning checkpoint.
