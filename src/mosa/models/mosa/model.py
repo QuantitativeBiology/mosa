@@ -266,7 +266,7 @@ class MOSAModel(MultiOmicModel):
         interchangeable. Config, arch dims, and preprocessing state are all
         restored from the file.
         """
-        checkpoint = torch.load(str(path), weights_only=False)
+        checkpoint = torch.load(str(path), map_location="cpu", weights_only=False)
         hp = checkpoint["hyper_parameters"]
 
         data_cfg = DataConfig(**hp["data_cfg"])
