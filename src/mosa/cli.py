@@ -75,6 +75,14 @@ def _train(args):
     train_data = dataset
     val_data = None
     if cfg.model.test_size > 0:
+        classes, counts = np.unique(dataset.metadata["model_type"], return_counts=True)
+        if counts.min() < 2:
+            smallest = classes[np.argmin(counts)]
+            raise ValueError(
+                f"Cannot create a stratified train/val split: model_type class "
+                f"'{smallest}' has only {counts.min()} sample(s); need at least 2."
+            )
+
         label_codes = pd.Categorical(
             dataset.metadata["model_type"],
             categories=sorted(dataset.metadata["model_type"].unique()),
