@@ -52,6 +52,10 @@ def _silent_trainer(no_val: bool = False, **kwargs) -> pl.Trainer:
     if no_val:
         kwargs.setdefault("limit_val_batches", 0)
         kwargs.setdefault("num_sanity_val_steps", 0)
+    # accelerator/devices default to "auto" in Lightning, which DDP-spawns across
+    # every visible GPU on a multi-GPU host; pin to CPU for these unit tests.
+    kwargs.setdefault("accelerator", "cpu")
+    kwargs.setdefault("devices", 1)
     return pl.Trainer(
         enable_progress_bar=False,
         logger=False,

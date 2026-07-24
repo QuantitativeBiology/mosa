@@ -97,6 +97,11 @@ def make_mosa_config():
         }
 
         output_dir = overrides.pop("output_dir", "/tmp/mosa_test")
+        # Default to CPU/single-device: accelerator="auto" + devices="auto" makes
+        # Lightning DDP-spawn across every visible GPU, which is both wasteful and,
+        # on a shared multi-GPU host, slow enough to look like a hang.
+        overrides.setdefault("accelerator", "cpu")
+        overrides.setdefault("devices", 1)
 
         model_cfg = MOSAConfig(
             views=view_configs,
