@@ -16,6 +16,11 @@ class MultiOmicModel(ABC):
     implementation-specific and hidden behind this interface.
     """
 
+    supports_out_of_sample: bool = True
+    """Whether transform()/reconstruct() accept samples not seen during fit().
+    False for transductive models, which cross_validate() rejects before
+    training anything."""
+
     @abstractmethod
     def fit(
         self,

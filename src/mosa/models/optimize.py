@@ -4,7 +4,7 @@ import dataclasses
 import logging
 from pathlib import Path
 
-from mosa.config import DataConfig, ModelConfig
+from mosa.config import DataConfig, EvaluationConfig, ModelConfig
 from mosa.data.dataset import MultiOmicDataset
 from mosa.models.evaluation import cross_validate
 from mosa.utils import read_yaml
@@ -61,24 +61,54 @@ def parse_search_space(raw: dict) -> dict:
     return raw
 
 
+def _check_search_space_fields(search_space: dict, base_model_cfg: ModelConfig) -> None:
+    """Reject search-space names that are not fields of the model config.
+
+    Names from the evaluation block get a targeted message: the protocol is
+    what scores the study, so tuning it would optimize the measurement rather
+    than the model.
+    """
+    model_fields = {f.name for f in dataclasses.fields(base_model_cfg)}
+    unknown = sorted(name for name in search_space if name not in model_fields)
+    if not unknown:
+        return
+
+    eval_fields = {f.name for f in dataclasses.fields(EvaluationConfig)}
+    message = (
+        f"Search-space name(s) not a field of "
+        f"{type(base_model_cfg).__name__}: {unknown}"
+    )
+    protocol = [name for name in unknown if name in eval_fields]
+    if protocol:
+        message += (
+            f". {protocol} configure the evaluation protocol, which is held "
+            f"fixed for a study; set them in the config's evaluation block"
+        )
+    raise ValueError(message)
+
+
 def optimize(
     dataset: MultiOmicDataset,
     data_cfg: DataConfig,
     base_model_cfg: ModelConfig,
     search_space: dict,
     n_trials: int,
-    n_folds: int = 3,
+    eval_cfg: EvaluationConfig | None = None,
 ):
     """Optuna hyperparameter search over top-level ModelConfig fields, scored via cross_validate.
 
     Each trial samples values per `search_space`, builds a mutated config with
     `dataclasses.replace(base_model_cfg, **sampled)`, and scores it with
-    `cross_validate(..., n_folds)` (lower is better). If the sampled combo is
-    invalid, the config's own __post_init__ raises ValueError; this is caught
-    and turned into optuna.TrialPruned so the trial is pruned instead of
-    crashing the whole study. Any exception raised during cross_validate
-    itself is caught the same way, with the full traceback logged, so one
-    failing trial does not abort the remaining trials.
+    `cross_validate(..., eval_cfg)` (lower is better). The evaluation protocol
+    is fixed for the whole study; only ModelConfig fields are searched, and
+    names that are not fields of base_model_cfg raise before the study starts.
+
+    If a sampled combo is invalid, the config's own __post_init__ raises
+    ValueError (or TypeError, when a sampled value has the wrong type for the
+    field); this is caught and turned into optuna.TrialPruned so the trial is
+    pruned instead of crashing the whole study. Any exception raised during
+    cross_validate itself is caught the same way, with the full traceback
+    logged, so one failing trial does not abort the remaining trials.
 
     Requires optuna (`pip install '.[hpo]'`); imported lazily so importing
     mosa never requires it.
@@ -93,17 +123,18 @@ def optimize(
         ) from e
 
     search_space = parse_search_space(search_space)
+    _check_search_space_fields(search_space, base_model_cfg)
 
     def objective(trial: "optuna.Trial") -> float:
         sampled = {name: _suggest(trial, name, spec) for name, spec in search_space.items()}
         try:
             trial_model_cfg = dataclasses.replace(base_model_cfg, **sampled)
-        except ValueError as e:
+        except (ValueError, TypeError) as e:
             logger.debug("Trial %d pruned: invalid config (%s)", trial.number, e)
             raise optuna.TrialPruned(str(e)) from e
 
         try:
-            result = cross_validate(dataset, data_cfg, trial_model_cfg, n_folds=n_folds)
+            result = cross_validate(dataset, data_cfg, trial_model_cfg, eval_cfg)
         except Exception as e:
             logger.exception("Trial %d failed", trial.number)
             raise optuna.TrialPruned(f"trial {trial.number} failed: {e}") from e

@@ -44,7 +44,6 @@ model:
   # Shared orchestration (ModelConfig base contract)
   output_dir: outputs
   random_seed: 42
-  test_size: 0.1          # validation fraction; 0 disables validation and early stopping
 
   # Architecture
   joint_latent_dim: 64
@@ -105,3 +104,16 @@ model:
   early_stopping_patience: 20
   checkpoint_top_k: 3
   num_workers: 0          # set to 4-8 for large datasets
+
+
+# ---------------------------------------------------------------------------
+# Evaluation: how data is held out for assessment. Optional; these are the
+# defaults. Used by `mosa train` (test_size) and by `mosa cross-validate` /
+# `mosa optimize` (the fold settings).
+# ---------------------------------------------------------------------------
+
+evaluation:
+  test_size: 0.1          # validation fraction; 0 disables validation and early stopping
+  n_folds: 5              # cross-validation folds
+  strategy: stratified    # stratified balances model_type across folds; kfold ignores it
+  shuffle: true           # false assigns folds as contiguous blocks of sample order

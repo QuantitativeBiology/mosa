@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from mosa.config import Config, DataConfig
+from mosa.config import Config, DataConfig, EvaluationConfig
 from mosa.data.io import _dearrow_mudata, summarize_structure
 from mosa.models.mofa.config import MOFAConfig
 from mosa.models.mosa.config import MOSAConfig, OmicViewConfig
@@ -258,10 +258,11 @@ def test_cli_validate_missing_path_exits_1(tmp_path, capsys):
         "  views: [view_a]\n"
         "model:\n"
         "  type: mosa_vae\n"
-        "  test_size: 0.0\n"
         "  views:\n"
         "    view_a:\n"
         "      hidden_layer_dims: [16, 8]\n"
+        "evaluation:\n"
+        "  test_size: 0.0\n"
     )
     args = argparse.Namespace(config=str(yaml_path))
 
@@ -285,14 +286,31 @@ def test_load_time_structure_error_unchanged(tmp_path):
         load_mudata(str(path), ["view_a", "view_missing"])
 
 
-# MOFAConfig.validate_against_data — uniform interface, no extra checks.
+# MOFAConfig.validate_against_data: only the inert-holdout check.
 
 
 def test_mofa_validate_against_data_returns_empty(tmp_path):
     path = _write_h5mu(tmp_path, {"view_a": 10})
     data_cfg = DataConfig(path=str(path), views=["view_a"])
-    model_cfg = MOFAConfig(test_size=0.0)
-    cfg = Config(data=data_cfg, model=model_cfg)
+    cfg = Config(
+        data=data_cfg,
+        model=MOFAConfig(),
+        evaluation=EvaluationConfig(test_size=0.0),
+    )
 
     warnings = validate_config_against_data(cfg)
     assert warnings == []
+
+
+def test_mofa_warns_when_test_size_nonzero(tmp_path):
+    path = _write_h5mu(tmp_path, {"view_a": 10})
+    data_cfg = DataConfig(path=str(path), views=["view_a"])
+    cfg = Config(
+        data=data_cfg,
+        model=MOFAConfig(),
+        evaluation=EvaluationConfig(test_size=0.2),
+    )
+
+    warnings = validate_config_against_data(cfg)
+    assert len(warnings) == 1
+    assert "MOFA ignores validation data" in warnings[0]

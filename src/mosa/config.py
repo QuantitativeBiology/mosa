@@ -6,6 +6,8 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+CV_STRATEGIES = ("stratified", "kfold")
+
 
 @dataclass
 class DataConfig:
@@ -65,16 +67,42 @@ class DataConfig:
 
 
 @dataclass
+class EvaluationConfig:
+    """How data is held out for assessment: train/val holdout and cross-validation folds.
+
+    Independent of both the data and the model. No model reads these fields,
+    and optimize() holds them fixed while it mutates ModelConfig per trial.
+
+    strategy selects the cross-validation splitter: "stratified" balances
+    model_type across folds, "kfold" ignores it. shuffle False makes folds
+    contiguous blocks of the dataset's sample order.
+    """
+
+    test_size: float = 0.1
+    n_folds: int = 5
+    strategy: str = "stratified"
+    shuffle: bool = True
+
+    def __post_init__(self):
+        if not 0.0 <= self.test_size < 1.0:
+            raise ValueError(f"test_size must be in [0, 1), got {self.test_size}")
+        if self.n_folds < 2:
+            raise ValueError(f"n_folds must be at least 2, got {self.n_folds}")
+        if self.strategy not in CV_STRATEGIES:
+            raise ValueError(
+                f"strategy must be one of {CV_STRATEGIES}, got '{self.strategy}'"
+            )
+
+
+@dataclass
 class ModelConfig:
     """Base contract for every model config: orchestration fields shared across all models."""
 
     output_dir: str = "outputs"
     random_seed: int = 42
-    test_size: float = 0.1
 
     def __post_init__(self):
-        if not 0.0 <= self.test_size < 1.0:
-            raise ValueError(f"test_size must be in [0, 1), got {self.test_size}")
+        """No base-level invariants; defined so subclasses can call super()."""
 
     @classmethod
     def from_yaml_dict(cls, raw: dict) -> "ModelConfig":
@@ -89,10 +117,11 @@ class ModelConfig:
 
 @dataclass
 class Config:
-    """A complete experiment configuration: shared data + model-specific knobs."""
+    """A complete experiment configuration: shared data + model-specific knobs + holdout policy."""
 
     data: DataConfig
     model: ModelConfig
+    evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
 
     def __post_init__(self):
         # Cross-check: if the model declares per-view architecture, view sets must match data.

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from mosa.config import Config, DataConfig
+from mosa.config import Config, DataConfig, EvaluationConfig
 from mosa.models.mofa.config import MOFAConfig
 from mosa.models.mosa.config import MOSAConfig, OmicViewConfig
 from mosa.utils import load_config
@@ -113,7 +113,18 @@ def test_invalid_num_epochs():
 @pytest.mark.parametrize("ts", [-0.1, 1.0])
 def test_invalid_test_size(ts):
     with pytest.raises(ValueError, match="test_size must be in"):
-        MOSAConfig(test_size=ts)
+        EvaluationConfig(test_size=ts)
+
+
+@pytest.mark.parametrize("n", [0, 1, -3])
+def test_invalid_n_folds(n):
+    with pytest.raises(ValueError, match="n_folds must be at least 2"):
+        EvaluationConfig(n_folds=n)
+
+
+def test_invalid_strategy():
+    with pytest.raises(ValueError, match="strategy must be one of"):
+        EvaluationConfig(strategy="grouped")
 
 
 @pytest.mark.parametrize("lr", [0, -1e-3])
@@ -216,7 +227,6 @@ def _mosa_payload(path="data/dataset.h5mu"):
             "num_epochs": 10,
             "batch_size": 16,
             "learning_rate": 1e-3,
-            "test_size": 0.0,
             "views": {
                 "rna": {"hidden_layer_dims": [256, 128], "loss_type": "mean", "dropout_p": 0.1},
             },
@@ -238,12 +248,42 @@ def test_load_config_mosa(tmp_path):
 def test_load_config_mofa(tmp_path):
     payload = {
         "data": {"path": "x.h5mu", "views": ["rna", "meth"]},
-        "model": {"type": "mofa", "n_factors": 10, "test_size": 0.0},
+        "model": {"type": "mofa", "n_factors": 10},
     }
     yaml_path = _write_yaml(tmp_path / "c.yaml", payload)
     cfg = load_config(yaml_path)
     assert isinstance(cfg.model, MOFAConfig)
     assert cfg.model.n_factors == 10
+
+
+def test_load_config_evaluation_block_optional(tmp_path):
+    yaml_path = _write_yaml(tmp_path / "c.yaml", _mosa_payload())
+    cfg = load_config(yaml_path)
+    assert cfg.evaluation == EvaluationConfig()
+
+
+def test_load_config_parses_evaluation_block(tmp_path):
+    payload = _mosa_payload()
+    payload["evaluation"] = {
+        "test_size": 0.0,
+        "n_folds": 4,
+        "strategy": "kfold",
+        "shuffle": False,
+    }
+    yaml_path = _write_yaml(tmp_path / "c.yaml", payload)
+    cfg = load_config(yaml_path)
+    assert cfg.evaluation.test_size == 0.0
+    assert cfg.evaluation.n_folds == 4
+    assert cfg.evaluation.strategy == "kfold"
+    assert cfg.evaluation.shuffle is False
+
+
+def test_load_config_invalid_evaluation_block_raises(tmp_path):
+    payload = _mosa_payload()
+    payload["evaluation"] = {"strategy": "grouped"}
+    yaml_path = _write_yaml(tmp_path / "c.yaml", payload)
+    with pytest.raises(ValueError, match="strategy must be one of"):
+        load_config(yaml_path)
 
 
 def test_load_config_missing_data_block(tmp_path):

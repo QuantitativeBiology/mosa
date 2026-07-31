@@ -110,7 +110,6 @@ def make_mosa_config():
             num_epochs=num_epochs,
             batch_size=batch_size,
             learning_rate=1e-3,
-            test_size=0.0,
             output_dir=output_dir,
             weighted_random_sampler=False,
             **overrides,

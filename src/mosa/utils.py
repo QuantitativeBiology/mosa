@@ -8,7 +8,7 @@ import pytorch_lightning as pl
 import yaml
 from torch import Tensor
 
-from mosa.config import Config, DataConfig
+from mosa.config import Config, DataConfig, EvaluationConfig
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,11 @@ def read_yaml(path: str | Path) -> dict:
 
 
 def load_config(yaml_path: str | Path) -> Config:
-    """Load a YAML config and return a Config bundling DataConfig + ModelConfig."""
+    """Load a YAML config and return a Config bundling DataConfig + ModelConfig + EvaluationConfig.
+
+    The 'evaluation:' block is optional; omitting it takes EvaluationConfig's
+    defaults.
+    """
     from mosa.models.registry import model_config_classes
 
     raw = read_yaml(yaml_path)
@@ -52,8 +56,9 @@ def load_config(yaml_path: str | Path) -> Config:
         raise ValueError(f"unknown model.type '{mtype}'; valid: {list(model_configs)}")
 
     model_cfg = model_configs[mtype].from_yaml_dict(model_raw)
+    evaluation = EvaluationConfig(**raw.get("evaluation", {}))
 
-    return Config(data=data, model=model_cfg)
+    return Config(data=data, model=model_cfg, evaluation=evaluation)
 
 
 def validate_config_against_data(cfg: Config) -> list[str]:
@@ -70,7 +75,7 @@ def validate_config_against_data(cfg: Config) -> list[str]:
     cfg.data.validate_paths()
     summary = summarize_structure(cfg.data.path)
     warnings = cfg.data.validate_against_data(summary)
-    warnings += cfg.model.validate_against_data(cfg.data, summary)
+    warnings += cfg.model.validate_against_data(cfg.data, cfg.evaluation, summary)
     return warnings
 
 

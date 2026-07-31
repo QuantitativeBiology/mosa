@@ -172,7 +172,7 @@ class MOSAConfig(ModelConfig):
                 stacklevel=2,
             )
 
-    def validate_against_data(self, data_cfg, summary: dict) -> list[str]:
+    def validate_against_data(self, data_cfg, eval_cfg, summary: dict) -> list[str]:
         """Check MOSA-specific value-level requirements against a data summary.
 
         Hard invariants raise ValueError; soft ones (tissue/mutations/adversarial

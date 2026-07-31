@@ -30,7 +30,6 @@ def _write_config(path: Path, data_path: Path, output_dir: Path, view_specs: dic
         "model": {
             "type": "mosa_vae",
             "output_dir": str(output_dir),
-            "test_size": 0.0,
             "joint_latent_dim": 8,
             "num_epochs": 2,
             "batch_size": 8,
@@ -44,6 +43,7 @@ def _write_config(path: Path, data_path: Path, output_dir: Path, view_specs: dic
             "devices": 1,
             "precision": "32",
         },
+        "evaluation": {"test_size": 0.0},
     }
     config_path = path / "config.yaml"
     config_path.write_text(yaml.dump(config))

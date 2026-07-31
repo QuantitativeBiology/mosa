@@ -40,12 +40,17 @@ def model_config_classes() -> dict[str, type[ModelConfig]]:
     return {name: reg.config_cls for name, reg in _REGISTRY.items()}
 
 
-def build_model(data_cfg: DataConfig, model_cfg: ModelConfig) -> MultiOmicModel:
-    """Instantiate the registered model class matching model_cfg's exact type."""
+def model_class_for(model_cfg: ModelConfig) -> type[MultiOmicModel]:
+    """Registered model class matching model_cfg's exact type, without instantiating it."""
     for reg in _REGISTRY.values():
         if type(model_cfg) is reg.config_cls:
-            return reg.model_cls(data_cfg, model_cfg)
+            return reg.model_cls
     raise TypeError(f"Unsupported model_cfg type: {type(model_cfg).__name__}")
+
+
+def build_model(data_cfg: DataConfig, model_cfg: ModelConfig) -> MultiOmicModel:
+    """Instantiate the registered model class matching model_cfg's exact type."""
+    return model_class_for(model_cfg)(data_cfg, model_cfg)
 
 
 def load_model(path: str | Path) -> MultiOmicModel:

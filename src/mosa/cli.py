@@ -6,6 +6,8 @@ import os
 import sys
 import warnings
 
+from mosa.config import CV_STRATEGIES
+
 logger = logging.getLogger(__name__)
 
 
@@ -73,7 +75,7 @@ def _train(args):
 
     train_data = dataset
     val_data = None
-    if cfg.model.test_size > 0:
+    if cfg.evaluation.test_size > 0:
         classes, counts = np.unique(dataset.metadata["model_type"], return_counts=True)
         if counts.min() < 2:
             smallest = classes[np.argmin(counts)]
@@ -90,7 +92,7 @@ def _train(args):
 
         train_idx, val_idx = train_test_split(
             np.arange(dataset.n_samples),
-            test_size=cfg.model.test_size,
+            test_size=cfg.evaluation.test_size,
             random_state=cfg.model.random_seed,
             stratify=label_codes,
         )
@@ -134,8 +136,22 @@ def _transform(args):
         print(f"Reconstructions saved to {out_dir}/")
 
 
+def _eval_cfg_from_args(cfg, args):
+    """Apply the cross-validation CLI flags that were given onto cfg.evaluation."""
+    import dataclasses
+
+    overrides = {}
+    if args.folds is not None:
+        overrides["n_folds"] = args.folds
+    if args.strategy is not None:
+        overrides["strategy"] = args.strategy
+    if args.no_shuffle:
+        overrides["shuffle"] = False
+    return dataclasses.replace(cfg.evaluation, **overrides)
+
+
 def _cross_validate(args):
-    """Load config and data, run stratified k-fold cross-validation, and print scores."""
+    """Load config and data, run k-fold cross-validation, and print scores."""
     import torch
 
     from mosa.models.evaluation import cross_validate
@@ -145,7 +161,8 @@ def _cross_validate(args):
 
     cfg, dataset = _load_config_and_data(args.config)
     seed_everything(cfg.model.random_seed)
-    results = cross_validate(dataset, cfg.data, cfg.model, n_folds=args.folds)
+    eval_cfg = _eval_cfg_from_args(cfg, args)
+    results = cross_validate(dataset, cfg.data, cfg.model, eval_cfg)
 
     views = list(results["per_fold"][0]["per_view"].keys())
     header = f"{'fold':<6}" + "".join(f"{v + ' (NMSE)':<20}" for v in views) + f"{'aggregate':<12}"
@@ -174,7 +191,7 @@ def _optimize(args):
 
     results = optimize(
         dataset, cfg.data, cfg.model, search_space,
-        n_trials=args.trials, n_folds=args.folds,
+        n_trials=args.trials, eval_cfg=_eval_cfg_from_args(cfg, args),
     )
     study = results["study"]
 
@@ -269,12 +286,37 @@ def _validate(args):
     print(f"  views:   {cfg.data.views} (discrete: {sorted(cfg.data.discrete_views)})")
     print(f"  model:   {type(cfg.model).__name__}")
     print(f"  output:  {cfg.model.output_dir}")
-    print(f"  seed:    {cfg.model.random_seed}, test_size={cfg.model.test_size}")
+    print(f"  seed:    {cfg.model.random_seed}")
+    print(
+        f"  eval:    test_size={cfg.evaluation.test_size}, "
+        f"n_folds={cfg.evaluation.n_folds}, strategy={cfg.evaluation.strategy}, "
+        f"shuffle={cfg.evaluation.shuffle}"
+    )
 
     from mosa.models.mosa.config import MOSAConfig
     if isinstance(cfg.model, MOSAConfig):
         print(f"  arch:    fusion={cfg.model.fusion_method}, latent={cfg.model.joint_latent_dim}")
         print(f"  train:   epochs={cfg.model.num_epochs}, batch_size={cfg.model.batch_size}")
+
+
+def _add_eval_args(parser):
+    """Add the cross-validation flags that override a config's evaluation block.
+
+    Defaults are None/False so an unset flag leaves the config value alone.
+    """
+    parser.add_argument(
+        "--folds", type=int, default=None,
+        help="Number of folds, per trial for optimize (overrides evaluation.n_folds)",
+    )
+    parser.add_argument(
+        "--strategy", choices=CV_STRATEGIES, default=None,
+        help="Fold assignment: stratified balances model_type, kfold ignores it "
+             "(overrides evaluation.strategy)",
+    )
+    parser.add_argument(
+        "--no-shuffle", action="store_true",
+        help="Assign folds as contiguous blocks of sample order instead of shuffling",
+    )
 
 
 def main():
@@ -301,12 +343,10 @@ def main():
     transform_parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
 
     cv_parser = subparsers.add_parser(
-        "cross-validate", help="Run stratified k-fold cross-validation",
+        "cross-validate", help="Run k-fold cross-validation",
     )
     cv_parser.add_argument("--config", required=True, help="Path to YAML config file")
-    cv_parser.add_argument(
-        "--folds", type=int, default=5, help="Number of stratified folds (default: 5)",
-    )
+    _add_eval_args(cv_parser)
     cv_parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
 
     optimize_parser = subparsers.add_parser(
@@ -317,7 +357,7 @@ def main():
         "--search-space", required=True, help="Path to search-space YAML (see configs/search_space.yaml)",
     )
     optimize_parser.add_argument("--trials", type=int, default=20, help="Number of Optuna trials (default: 20)")
-    optimize_parser.add_argument("--folds", type=int, default=3, help="Folds per trial's cross_validate (default: 3)")
+    _add_eval_args(optimize_parser)
     optimize_parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
 
     plot_parser = subparsers.add_parser("plot", help="Generate diagnostic plots from training outputs")

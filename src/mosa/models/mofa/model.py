@@ -24,6 +24,8 @@ class MOFAModel(MultiOmicModel):
     validation data is therefore not used.
     """
 
+    supports_out_of_sample = False
+
     def __init__(
         self,
         data_cfg: DataConfig | None = None,

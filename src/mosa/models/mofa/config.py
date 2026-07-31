@@ -27,6 +27,17 @@ class MOFAConfig(ModelConfig):
                 f"convergence_mode must be one of {_VALID_CONVERGENCE}, got '{self.convergence_mode}'"
             )
 
-    def validate_against_data(self, data_cfg, summary: dict) -> list[str]:
-        """MOFA needs only the structural requirements, already checked by DataConfig."""
+    def validate_against_data(self, data_cfg, eval_cfg, summary: dict) -> list[str]:
+        """MOFA needs only the structural requirements, already checked by DataConfig.
+
+        The one soft check is the holdout: MOFA's fit() ignores validation
+        data, so a nonzero test_size removes samples from training and buys
+        nothing.
+        """
+        if eval_cfg.test_size > 0:
+            return [
+                f"evaluation.test_size is {eval_cfg.test_size} but MOFA ignores "
+                f"validation data; those samples would be held out of training "
+                f"for no benefit. Set evaluation.test_size to 0."
+            ]
         return []

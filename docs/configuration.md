@@ -141,7 +141,6 @@ scaler_sample_frac: 1.0          # zarr only: fraction of training samples for f
 
 num_epochs: 200
 batch_size: 64
-test_size: 0.1                   # validation split fraction
 view_dropout_prob: 0.2           # probability of dropping an entire view during training
 random_seed: 42
 ```
@@ -153,9 +152,31 @@ random_seed: 42
 | `scaler_sample_frac` | `1.0` | Fraction of training samples used to fit the StandardScaler. Only relevant for zarr datasets — reduces memory and I/O when fitting on millions of samples is expensive (e.g. `0.1`). Has no effect for h5mu, which is already in memory. |
 | `num_epochs` | `200` | Maximum training epochs. |
 | `batch_size` | `64` | Samples per batch. |
-| `test_size` | `0.1` | Validation split fraction. 0 disables validation and early stopping. |
 | `view_dropout_prob` | `0.2` | Probability of zeroing an entire view during training. 0 to disable. |
 | `random_seed` | `42` | Seed for all RNGs (Python, NumPy, PyTorch, Lightning). |
+
+## Evaluation
+
+How data is held out for assessment. Optional block; omitting it takes these
+defaults. Nested under `evaluation:`, not under `model:`.
+
+```yaml
+evaluation:
+  test_size: 0.1
+  n_folds: 5
+  strategy: stratified
+  shuffle: true
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `test_size` | `0.1` | Validation split fraction for `mosa train`. 0 disables validation and early stopping. |
+| `n_folds` | `5` | Folds for `mosa cross-validate` and each `mosa optimize` trial. Minimum 2. |
+| `strategy` | `"stratified"` | `stratified` balances `model_type` across folds; `kfold` ignores it. |
+| `shuffle` | `true` | `false` assigns folds as contiguous blocks of sample order, making fold composition seed-independent. |
+
+`mosa cross-validate` and `mosa optimize` accept `--folds`, `--strategy`, and
+`--no-shuffle` to override the block for one run.
 
 ## Trainer (PyTorch Lightning)
 

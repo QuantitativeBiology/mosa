@@ -2,7 +2,10 @@
 #
 # Maps top-level MOSAConfig field names to a distribution. Nested per-view
 # params (e.g. views.<name>.hidden_layer_dims) are out of scope; only
-# top-level fields can be tuned this way.
+# top-level fields can be tuned this way. Names that are not model config
+# fields are rejected before the study starts, including the evaluation block
+# (test_size, n_folds, strategy, shuffle): the protocol scores the study, so
+# it is held fixed across trials.
 #
 # Supported dist types:
 #   loguniform:  { dist: loguniform, low: ..., high: ... }   (float, log-scale)

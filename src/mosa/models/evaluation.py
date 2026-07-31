@@ -5,11 +5,11 @@ import logging
 import tempfile
 
 import numpy as np
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import KFold, StratifiedKFold
 
-from mosa.config import DataConfig, ModelConfig
+from mosa.config import DataConfig, EvaluationConfig, ModelConfig
 from mosa.data.dataset import MultiOmicDataset
-from mosa.models.registry import build_model
+from mosa.models.registry import build_model, model_class_for
 
 logger = logging.getLogger(__name__)
 
@@ -47,42 +47,77 @@ def _score_fold(model, val: MultiOmicDataset) -> dict:
     return {"per_view": per_view, "aggregate": aggregate}
 
 
+def _check_folds_fit_data(
+    dataset: MultiOmicDataset, labels: np.ndarray, eval_cfg: EvaluationConfig
+) -> None:
+    """Reject fold counts the data cannot support, per strategy."""
+    n_folds = eval_cfg.n_folds
+    if eval_cfg.strategy == "stratified":
+        classes, counts = np.unique(labels, return_counts=True)
+        if counts.min() < n_folds:
+            smallest = classes[np.argmin(counts)]
+            raise ValueError(
+                f"n_folds={n_folds} exceeds the size of the smallest model_type "
+                f"class ('{smallest}', {counts.min()} samples); reduce n_folds, "
+                f"add more samples for that class, or use strategy='kfold'."
+            )
+    elif dataset.n_samples < n_folds:
+        raise ValueError(
+            f"n_folds={n_folds} exceeds the number of samples "
+            f"({dataset.n_samples}); reduce n_folds."
+        )
+
+
+def _build_splitter(eval_cfg: EvaluationConfig, seed: int):
+    """Construct the sklearn splitter for the configured strategy."""
+    cls = StratifiedKFold if eval_cfg.strategy == "stratified" else KFold
+    # sklearn rejects random_state outright when shuffle is False.
+    return cls(
+        n_splits=eval_cfg.n_folds,
+        shuffle=eval_cfg.shuffle,
+        random_state=seed if eval_cfg.shuffle else None,
+    )
+
+
 def cross_validate(
     dataset: MultiOmicDataset,
     data_cfg: DataConfig,
     model_cfg: ModelConfig,
-    n_folds: int = 5,
+    eval_cfg: EvaluationConfig | None = None,
 ) -> dict:
-    """Stratified k-fold cross-validation, scored by masked variance-normalized MSE.
+    """K-fold cross-validation, scored by masked variance-normalized MSE.
 
-    Folds are stratified on dataset.metadata["model_type"] via StratifiedKFold.
+    `eval_cfg.strategy` selects the splitter: "stratified" balances
+    dataset.metadata["model_type"] across folds, "kfold" ignores it. With
+    `eval_cfg.shuffle` False the folds are contiguous blocks of the dataset's
+    sample order (sorted by sample ID, per align_views) and model_cfg's seed
+    no longer affects fold composition.
+
     Each fold trains a fresh model from scratch (build_model + fit) and scores
     it on the held-out fold with reconstruct(). No artifacts are written:
     each fold's model_cfg is a copy with checkpoint_top_k forced to 0 (where
     the field exists) and output_dir pointed at a unique, auto-cleaned temp
     directory, so folds never write to the caller's output_dir and never
     clobber each other.
-
-    Models with no out-of-sample projection raise NotImplementedError from
-    reconstruct(); this is caught and re-raised as a clear error on the first
-    fold, before the remaining folds are trained.
     """
-    labels = dataset.metadata["model_type"].to_numpy()
-    classes, counts = np.unique(labels, return_counts=True)
-    if counts.min() < n_folds:
-        smallest = classes[np.argmin(counts)]
-        raise ValueError(
-            f"n_folds={n_folds} exceeds the size of the smallest model_type "
-            f"class ('{smallest}', {counts.min()} samples); reduce n_folds or "
-            f"add more samples for that class."
+    eval_cfg = eval_cfg or EvaluationConfig()
+
+    model_cls = model_class_for(model_cfg)
+    if not model_cls.supports_out_of_sample:
+        raise RuntimeError(
+            f"Cross-validation is not supported for the "
+            f"'{getattr(model_cls, 'registered_name', model_cls.__name__)}' "
+            f"model: it has no out-of-sample projection."
         )
 
-    seed = getattr(model_cfg, "random_seed", 42)
-    skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed)
+    labels = dataset.metadata["model_type"].to_numpy()
+    _check_folds_fit_data(dataset, labels, eval_cfg)
+
+    splitter = _build_splitter(eval_cfg, getattr(model_cfg, "random_seed", 42))
 
     per_fold = []
     for fold_idx, (train_idx, val_idx) in enumerate(
-        skf.split(np.arange(dataset.n_samples), labels)
+        splitter.split(np.arange(dataset.n_samples), labels)
     ):
         train = dataset.subset(train_idx)
         val = dataset.subset(val_idx)
@@ -95,22 +130,7 @@ def cross_validate(
 
             model = build_model(data_cfg, fold_model_cfg)
             model.fit(train, val)
-
-            try:
-                score = _score_fold(model, val)
-            except (NotImplementedError, RuntimeError) as e:
-                # Transductive models reject held-out scoring either via
-                # NotImplementedError (no out-of-sample projection) or
-                # RuntimeError (requires save_outputs() first, which
-                # cross_validate never calls). Only fold 0 is wrapped this
-                # broadly; later folds' RuntimeErrors propagate as real errors.
-                if fold_idx != 0:
-                    raise
-                name = getattr(model, "registered_name", type(model).__name__)
-                raise RuntimeError(
-                    f"Cross-validation is not supported for the '{name}' "
-                    f"model — it has no out-of-sample projection."
-                ) from e
+            score = _score_fold(model, val)
 
         logger.debug("Fold %d: aggregate=%.4f", fold_idx, score["aggregate"])
         per_fold.append(score)
