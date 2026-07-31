@@ -199,7 +199,10 @@ def compute_umap_embedding(df, n_neighbors=25, min_dist=0.25, metric="euclidean"
     index = df.index if isinstance(df, pd.DataFrame) else None
 
     if pca_components is not None:
-        X = PCA(n_components=pca_components).fit_transform(X)
+        # PCA cannot produce more components than min(n_samples, n_features);
+        # small cohorts would otherwise fail on the default of 50.
+        n_components_pca = min(pca_components, *X.shape)
+        X = PCA(n_components=n_components_pca).fit_transform(X)
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
@@ -762,7 +765,17 @@ def generate_all_plots(output_dir, data_cfg, model_cfg=None, palette=None, pca_c
     logger.debug("Loading data files")
     data = _load_data_files(output_dir, views, data_cfg.path)
 
-    tissues = data["conditionals"]["tissue"].dropna().unique()
+    # 'tissue' is optional everywhere else (training warns and carries on), but
+    # every plot here is coloured by it.
+    conditionals = data["conditionals"]
+    if "tissue" not in conditionals.columns:
+        raise DataError(
+            f"Plotting requires a 'tissue' column in the data's .obs; "
+            f"{data_cfg.path} has {sorted(conditionals.columns)}. "
+            f"Training and cross-validation do not need it."
+        )
+
+    tissues = conditionals["tissue"].dropna().unique()
     palette = build_palette(tissues, base_palette=palette)
 
     logger.debug("Generating UMAP plots")
