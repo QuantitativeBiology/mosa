@@ -905,7 +905,11 @@ def csv_to_mudata(
 
     mutations_df = None
     if mutations_path:
-        mutations_df = _read_table(mutations_path).T.reindex(sample_axis).fillna(0)
+        try:
+            mutations_df = _read_table(mutations_path).T
+        except Exception as e:
+            raise ValueError(f"Cannot read mutations '{mutations_path}': {e}") from e
+        mutations_df = mutations_df.reindex(sample_axis).fillna(0)
 
     # Build AnnData objects
     logger.debug("Creating AnnData objects")
