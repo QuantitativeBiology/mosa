@@ -914,7 +914,7 @@ def csv_to_mudata(
         mask = ~np.isnan(X)
         # Do NOT impute here; keep NaN for z-score in datamodule
         # Only mask layer records which values are missing
-        adata = AnnData(X=X.astype(np.float32), var=pd.DataFrame(index=df.columns), dtype=np.float32)
+        adata = AnnData(X=X, var=pd.DataFrame(index=df.columns))
         adata.obs_names = conditionals.index
         adata.layers["mask"] = mask
         adatas[view_name] = adata
@@ -944,10 +944,12 @@ def csv_to_mudata(
     ensure_dir(output_path_obj.parent)
 
     logger.info("Saving MuData (%s) to %s", format, output_path)
-    if format == "zarr":
-        mdata.write_zarr(str(output_path_obj))
-    else:
-        mdata.write(str(output_path_obj))
+    # Writing runs update(), which pulls per-modality obs/var unless disabled.
+    with mudata.set_options(pull_on_update=False):
+        if format == "zarr":
+            mdata.write_zarr(str(output_path_obj))
+        else:
+            mdata.write(str(output_path_obj))
     logger.info("Conversion complete: %d samples, %d modalities",
                 len(sample_axis), len(adatas))
 
