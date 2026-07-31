@@ -99,6 +99,20 @@ def test_typo_in_per_view_key_names_the_view(tmp_path, capsys, make_h5mu_file):
     )
 
 
+def test_view_name_key_is_rejected_not_crashed(tmp_path, capsys, make_h5mu_file):
+    """'name' is injected per view, so setting it in YAML must be a guided error
+    rather than a TypeError from the OmicViewConfig constructor."""
+    h5mu = make_h5mu_file(tmp_path)
+    model = MOSA_VAE_MODEL.replace(
+        "    view_a:\n      hidden_layer_dims: [16, 8]\n",
+        "    view_a:\n      name: something\n      hidden_layer_dims: [16, 8]\n",
+    )
+    cfg = _config(tmp_path, h5mu, model=model)
+    assert_guided_failure(
+        capsys, ["validate", "--config", cfg], "Unknown key 'name' in model.views.view_a"
+    )
+
+
 def test_unknown_model_type(tmp_path, capsys):
     cfg = _config(tmp_path, "x.h5mu", model="model:\n  type: not_a_model\n")
     assert_guided_failure(

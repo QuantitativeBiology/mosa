@@ -134,5 +134,9 @@ def test_optimize_raises_when_every_trial_fails(
 
     monkeypatch.setattr(optimize_module, "cross_validate", always_fails)
 
-    with pytest.raises(RuntimeError, match="No trial completed"):
+    with pytest.raises(RuntimeError, match="No trial completed") as exc:
         optimize(dataset, data_cfg, model_cfg, search_space, n_trials=3, eval_cfg=EvaluationConfig(n_folds=2))
+
+    # The per-trial cause is otherwise only in the logs, which the CLI hides
+    # unless --debug is passed.
+    assert "simulated training divergence" in str(exc.value)

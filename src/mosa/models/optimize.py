@@ -109,7 +109,9 @@ def optimize(
     field); this is caught and turned into optuna.TrialPruned so the trial is
     pruned instead of crashing the whole study. Any exception raised during
     cross_validate itself is caught the same way, with the full traceback
-    logged, so one failing trial does not abort the remaining trials.
+    logged, so one failing trial does not abort the remaining trials. If no
+    trial completes, the first failure's message is carried into the raised
+    error, since the logs are otherwise the only record of the cause.
 
     Requires optuna (`pip install '.[hpo]'`); imported lazily so importing
     mosa never requires it.
@@ -126,18 +128,30 @@ def optimize(
     search_space = parse_search_space(search_space)
     _check_search_space_fields(search_space, base_model_cfg)
 
+    # Every trial failure becomes TrialPruned so one bad combo cannot abort the
+    # study. Keep the first reason: if nothing completes, it is the only thing
+    # that explains why, and it would otherwise be buried in the logs.
+    first_failure: list[str] = []
+
     def objective(trial: "optuna.Trial") -> float:
         sampled = {name: _suggest(trial, name, spec) for name, spec in search_space.items()}
         try:
             trial_model_cfg = dataclasses.replace(base_model_cfg, **sampled)
         except (ValueError, TypeError) as e:
             logger.debug("Trial %d pruned: invalid config (%s)", trial.number, e)
+            if not first_failure:
+                first_failure.append(f"invalid config ({type(e).__name__}: {e})")
             raise optuna.TrialPruned(str(e)) from e
 
         try:
             result = cross_validate(dataset, data_cfg, trial_model_cfg, eval_cfg)
         except Exception as e:
-            logger.exception("Trial %d failed", trial.number)
+            # Traceback only under --debug; a pruned trial is not itself an
+            # error, and the study still reports the cause if none complete.
+            logger.warning("Trial %d failed: %s", trial.number, e)
+            logger.debug("Trial %d traceback", trial.number, exc_info=True)
+            if not first_failure:
+                first_failure.append(f"{type(e).__name__}: {e}")
             raise optuna.TrialPruned(f"trial {trial.number} failed: {e}") from e
         return result["mean"]
 
@@ -149,7 +163,11 @@ def optimize(
     study.optimize(objective, n_trials=n_trials)
 
     if not any(t.state == optuna.trial.TrialState.COMPLETE for t in study.trials):
-        raise UnsupportedError(f"No trial completed out of {n_trials}; see logged tracebacks")
+        reason = f" First failure: {first_failure[0].rstrip('.')}." if first_failure else ""
+        raise UnsupportedError(
+            f"No trial completed out of {n_trials}.{reason} "
+            f"Re-run with --debug for the full tracebacks."
+        )
 
     return {
         "best_params": study.best_params,
