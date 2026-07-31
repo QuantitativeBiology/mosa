@@ -8,7 +8,8 @@ import pytorch_lightning as pl
 import yaml
 from torch import Tensor
 
-from mosa.config import Config, DataConfig, EvaluationConfig
+from mosa.config import Config, DataConfig, EvaluationConfig, check_unknown_keys
+from mosa.errors import ConfigError, MissingFileError
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +29,14 @@ def ensure_dir(path: str | Path) -> Path:
 
 def read_yaml(path: str | Path) -> dict:
     """Read a YAML file into a dict; empty files return {}."""
-    with open(path) as f:
-        return yaml.safe_load(f) or {}
+    try:
+        with open(path) as f:
+            return yaml.safe_load(f) or {}
+    except FileNotFoundError as e:
+        raise MissingFileError(f"File not found: {path}") from e
+    except yaml.YAMLError as e:
+        # PyYAML's message already carries the line and column.
+        raise ConfigError(f"Invalid YAML in {path}: {e}") from e
 
 
 def load_config(yaml_path: str | Path) -> Config:
@@ -43,20 +50,24 @@ def load_config(yaml_path: str | Path) -> Config:
     raw = read_yaml(yaml_path)
 
     if "data" not in raw or "model" not in raw:
-        raise ValueError(f"Config {yaml_path} must contain top-level 'data:' and 'model:' blocks")
+        raise ConfigError(f"Config {yaml_path} must contain top-level 'data:' and 'model:' blocks")
 
+    check_unknown_keys(DataConfig, raw["data"], "data:")
     data = DataConfig(**raw["data"])
 
     model_raw = dict(raw["model"])
     if "type" not in model_raw:
-        raise ValueError("model.type is required (e.g. 'mosa_vae', 'mofa')")
+        raise ConfigError("model.type is required (e.g. 'mosa_vae', 'mofa')")
     mtype = model_raw.pop("type")
     model_configs = model_config_classes()
     if mtype not in model_configs:
-        raise ValueError(f"unknown model.type '{mtype}'; valid: {list(model_configs)}")
+        raise ConfigError(f"unknown model.type '{mtype}'; valid: {list(model_configs)}")
 
     model_cfg = model_configs[mtype].from_yaml_dict(model_raw)
-    evaluation = EvaluationConfig(**raw.get("evaluation", {}))
+
+    evaluation_raw = raw.get("evaluation", {})
+    check_unknown_keys(EvaluationConfig, evaluation_raw, "evaluation:")
+    evaluation = EvaluationConfig(**evaluation_raw)
 
     return Config(data=data, model=model_cfg, evaluation=evaluation)
 

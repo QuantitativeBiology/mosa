@@ -4,9 +4,11 @@ import argparse
 import logging
 import os
 import sys
+import traceback
 import warnings
 
 from mosa.config import CV_STRATEGIES
+from mosa.errors import ConfigError, DataError, MissingDependencyError, MissingFileError, MosaError
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +81,7 @@ def _train(args):
         classes, counts = np.unique(dataset.metadata["model_type"], return_counts=True)
         if counts.min() < 2:
             smallest = classes[np.argmin(counts)]
-            raise ValueError(
+            raise DataError(
                 f"Cannot create a stratified train/val split: model_type class "
                 f"'{smallest}' has only {counts.min()} sample(s); need at least 2."
             )
@@ -109,13 +111,32 @@ def _train(args):
 
 def _transform(args):
     """Load a saved model and project data into the latent space."""
+    from pathlib import Path
+
     import pandas as pd
 
-    from mosa.data.io import load_mudata
+    from mosa.data.io import load_mudata, summarize_structure
     from mosa.models.registry import load_model
     from mosa.utils import ensure_dir
 
+    for label, path in (("Checkpoint", args.checkpoint), ("Input data", args.input)):
+        p = Path(path)
+        if not (p.is_file() or p.is_dir()):
+            raise MissingFileError(f"{label} not found: {path}")
+
     model = load_model(args.checkpoint)
+
+    # Name the mismatch here: load_mudata would report only the first missing
+    # view, without saying what the checkpoint was trained on.
+    available = list(summarize_structure(args.input).get("modalities", {}))
+    missing = [v for v in model.data_cfg.views if v not in available]
+    if missing:
+        raise DataError(
+            f"Input {args.input} is missing view(s) {missing} required by the "
+            f"checkpoint. Checkpoint was trained on {list(model.data_cfg.views)}; "
+            f"input has {available}."
+        )
+
     dataset = load_mudata(
         args.input,
         model.data_cfg.views,
@@ -185,9 +206,19 @@ def _optimize(args):
 
     torch.set_float32_matmul_precision("high")
 
+    # Cheapest and most-likely-to-fail checks first: a missing optuna or a bad
+    # search space should not cost a full MuData load to discover.
+    try:
+        import optuna  # noqa: F401
+    except ImportError as e:
+        raise MissingDependencyError(
+            "optuna is required for optimize; install it with pip install '.[hpo]'"
+        ) from e
+
+    search_space = load_search_space(args.search_space)
+
     cfg, dataset = _load_config_and_data(args.config)
     seed_everything(cfg.model.random_seed)
-    search_space = load_search_space(args.search_space)
 
     results = optimize(
         dataset, cfg.data, cfg.model, search_space,
@@ -207,8 +238,14 @@ def _optimize(args):
 
 def _plot(args):
     """Generate diagnostic plots from a completed training run."""
-    from mosa.plot import generate_all_plots
     from mosa.utils import load_config
+
+    try:
+        from mosa.plot import generate_all_plots
+    except ImportError as e:
+        raise MissingDependencyError(
+            "plot requires matplotlib, seaborn, and umap-learn: pip install '.[plot]'"
+        ) from e
 
     cfg = load_config(args.config)
     output_dir = args.output_dir or cfg.model.output_dir
@@ -225,7 +262,7 @@ def _convert(args):
     view_specs = []
     for spec in args.view:
         if ":" not in spec:
-            raise ValueError(
+            raise ConfigError(
                 f"Invalid --view format: '{spec}'. Expected 'name:path' "
                 f"(e.g. 'gexp_voom:data/gexp_voom.csv')"
             )
@@ -235,7 +272,7 @@ def _convert(args):
     metadata_filters: dict[str, list[str]] = {}
     for spec in args.filter or []:
         if "=" not in spec:
-            raise ValueError(
+            raise ConfigError(
                 f"Invalid --filter format: '{spec}'. Expected 'COLUMN=VAL[,VAL...]' "
                 f"(e.g. 'model_type=Cell_Line,Organoid')"
             )
@@ -271,12 +308,8 @@ def _validate(args):
     """Validate a YAML config, including that the data satisfies the model's requirements."""
     from mosa.utils import load_config, validate_config_against_data
 
-    try:
-        cfg = load_config(args.config)
-        data_warnings = validate_config_against_data(cfg)
-    except (ValueError, FileNotFoundError, KeyError, TypeError) as e:
-        print(f"Config invalid: {e}")
-        sys.exit(1)
+    cfg = load_config(args.config)
+    data_warnings = validate_config_against_data(cfg)
 
     for w in data_warnings:
         print(f"Warning: {w}")
@@ -319,8 +352,8 @@ def _add_eval_args(parser):
     )
 
 
-def main():
-    """CLI entry point."""
+def main(argv=None):
+    """CLI entry point. argv defaults to sys.argv[1:]; tests pass it explicitly."""
     parser = argparse.ArgumentParser(
         description="MOSA: Multi-Omic Synthetic Augmentation",
     )
@@ -429,25 +462,36 @@ def main():
     validate_parser.add_argument("--config", required=True, help="Path to YAML config file")
     validate_parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     _setup_logging(args.debug)
 
-    if args.command == "train":
-        _train(args)
-    elif args.command == "transform":
-        _transform(args)
-    elif args.command == "cross-validate":
-        _cross_validate(args)
-    elif args.command == "optimize":
-        _optimize(args)
-    elif args.command == "plot":
-        _plot(args)
-    elif args.command == "convert":
-        _convert(args)
-    elif args.command == "inspect":
-        _inspect(args)
-    elif args.command == "validate":
-        _validate(args)
+    handlers = {
+        "train": _train,
+        "transform": _transform,
+        "cross-validate": _cross_validate,
+        "optimize": _optimize,
+        "plot": _plot,
+        "convert": _convert,
+        "inspect": _inspect,
+        "validate": _validate,
+    }
+
+    try:
+        handlers[args.command](args)
+    except MosaError as e:
+        # Anything not deriving from MosaError is a bug: let it traceback.
+        print(f"Error: {e}", file=sys.stderr)
+        # getattr, not args.debug: a subcommand without the flag must not
+        # raise AttributeError from inside the error handler.
+        if getattr(args, "debug", False):
+            traceback.print_exc()
+        sys.exit(1)
+    except KeyboardInterrupt:
+        # Only reached outside Lightning (data loading, convert, inspect,
+        # transform). Lightning traps SIGINT inside fit() and raises
+        # SystemExit(1) itself, which passes straight through here.
+        print("Interrupted.", file=sys.stderr)
+        sys.exit(130)
 
 
 if __name__ == "__main__":

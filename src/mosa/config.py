@@ -1,12 +1,44 @@
 from __future__ import annotations
 
+import difflib
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
+
+from mosa.errors import ConfigError, DataError, MissingFileError
 
 logger = logging.getLogger(__name__)
 
 CV_STRATEGIES = ("stratified", "kfold")
+
+
+def check_unknown_keys(cls, raw: dict, block: str, ignore: set[str] = frozenset()) -> None:
+    """Reject keys that are not fields of `cls`, suggesting the closest valid name.
+
+    `block` names the YAML location for the message (e.g. "model:" or
+    "model.views.gexp"). `ignore` names fields the caller supplies itself, so
+    setting them in YAML is an error rather than a silently ignored key.
+    """
+    valid = {f.name for f in fields(cls)} - ignore
+    unknown = sorted(set(raw) - valid)
+    if not unknown:
+        return
+
+    lines = []
+    unmatched = False
+    for key in unknown:
+        close = difflib.get_close_matches(key, sorted(valid), n=1, cutoff=0.6)
+        if close:
+            lines.append(f"Unknown key '{key}' in {block}. Did you mean '{close[0]}'?")
+        else:
+            lines.append(f"Unknown key '{key}' in {block}.")
+            unmatched = True
+
+    # Only worth dumping the full list when no suggestion landed; otherwise it
+    # buries the answer under 30+ names.
+    if unmatched:
+        lines.append(f"Valid keys: {sorted(valid)}")
+    raise ConfigError(" ".join(lines))
 
 
 @dataclass
@@ -24,18 +56,18 @@ class DataConfig:
         if isinstance(self.discrete_views, list):
             self.discrete_views = set(self.discrete_views)
         if not self.views:
-            raise ValueError("data.views must not be empty")
+            raise ConfigError("data.views must not be empty")
         bad = self.discrete_views - set(self.views)
         if bad:
-            raise ValueError(f"data.discrete_views not in data.views: {sorted(bad)}")
+            raise ConfigError(f"data.discrete_views not in data.views: {sorted(bad)}")
 
     def validate_paths(self) -> None:
         """Check that the MuData file/dir exists. Call before training."""
         if not self.path:
-            raise FileNotFoundError("data.path is required")
+            raise MissingFileError("data.path is required")
         p = Path(self.path)
         if not (p.is_file() or p.is_dir()):
-            raise FileNotFoundError(f"data.path not found: {self.path}")
+            raise MissingFileError(f"data.path not found: {self.path}")
 
     def validate_against_data(self, summary: dict) -> list[str]:
         """Check structural requirements against a data summary (see data/io.py:summarize_structure).
@@ -47,19 +79,19 @@ class DataConfig:
         """
         obs_columns = summary.get("obs_columns", [])
         if "model_type" not in obs_columns:
-            raise ValueError(
+            raise DataError(
                 f"MuData .obs missing 'model_type' column. Available: {obs_columns}"
             )
 
         modalities = summary.get("modalities", {})
         for view in self.views:
             if view not in modalities:
-                raise ValueError(
+                raise DataError(
                     f"View '{view}' not in MuData. Available: {list(modalities.keys())}"
                 )
             layers = modalities[view].get("layers", [])
             if self.mask_layer_name not in layers:
-                raise ValueError(
+                raise DataError(
                     f"Mask layer '{self.mask_layer_name}' not in '{view}'. Available: {layers}"
                 )
 
@@ -85,11 +117,11 @@ class EvaluationConfig:
 
     def __post_init__(self):
         if not 0.0 <= self.test_size < 1.0:
-            raise ValueError(f"test_size must be in [0, 1), got {self.test_size}")
+            raise ConfigError(f"test_size must be in [0, 1), got {self.test_size}")
         if self.n_folds < 2:
-            raise ValueError(f"n_folds must be at least 2, got {self.n_folds}")
+            raise ConfigError(f"n_folds must be at least 2, got {self.n_folds}")
         if self.strategy not in CV_STRATEGIES:
-            raise ValueError(
+            raise ConfigError(
                 f"strategy must be one of {CV_STRATEGIES}, got '{self.strategy}'"
             )
 
@@ -111,7 +143,9 @@ class ModelConfig:
         Base implementation passes the mapping straight through. Subclasses
         with nested config objects (e.g. per-view configs) override this to
         parse those before construction, so load_config stays model-agnostic.
+        Overriding subclasses must call check_unknown_keys themselves.
         """
+        check_unknown_keys(cls, raw, "model:")
         return cls(**raw)
 
 
@@ -130,7 +164,7 @@ class Config:
             missing = set(model_views) - set(self.data.views)
             extra = set(self.data.views) - set(model_views)
             if missing or extra:
-                raise ValueError(
+                raise ConfigError(
                     f"model.views must match data.views — "
                     f"missing in model: {sorted(missing)}, extra in model: {sorted(extra)}"
                 )

@@ -5,6 +5,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from mosa.errors import DataError
+
 
 @dataclass
 class MultiOmicDataset:
@@ -45,17 +47,17 @@ class MultiOmicDataset:
         return list(self.metadata.index)
 
     def validate(self) -> None:
-        """Check structural consistency of all fields. Raises ValueError on failure."""
+        """Check structural consistency of all fields. Raises DataError on failure."""
         view_keys = set(self.views.keys())
         mask_keys = set(self.masks.keys())
         feat_keys = set(self.feature_names.keys())
 
         if view_keys != mask_keys:
-            raise ValueError(
+            raise DataError(
                 f"views and masks have different keys: {view_keys} vs {mask_keys}"
             )
         if view_keys != feat_keys:
-            raise ValueError(
+            raise DataError(
                 f"views and feature_names have different keys: {view_keys} vs {feat_keys}"
             )
 
@@ -64,21 +66,21 @@ class MultiOmicDataset:
             v_shape = self.views[k].shape
             m_shape = self.masks[k].shape
             if v_shape != m_shape:
-                raise ValueError(
+                raise DataError(
                     f"views['{k}'] shape {v_shape} != masks['{k}'] shape {m_shape}"
                 )
             if v_shape[0] != n:
-                raise ValueError(
+                raise DataError(
                     f"views['{k}'] has {v_shape[0]} samples but metadata has {n}"
                 )
             n_features = len(self.feature_names[k])
             if v_shape[1] != n_features:
-                raise ValueError(
+                raise DataError(
                     f"views['{k}'] has {v_shape[1]} features but feature_names['{k}'] has {n_features}"
                 )
 
         if "model_type" not in self.metadata.columns:
-            raise ValueError("metadata is missing required column 'model_type'")
+            raise DataError("metadata is missing required column 'model_type'")
 
     def subset(self, indices: np.ndarray) -> MultiOmicDataset:
         """Subset by sample indices."""

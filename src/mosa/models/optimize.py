@@ -6,6 +6,7 @@ from pathlib import Path
 
 from mosa.config import DataConfig, EvaluationConfig, ModelConfig
 from mosa.data.dataset import MultiOmicDataset
+from mosa.errors import ConfigError, MissingDependencyError, UnsupportedError
 from mosa.models.evaluation import cross_validate
 from mosa.utils import read_yaml
 
@@ -34,7 +35,7 @@ def _suggest(trial, name: str, spec: dict):
         return trial.suggest_int(name, spec["low"], spec["high"])
     if dist == "categorical":
         return trial.suggest_categorical(name, spec["choices"])
-    raise ValueError(
+    raise ConfigError(
         f"Unknown dist '{dist}' for search-space entry '{name}'; "
         f"must be one of {_SUPPORTED_DISTS}"
     )
@@ -48,16 +49,16 @@ def parse_search_space(raw: dict) -> dict:
     """
     for name, spec in raw.items():
         if not isinstance(spec, dict) or "dist" not in spec:
-            raise ValueError(f"Search-space entry '{name}' must be a mapping with a 'dist' key")
+            raise ConfigError(f"Search-space entry '{name}' must be a mapping with a 'dist' key")
         dist = spec["dist"]
         if dist not in _SUPPORTED_DISTS:
-            raise ValueError(
+            raise ConfigError(
                 f"Search-space entry '{name}': dist must be one of {_SUPPORTED_DISTS}, got '{dist}'"
             )
         required = {"categorical": ("choices",)}.get(dist, ("low", "high"))
         missing = [k for k in required if k not in spec]
         if missing:
-            raise ValueError(f"Search-space entry '{name}' missing key(s): {missing}")
+            raise ConfigError(f"Search-space entry '{name}' missing key(s): {missing}")
     return raw
 
 
@@ -84,7 +85,7 @@ def _check_search_space_fields(search_space: dict, base_model_cfg: ModelConfig) 
             f". {protocol} configure the evaluation protocol, which is held "
             f"fixed for a study; set them in the config's evaluation block"
         )
-    raise ValueError(message)
+    raise ConfigError(message)
 
 
 def optimize(
@@ -118,7 +119,7 @@ def optimize(
     try:
         import optuna
     except ImportError as e:
-        raise ImportError(
+        raise MissingDependencyError(
             "optuna is required for optimize(); install it with pip install '.[hpo]'"
         ) from e
 
@@ -148,7 +149,7 @@ def optimize(
     study.optimize(objective, n_trials=n_trials)
 
     if not any(t.state == optuna.trial.TrialState.COMPLETE for t in study.trials):
-        raise RuntimeError(f"No trial completed out of {n_trials}; see logged tracebacks")
+        raise UnsupportedError(f"No trial completed out of {n_trials}; see logged tracebacks")
 
     return {
         "best_params": study.best_params,

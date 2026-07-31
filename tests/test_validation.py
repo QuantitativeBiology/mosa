@@ -245,11 +245,14 @@ def test_summarize_structure_zarr(tmp_path):
     assert set(summary["model_type_categories"]) == {"TypeA", "TypeB"}
 
 
-# 10. mosa validate on a config with a missing path still exits 1 cleanly.
+# 10. mosa validate on a config with a missing path raises a MosaError. The
+#     exit code and stderr contract it gets turned into lives at the CLI
+#     boundary; see tests/test_cli_errors.py.
 
 
-def test_cli_validate_missing_path_exits_1(tmp_path, capsys):
+def test_cli_validate_missing_path_raises_mosa_error(tmp_path):
     from mosa.cli import _validate
+    from mosa.errors import MissingFileError
 
     yaml_path = tmp_path / "c.yaml"
     yaml_path.write_text(
@@ -266,12 +269,8 @@ def test_cli_validate_missing_path_exits_1(tmp_path, capsys):
     )
     args = argparse.Namespace(config=str(yaml_path))
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(MissingFileError, match="data.path not found"):
         _validate(args)
-    assert exc.value.code == 1
-
-    out = capsys.readouterr().out
-    assert "data.path not found" in out
 
 
 # 11. Existing load-time structural errors are unchanged (regression guard;

@@ -3,7 +3,8 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass, field
 
-from mosa.config import ModelConfig
+from mosa.config import ModelConfig, check_unknown_keys
+from mosa.errors import ConfigError, DataError
 
 _VALID_FUSION_METHODS = ("concat", "poe")
 _VALID_LOSS_TYPES = ("mean", "macro")
@@ -25,18 +26,18 @@ class OmicViewConfig:
 
     def __post_init__(self):
         if not self.hidden_layer_dims:
-            raise ValueError(f"View '{self.name}': hidden_layer_dims must not be empty")
+            raise ConfigError(f"View '{self.name}': hidden_layer_dims must not be empty")
         if any(d <= 0 for d in self.hidden_layer_dims):
-            raise ValueError(f"View '{self.name}': all hidden_layer_dims must be positive")
+            raise ConfigError(f"View '{self.name}': all hidden_layer_dims must be positive")
         if self.loss_type not in _VALID_LOSS_TYPES:
-            raise ValueError(
+            raise ConfigError(
                 f"View '{self.name}': loss_type must be one of {_VALID_LOSS_TYPES}, "
                 f"got '{self.loss_type}'"
             )
         if not 0.0 <= self.dropout_p < 1.0:
-            raise ValueError(f"View '{self.name}': dropout_p must be in [0, 1), got {self.dropout_p}")
+            raise ConfigError(f"View '{self.name}': dropout_p must be in [0, 1), got {self.dropout_p}")
         if self.recon_weight <= 0:
-            raise ValueError(f"View '{self.name}': recon_weight must be positive, got {self.recon_weight}")
+            raise ConfigError(f"View '{self.name}': recon_weight must be positive, got {self.recon_weight}")
 
 
 @dataclass
@@ -96,7 +97,13 @@ class MOSAConfig(ModelConfig):
     def from_yaml_dict(cls, raw: dict) -> "MOSAConfig":
         """Parse the per-view mapping into OmicViewConfig objects before construction."""
         raw = dict(raw)
+        check_unknown_keys(cls, raw, "model:")
         if "views" in raw:
+            # 'name' is injected below, so it is never a valid key in the YAML.
+            for view_name, vcfg in raw["views"].items():
+                check_unknown_keys(
+                    OmicViewConfig, vcfg, f"model.views.{view_name}", ignore={"name"}
+                )
             raw["views"] = {
                 name: OmicViewConfig(name=name, **vcfg)
                 for name, vcfg in raw["views"].items()
@@ -118,50 +125,50 @@ class MOSAConfig(ModelConfig):
 
         # Structural validation
         if self.fusion_method not in _VALID_FUSION_METHODS:
-            raise ValueError(f"fusion_method must be one of {_VALID_FUSION_METHODS}, got '{self.fusion_method}'")
+            raise ConfigError(f"fusion_method must be one of {_VALID_FUSION_METHODS}, got '{self.fusion_method}'")
         if self.lr_scheduler not in _VALID_LR_SCHEDULERS:
-            raise ValueError(f"lr_scheduler must be one of {_VALID_LR_SCHEDULERS}, got '{self.lr_scheduler}'")
+            raise ConfigError(f"lr_scheduler must be one of {_VALID_LR_SCHEDULERS}, got '{self.lr_scheduler}'")
         if self.joint_latent_dim <= 0:
-            raise ValueError(f"joint_latent_dim must be positive, got {self.joint_latent_dim}")
+            raise ConfigError(f"joint_latent_dim must be positive, got {self.joint_latent_dim}")
         if self.batch_size <= 0:
-            raise ValueError(f"batch_size must be positive, got {self.batch_size}")
+            raise ConfigError(f"batch_size must be positive, got {self.batch_size}")
         if self.num_epochs <= 0:
-            raise ValueError(f"num_epochs must be positive, got {self.num_epochs}")
+            raise ConfigError(f"num_epochs must be positive, got {self.num_epochs}")
         if not 0.0 <= self.view_dropout_prob < 1.0:
-            raise ValueError(f"view_dropout_prob must be in [0, 1), got {self.view_dropout_prob}")
+            raise ConfigError(f"view_dropout_prob must be in [0, 1), got {self.view_dropout_prob}")
         if self.learning_rate <= 0:
-            raise ValueError(f"learning_rate must be positive, got {self.learning_rate}")
+            raise ConfigError(f"learning_rate must be positive, got {self.learning_rate}")
         if self.adv_weight > 0 and self.adv_learning_rate <= 0:
-            raise ValueError(
+            raise ConfigError(
                 f"adv_learning_rate must be positive when adv_weight > 0, got {self.adv_learning_rate}"
             )
         if not 0.0 < self.scaler_sample_frac <= 1.0:
-            raise ValueError(f"scaler_sample_frac must be in (0.0, 1.0], got {self.scaler_sample_frac}")
+            raise ConfigError(f"scaler_sample_frac must be in (0.0, 1.0], got {self.scaler_sample_frac}")
         if self.adv_focal_gamma < 0:
-            raise ValueError(f"adv_focal_gamma must be >= 0, got {self.adv_focal_gamma}")
+            raise ConfigError(f"adv_focal_gamma must be >= 0, got {self.adv_focal_gamma}")
         if self.preprocessing_mode not in _VALID_PREPROCESSING_MODES:
-            raise ValueError(
+            raise ConfigError(
                 f"preprocessing_mode must be one of {_VALID_PREPROCESSING_MODES}, "
                 f"got '{self.preprocessing_mode}'"
             )
 
         # Lightning
         if self.precision not in _VALID_PRECISIONS:
-            raise ValueError(f"precision must be one of {_VALID_PRECISIONS}, got '{self.precision}'")
+            raise ConfigError(f"precision must be one of {_VALID_PRECISIONS}, got '{self.precision}'")
         if self.accelerator not in _VALID_ACCELERATORS:
-            raise ValueError(f"accelerator must be one of {_VALID_ACCELERATORS}, got '{self.accelerator}'")
+            raise ConfigError(f"accelerator must be one of {_VALID_ACCELERATORS}, got '{self.accelerator}'")
         if isinstance(self.devices, int) and self.devices < 1:
-            raise ValueError(f"devices must be >= 1, got {self.devices}")
+            raise ConfigError(f"devices must be >= 1, got {self.devices}")
         if self.accumulate_grad_batches < 1:
-            raise ValueError(f"accumulate_grad_batches must be >= 1, got {self.accumulate_grad_batches}")
+            raise ConfigError(f"accumulate_grad_batches must be >= 1, got {self.accumulate_grad_batches}")
         if self.gradient_clip_val < 0:
-            raise ValueError(f"gradient_clip_val must be >= 0, got {self.gradient_clip_val}")
+            raise ConfigError(f"gradient_clip_val must be >= 0, got {self.gradient_clip_val}")
 
         # Cross-field: PoE with a shared head requires equal last hidden dims across views
         if self.fusion_method == "poe" and self.views and self.poe_use_shared_head:
             last = {n: v.hidden_layer_dims[-1] for n, v in self.views.items()}
             if len(set(last.values())) > 1:
-                raise ValueError(
+                raise ConfigError(
                     f"PoE fusion requires all views to have the same last hidden dim, got {last}"
                 )
 
@@ -175,7 +182,7 @@ class MOSAConfig(ModelConfig):
     def validate_against_data(self, data_cfg, eval_cfg, summary: dict) -> list[str]:
         """Check MOSA-specific value-level requirements against a data summary.
 
-        Hard invariants raise ValueError; soft ones (tissue/mutations/adversarial
+        Hard invariants raise DataError; soft ones (tissue/mutations/adversarial
         batch count) degrade silently at fit time, so they are returned as warnings.
         """
         obs_columns = summary.get("obs_columns", [])
@@ -184,7 +191,7 @@ class MOSAConfig(ModelConfig):
         if self.inference and self.target_batch:
             target = self.target_batch.strip()
             if target not in categories:
-                raise ValueError(
+                raise DataError(
                     f"target_batch '{target}' not in model_type categories: {categories}"
                 )
 

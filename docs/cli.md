@@ -2,6 +2,25 @@
 
 All commands follow the pattern `mosa <command> [options]`. Run `mosa --help` or `mosa <command> --help` for inline help.
 
+## Errors
+
+Anything you can fix — a bad path, an unknown config key, data that does not match the model — is reported as a single line on stderr, and the command exits 1:
+
+```
+$ mosa train --config configs/my_experiment.yaml
+Error: data.path not found: data/dataset.h5mu
+```
+
+Misspelled config keys suggest the intended name:
+
+```
+Error: Unknown key 'laten_dim' in model:. Did you mean 'joint_latent_dim'?
+```
+
+Adding `--debug` to any command prints the full traceback alongside the message. Reach for it when an error looks like a bug in MOSA rather than a problem with your config or data — a traceback shown without `--debug` is always worth reporting.
+
+Use `mosa validate --config <path>` to check a config, and the data it points at, without training.
+
 ## train
 
 Train a MOSA model from a YAML config file.

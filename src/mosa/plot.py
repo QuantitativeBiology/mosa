@@ -19,6 +19,7 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import calinski_harabasz_score, davies_bouldin_score
 
+from mosa.errors import DataError
 from mosa.utils import ensure_dir
 
 logger = logging.getLogger(__name__)
@@ -302,6 +303,35 @@ def _read_split(output_dir, splits, filename):
         if data is not None:
             return data
     return None
+
+
+_LATENT_SPLITS = ("full", "train")
+
+
+def _require_training_artifacts(output_dir):
+    """Fail before plotting when output_dir holds no training outputs.
+
+    Without this the loaders return empty and every plot silently no-ops,
+    so the command reports success having written nothing.
+    """
+    if not output_dir.exists():
+        raise DataError(
+            f"Output directory not found: {output_dir}. "
+            f"Run 'mosa train' first, or point --output-dir at a completed run."
+        )
+
+    candidates = [
+        output_dir / split / f"latent{ext}"
+        for split in _LATENT_SPLITS
+        for ext in (".parquet", ".csv")
+    ]
+    if not any(p.exists() for p in candidates):
+        looked_for = " or ".join(f"{split}/latent.parquet" for split in _LATENT_SPLITS)
+        raise DataError(
+            f"No latent representations found under {output_dir} "
+            f"(looked for {looked_for}). "
+            f"Run 'mosa train' first, or point --output-dir at a completed run."
+        )
 
 
 def _load_conditionals(path):
@@ -724,6 +754,7 @@ def generate_all_plots(output_dir, data_cfg, model_cfg=None, palette=None, pca_c
     """
     configure_plot_style()
     output_dir = Path(output_dir)
+    _require_training_artifacts(output_dir)
     plots_dir = output_dir / "plots"
 
     views = list(data_cfg.views)

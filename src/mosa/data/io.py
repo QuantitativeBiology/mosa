@@ -11,6 +11,7 @@ from mudata import MuData
 from scipy.sparse import issparse
 
 from mosa.data.dataset import MultiOmicDataset
+from mosa.errors import DataError, MissingFileError
 from mosa.utils import ensure_dir
 
 logger = logging.getLogger(__name__)
@@ -67,7 +68,7 @@ def _read_zarr_column(group) -> np.ndarray:
     if "values" in keys:
         return np.asarray(group["values"])
 
-    raise ValueError(f"Cannot decode zarr column with keys {keys}")
+    raise DataError(f"Cannot decode zarr column with keys {keys}")
 
 
 # MuData loading
@@ -129,7 +130,7 @@ def _load_h5mu(
         # samples. MOSA-produced files are always aligned (convert reindexes
         # every view to one order), so require that here rather than corrupt.
         if not adata.obs_names.equals(mdata.obs_names):
-            raise ValueError(
+            raise DataError(
                 f"View '{view_name}' sample order does not match the global "
                 f".obs order. MOSA requires every modality to be aligned to "
                 f".obs; reindex the modality to mdata.obs_names before loading."
@@ -200,7 +201,7 @@ def _load_zarr(
     for view_name in view_names:
         mod_key = f"mod/{view_name}"
         if mod_key not in store:
-            raise ValueError(f"View '{view_name}' not found in zarr store at {path}")
+            raise DataError(f"View '{view_name}' not found in zarr store at {path}")
 
         # Same alignment requirement as _load_h5mu: the modality's row order
         # must match the global obs order, else X rows pair with the wrong
@@ -210,7 +211,7 @@ def _load_zarr(
             mod_obs = store[mod_obs_key]
             mod_idx = list(_read_zarr_column(mod_obs[_zarr_index_key(mod_obs)]))
             if mod_idx != sample_names:
-                raise ValueError(
+                raise DataError(
                     f"View '{view_name}' sample order does not match the global "
                     f".obs order in the zarr store. MOSA requires every modality "
                     f"to be aligned to .obs."
@@ -358,7 +359,7 @@ def _table_format(path: str | Path) -> str:
         return "tsv"
     if ext in (".parquet", ".pq"):
         return "parquet"
-    raise ValueError(
+    raise DataError(
         f"Unsupported table format '{ext or path}'. Supported: .csv, .tsv, .txt, "
         f".parquet (optionally .gz/.bz2/.xz/.zip for the delimited formats)."
     )
@@ -385,7 +386,7 @@ def _require_exists(path: str | Path, what: str = "File") -> Path:
     """Raise a descriptive FileNotFoundError if path is missing."""
     p = Path(path)
     if not p.exists():
-        raise FileNotFoundError(f"{what} not found: {path}")
+        raise MissingFileError(f"{what} not found: {path}")
     return p
 
 
@@ -395,10 +396,10 @@ def _validate_conditionals(path: str) -> pd.DataFrame:
     try:
         conditionals = _read_table(path, index_col=None)
     except Exception as e:
-        raise ValueError(f"Cannot read conditionals '{path}': {e}") from e
+        raise DataError(f"Cannot read conditionals '{path}': {e}") from e
 
     if "model_id" not in conditionals.columns:
-        raise ValueError(
+        raise DataError(
             f"Conditionals '{path}' is missing required column 'model_id'.\n"
             f"  Found columns: {list(conditionals.columns)}\n"
             f"  'model_id' must contain unique sample identifiers that match the "
@@ -406,7 +407,7 @@ def _validate_conditionals(path: str) -> pd.DataFrame:
         )
 
     if "model_type" not in conditionals.columns:
-        raise ValueError(
+        raise DataError(
             f"Conditionals '{path}' is missing required column 'model_type'.\n"
             f"  Found columns: {list(conditionals.columns)}\n"
             f"  'model_type' is used for conditional encoding, class balancing, and "
@@ -425,7 +426,7 @@ def _validate_conditionals(path: str) -> pd.DataFrame:
 
     if conditionals.index.duplicated().any():
         dupes = list(conditionals.index[conditionals.index.duplicated(keep=False)].unique())
-        raise ValueError(
+        raise DataError(
             f"Conditionals '{path}' has duplicate model_id values: {dupes[:10]}"
             + (" (and more)" if len(dupes) > 10 else "")
         )
@@ -445,7 +446,7 @@ def _filter_metadata(
     """
     for column, allowed in filters.items():
         if column not in metadata.columns:
-            raise ValueError(
+            raise DataError(
                 f"Cannot filter on '{column}': not a column of '{path}'.\n"
                 f"  Available columns: {list(metadata.columns)}"
             )
@@ -457,7 +458,7 @@ def _filter_metadata(
                     column, allowed, len(metadata), before)
 
         if metadata.empty:
-            raise ValueError(
+            raise DataError(
                 f"Filter '{column}' in {allowed} matched no samples in '{path}'.\n"
                 f"  Values present in '{column}': {observed[:20]}"
                 + (" (and more)" if len(observed) > 20 else "")
@@ -476,11 +477,11 @@ def _load_id_map(path: str) -> dict[str, str]:
     try:
         df = _read_table(path, index_col=None)
     except Exception as e:
-        raise ValueError(f"Cannot read ID map '{path}': {e}") from e
+        raise DataError(f"Cannot read ID map '{path}': {e}") from e
 
     missing = {"source_id", "model_id"} - set(df.columns)
     if missing:
-        raise ValueError(
+        raise DataError(
             f"ID map '{path}' is missing required column(s): {sorted(missing)}.\n"
             f"  Found columns: {list(df.columns)}\n"
             f"  Expected 'source_id' (the ID as it appears in your omic files) and "
@@ -505,7 +506,7 @@ def _check_view_orientation(
     col_overlap = len(set(df_raw.columns) & conditionals_ids) / n_conditionals
 
     if row_overlap >= ORIENTATION_ERROR_THRESHOLD:
-        raise ValueError(
+        raise DataError(
             f"View '{view_name}' ({csv_path}): CSV appears to be samples x features "
             f"(row overlap with conditionals IDs: {row_overlap:.0%}, "
             f"threshold: {ORIENTATION_ERROR_THRESHOLD:.0%}).\n"
@@ -530,7 +531,7 @@ def _validate_view_numeric(df_raw: pd.DataFrame, view_name: str, csv_path: str) 
         bad_mask = coerced.isna() & df_raw[col].notna()
         if bad_mask.any():
             bad_vals = df_raw[col][bad_mask].unique()
-            raise ValueError(
+            raise DataError(
                 f"View '{view_name}' ({csv_path}): column '{col}' contains non-numeric "
                 f"values: {list(bad_vals[:5])}"
                 + (" (and more)" if len(bad_vals) > 5 else "") + ".\n"
@@ -600,7 +601,7 @@ def _combine_view_files(
     duplicates = combined.index[combined.index.duplicated()].unique()
     if len(duplicates) > 0:
         if on_collision == "error":
-            raise ValueError(
+            raise DataError(
                 f"View '{view_name}': {len(duplicates)} sample ID(s) occur more "
                 f"than once: {list(duplicates[:10])}"
                 + (" (and more)" if len(duplicates) > 10 else "") + ".\n"
@@ -665,7 +666,7 @@ def align_views(
     if not sample_axis:
         first_view = next(iter(views), None)
         view_examples = list(views[first_view].index)[:5] if first_view else []
-        raise ValueError(
+        raise DataError(
             f"No samples found in the metadata that appear in any view.\n"
             f"  Metadata model_ids (first 5): {list(metadata_ids)[:5]}\n"
             f"  View '{first_view}' sample IDs (first 5): {view_examples}\n"
@@ -695,7 +696,7 @@ def align_views(
         n_views = observed.sum(axis=1)
         keep = [s for s in sample_axis if n_views[s] >= min_views]
         if not keep:
-            raise ValueError(
+            raise DataError(
                 f"No samples have data in at least {min_views} views "
                 f"(the most any sample reaches is {int(n_views.max())}).\n"
                 f"  Lower --min-views, or check that sample IDs match across views."
@@ -718,7 +719,7 @@ def align_views(
 
         if not shared:
             sizes = {n: len(df.columns) for n, df in aligned.items()}
-            raise ValueError(
+            raise DataError(
                 f"shared_features left no features: the views have no feature "
                 f"names in common (view sizes: {sizes}).\n"
                 f"  This option requires every view to use one identifier "
@@ -826,7 +827,7 @@ def csv_to_mudata(
     import anndata
 
     if on_collision not in ("error", "first"):
-        raise ValueError(
+        raise DataError(
             f"on_collision must be 'error' or 'first', got '{on_collision}'"
         )
 
@@ -859,7 +860,7 @@ def csv_to_mudata(
         try:
             df_raw = _read_table(csv_path)
         except Exception as e:
-            raise ValueError(
+            raise DataError(
                 f"View '{view_name}': cannot read '{csv_path}': {e}"
             ) from e
 

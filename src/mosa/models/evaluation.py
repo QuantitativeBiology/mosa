@@ -9,6 +9,7 @@ from sklearn.model_selection import KFold, StratifiedKFold
 
 from mosa.config import DataConfig, EvaluationConfig, ModelConfig
 from mosa.data.dataset import MultiOmicDataset
+from mosa.errors import DataError, UnsupportedError
 from mosa.models.registry import build_model, model_class_for
 
 logger = logging.getLogger(__name__)
@@ -56,13 +57,13 @@ def _check_folds_fit_data(
         classes, counts = np.unique(labels, return_counts=True)
         if counts.min() < n_folds:
             smallest = classes[np.argmin(counts)]
-            raise ValueError(
+            raise DataError(
                 f"n_folds={n_folds} exceeds the size of the smallest model_type "
                 f"class ('{smallest}', {counts.min()} samples); reduce n_folds, "
                 f"add more samples for that class, or use strategy='kfold'."
             )
     elif dataset.n_samples < n_folds:
-        raise ValueError(
+        raise DataError(
             f"n_folds={n_folds} exceeds the number of samples "
             f"({dataset.n_samples}); reduce n_folds."
         )
@@ -104,7 +105,7 @@ def cross_validate(
 
     model_cls = model_class_for(model_cfg)
     if not model_cls.supports_out_of_sample:
-        raise RuntimeError(
+        raise UnsupportedError(
             f"Cross-validation is not supported for the "
             f"'{getattr(model_cls, 'registered_name', model_cls.__name__)}' "
             f"model: it has no out-of-sample projection."
