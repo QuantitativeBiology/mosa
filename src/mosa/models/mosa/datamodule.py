@@ -619,9 +619,13 @@ class MOSADataModule(pl.LightningDataModule):
 
     def _loader_kwargs(self) -> dict:
         nw = self.model_cfg.num_workers
+        accelerator = self.model_cfg.accelerator
+        # pin_memory only speeds up host->GPU transfer; on CPU it's a no-op
+        # that still pays for pinned allocation, so skip it there.
+        pin_memory = accelerator == "gpu" or (accelerator == "auto" and torch.cuda.is_available())
         kwargs: dict = {
             "num_workers": nw,
-            "pin_memory": True,
+            "pin_memory": pin_memory,
         }
         if nw > 0:
             kwargs["persistent_workers"] = True

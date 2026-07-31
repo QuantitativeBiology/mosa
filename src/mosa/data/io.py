@@ -525,7 +525,7 @@ def _check_view_orientation(
 
 def _validate_view_numeric(df_raw: pd.DataFrame, view_name: str, csv_path: str) -> None:
     # Only object-dtype columns can contain non-numeric strings; float/int are already clean.
-    for col in df_raw.select_dtypes(include="object").columns:
+    for col in df_raw.select_dtypes(include=["object", "str"]).columns:
         coerced = pd.to_numeric(df_raw[col], errors="coerce")
         bad_mask = coerced.isna() & df_raw[col].notna()
         if bad_mask.any():
