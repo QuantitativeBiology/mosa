@@ -215,6 +215,16 @@ def _convert(args):
         name, path = spec.split(":", 1)
         view_specs.append((name, path))
 
+    metadata_filters: dict[str, list[str]] = {}
+    for spec in args.filter or []:
+        if "=" not in spec:
+            raise ValueError(
+                f"Invalid --filter format: '{spec}'. Expected 'COLUMN=VAL[,VAL...]' "
+                f"(e.g. 'model_type=Cell_Line,Organoid')"
+            )
+        column, values = spec.split("=", 1)
+        metadata_filters[column] = [v.strip() for v in values.split(",") if v.strip()]
+
     logger.debug("Converting CSV dataset to MuData format")
     logger.debug("Output file: %s", args.output)
 
@@ -224,6 +234,11 @@ def _convert(args):
         output_path=args.output,
         mutations_path=args.mutations,
         format=args.format,
+        id_map_path=args.id_map,
+        on_collision=args.on_collision,
+        min_views=args.min_views,
+        metadata_filters=metadata_filters,
+        shared_features=args.shared_features,
     )
     print(f"MuData file saved to {args.output}")
 
@@ -323,11 +338,37 @@ def main():
     )
     convert_parser.add_argument(
         "--view", required=True, action="append",
-        help="View spec as 'name:path' (e.g. 'gexp_voom:data/gexp_voom.csv'). Repeat for each modality.",
+        help="View spec as 'name:path' (e.g. 'gexp:data/gexp.parquet'). Repeat for each "
+             "modality. Repeating the same name assembles that omic from several files: "
+             "samples concatenate, features union. Formats: .csv, .tsv, .txt, .parquet "
+             "(delimited ones may be .gz).",
     )
     convert_parser.add_argument(
         "--mutations", default=None,
         help="Path to mutations CSV (features x samples, binary). Columns become mutation_* in .obs.",
+    )
+    convert_parser.add_argument(
+        "--id-map", default=None,
+        help="Sample-ID crosswalk table (columns: source_id, model_id) applied to every "
+             "view before alignment. Use it when providers name the same sample differently.",
+    )
+    convert_parser.add_argument(
+        "--on-collision", choices=["error", "first"], default="error",
+        help="What to do when two columns resolve to one sample ID (default: error).",
+    )
+    convert_parser.add_argument(
+        "--min-views", type=int, default=1, metavar="N",
+        help="Keep only samples with data in at least N views (default: 1, keep all).",
+    )
+    convert_parser.add_argument(
+        "--filter", action="append", default=None, metavar="COLUMN=VAL[,VAL...]",
+        help="Restrict samples to metadata rows whose COLUMN is one of the listed values "
+             "(e.g. 'model_type=Cell_Line,Organoid'). Repeat for several columns.",
+    )
+    convert_parser.add_argument(
+        "--shared-features", action="store_true",
+        help="Reduce every view to the features they all share. Only valid when all "
+             "views use one identifier namespace (e.g. every omic at gene level).",
     )
     convert_parser.add_argument("--output", required=True, help="Output file path (.h5mu or .zarr)")
     convert_parser.add_argument(

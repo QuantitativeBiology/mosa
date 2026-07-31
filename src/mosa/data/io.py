@@ -338,6 +338,47 @@ def _summarize_zarr(path: str) -> dict:
     }
 
 
+# Table reading
+
+# Compression suffixes pandas decompresses transparently from the filename.
+_COMPRESSION_SUFFIXES = {".gz", ".bz2", ".xz", ".zip"}
+_DELIMITERS = {"csv": ",", "tsv": "\t"}
+
+
+def _table_format(path: str | Path) -> str:
+    """Infer table format from a file extension, ignoring any compression suffix."""
+    suffixes = [s.lower() for s in Path(path).suffixes]
+    if suffixes and suffixes[-1] in _COMPRESSION_SUFFIXES:
+        suffixes = suffixes[:-1]
+    ext = suffixes[-1] if suffixes else ""
+
+    if ext in (".csv",):
+        return "csv"
+    if ext in (".tsv", ".txt", ".tab"):
+        return "tsv"
+    if ext in (".parquet", ".pq"):
+        return "parquet"
+    raise ValueError(
+        f"Unsupported table format '{ext or path}'. Supported: .csv, .tsv, .txt, "
+        f".parquet (optionally .gz/.bz2/.xz/.zip for the delimited formats)."
+    )
+
+
+def _read_table(path: str | Path, index_col: int | None = 0) -> pd.DataFrame:
+    """Read a table into a DataFrame, dispatching on file extension."""
+    fmt = _table_format(path)
+
+    if fmt == "parquet":
+        df = pd.read_parquet(path)
+        # pandas restores its own index from parquet metadata; files from other
+        # tools (R arrow, Spark) arrive with a RangeIndex, first column = index.
+        if index_col is not None and isinstance(df.index, pd.RangeIndex):
+            df = df.set_index(df.columns[index_col])
+        return df
+
+    return pd.read_csv(path, index_col=index_col, sep=_DELIMITERS[fmt])
+
+
 # Validation helpers
 
 def _require_exists(path: str | Path, what: str = "File") -> Path:
@@ -352,7 +393,7 @@ def _validate_conditionals(path: str) -> pd.DataFrame:
     _require_exists(path, what="Conditionals")
 
     try:
-        conditionals = pd.read_csv(path)
+        conditionals = _read_table(path, index_col=None)
     except Exception as e:
         raise ValueError(f"Cannot read conditionals '{path}': {e}") from e
 
@@ -390,6 +431,63 @@ def _validate_conditionals(path: str) -> pd.DataFrame:
         )
 
     return conditionals
+
+
+def _filter_metadata(
+    metadata: pd.DataFrame,
+    filters: dict[str, list[str]],
+    path: str,
+) -> pd.DataFrame:
+    """Restrict metadata rows to allowed values per column, before alignment.
+
+    The sample axis is the view samples intersected with the metadata index, so
+    shrinking the metadata shrinks the axis.
+    """
+    for column, allowed in filters.items():
+        if column not in metadata.columns:
+            raise ValueError(
+                f"Cannot filter on '{column}': not a column of '{path}'.\n"
+                f"  Available columns: {list(metadata.columns)}"
+            )
+
+        before = len(metadata)
+        observed = list(pd.unique(metadata[column].dropna()))
+        metadata = metadata[metadata[column].isin(allowed)]
+        logger.info("filter %s in %s: kept %d of %d samples",
+                    column, allowed, len(metadata), before)
+
+        if metadata.empty:
+            raise ValueError(
+                f"Filter '{column}' in {allowed} matched no samples in '{path}'.\n"
+                f"  Values present in '{column}': {observed[:20]}"
+                + (" (and more)" if len(observed) > 20 else "")
+            )
+
+    return metadata
+
+
+def _load_id_map(path: str) -> dict[str, str]:
+    """Read a sample-ID crosswalk mapping provider IDs onto canonical model_ids.
+
+    Applied to omic views only; metadata and mutations already use canonical IDs.
+    """
+    _require_exists(path, what="ID map")
+
+    try:
+        df = _read_table(path, index_col=None)
+    except Exception as e:
+        raise ValueError(f"Cannot read ID map '{path}': {e}") from e
+
+    missing = {"source_id", "model_id"} - set(df.columns)
+    if missing:
+        raise ValueError(
+            f"ID map '{path}' is missing required column(s): {sorted(missing)}.\n"
+            f"  Found columns: {list(df.columns)}\n"
+            f"  Expected 'source_id' (the ID as it appears in your omic files) and "
+            f"'model_id' (the canonical ID used in your metadata)."
+        )
+
+    return dict(zip(df["source_id"].astype(str), df["model_id"].astype(str)))
 
 
 def _check_view_orientation(
@@ -483,6 +581,204 @@ def _dearrow_mudata(mdata: MuData) -> None:
         _dearrow_df(mod.var)
 
 
+# Alignment
+
+def _combine_view_files(
+    frames: list[pd.DataFrame],
+    view_name: str,
+    on_collision: str = "error",
+) -> pd.DataFrame:
+    """Assemble one omic from several files: concatenate samples, union features.
+
+    A feature absent from one file is NaN for that file's samples rather than
+    dropped. Collisions are checked over the view's pooled samples, catching
+    both a sample present in two files and two columns an ID map resolved onto
+    one sample.
+    """
+    combined = frames[0] if len(frames) == 1 else pd.concat(frames, axis=0)
+
+    duplicates = combined.index[combined.index.duplicated()].unique()
+    if len(duplicates) > 0:
+        if on_collision == "error":
+            raise ValueError(
+                f"View '{view_name}': {len(duplicates)} sample ID(s) occur more "
+                f"than once: {list(duplicates[:10])}"
+                + (" (and more)" if len(duplicates) > 10 else "") + ".\n"
+                f"  Two columns resolving to one sample is ambiguous. Pass "
+                f"--on-collision first to keep the first occurrence, or "
+                f"resolve it upstream."
+            )
+        combined = combined[~combined.index.duplicated(keep="first")]
+        logger.warning(
+            "View '%s': kept the first of %d colliding sample ID(s): %s%s",
+            view_name, len(duplicates), list(duplicates[:10]),
+            " (and more)" if len(duplicates) > 10 else "",
+        )
+
+    if len(frames) > 1:
+        logger.debug("  view '%s': combined %d files -> %d samples x %d features",
+                     view_name, len(frames), *combined.shape)
+    return combined
+
+
+def align_views(
+    views: dict[str, pd.DataFrame],
+    metadata: pd.DataFrame,
+    min_views: int = 1,
+    shared_features: bool = False,
+) -> tuple[dict[str, pd.DataFrame], pd.DataFrame, pd.DataFrame]:
+    """Align every view and the metadata onto one shared sample axis.
+
+    The axis is the sorted union of samples across views, restricted to those
+    the metadata describes; views gain all-NaN rows for samples they lack.
+
+    Parameters
+    ----------
+    views : dict of str to DataFrame
+        {view_name: frame} indexed by sample ID (samples x features).
+    metadata : DataFrame
+        Sample metadata, indexed by sample ID.
+    min_views : int
+        Drop samples holding real values in fewer than this many views. 1 keeps
+        the whole union; len(views) keeps only samples complete across omics.
+    shared_features : bool
+        Reduce every view to the features they all share. Off by default; valid
+        only when all views use one identifier namespace, e.g. every omic
+        summarised to gene level.
+
+    Returns
+    -------
+    (aligned_views, aligned_metadata, presence), all sharing one row order.
+    `presence` is a bool frame with one has_<view> column per view, True where
+    the sample appeared in that view's file. A sample absent from a view and one
+    whose values are all NaN yield identical matrices, so presence records the
+    difference; min_views instead counts views holding at least one real value.
+    """
+    metadata_ids = set(metadata.index)
+    view_samples = {name: set(df.index) for name, df in views.items()}
+
+    all_view_samples: set[str] = set()
+    for samples in view_samples.values():
+        all_view_samples |= samples
+
+    sample_axis = sorted(all_view_samples & metadata_ids)
+    if not sample_axis:
+        first_view = next(iter(views), None)
+        view_examples = list(views[first_view].index)[:5] if first_view else []
+        raise ValueError(
+            f"No samples found in the metadata that appear in any view.\n"
+            f"  Metadata model_ids (first 5): {list(metadata_ids)[:5]}\n"
+            f"  View '{first_view}' sample IDs (first 5): {view_examples}\n"
+            f"  Check that sample IDs use the same format in both files."
+        )
+
+    # `presence` = the sample appeared in the view's file, which no mask can
+    # recover. `observed` = it holds a real value there, which min_views counts.
+    presence = pd.DataFrame(
+        {f"has_{name}": [s in samples for s in sample_axis]
+         for name, samples in view_samples.items()},
+        index=sample_axis, dtype=bool,
+    )
+    observed = pd.DataFrame(
+        {name: df.notna().any(axis=1).reindex(sample_axis, fill_value=False)
+         for name, df in views.items()},
+        index=sample_axis, dtype=bool,
+    )
+
+    logger.debug("Sample axis (union across views, with metadata): %d", len(sample_axis))
+    for name in view_samples:
+        logger.debug("  view '%s': %d in file, %d with data (of %d)",
+                     name, int(presence[f"has_{name}"].sum()),
+                     int(observed[name].sum()), len(sample_axis))
+
+    if min_views > 1:
+        n_views = observed.sum(axis=1)
+        keep = [s for s in sample_axis if n_views[s] >= min_views]
+        if not keep:
+            raise ValueError(
+                f"No samples have data in at least {min_views} views "
+                f"(the most any sample reaches is {int(n_views.max())}).\n"
+                f"  Lower --min-views, or check that sample IDs match across views."
+            )
+        logger.info("min_views=%d dropped %d of %d samples",
+                    min_views, len(sample_axis) - len(keep), len(sample_axis))
+        sample_axis = keep
+        presence = presence.loc[keep]
+        observed = observed.loc[keep]
+
+    aligned = {name: df.reindex(sample_axis) for name, df in views.items()}
+
+    if shared_features and aligned:
+        common: set | None = None
+        for df in aligned.values():
+            cols = set(df.columns)
+            common = cols if common is None else common & cols
+        shared = sorted(common or set())
+        smallest = min(len(df.columns) for df in aligned.values())
+
+        if not shared:
+            sizes = {n: len(df.columns) for n, df in aligned.items()}
+            raise ValueError(
+                f"shared_features left no features: the views have no feature "
+                f"names in common (view sizes: {sizes}).\n"
+                f"  This option requires every view to use one identifier "
+                f"namespace, e.g. all omics summarised to gene symbols."
+            )
+        if len(shared) < 0.1 * smallest:
+            logger.warning(
+                "shared_features kept only %d features, under 10%% of the "
+                "smallest view (%d). Check that the views really share an "
+                "identifier namespace.", len(shared), smallest,
+            )
+        logger.info("shared_features: %d features common to all %d views",
+                    len(shared), len(aligned))
+        aligned = {name: df[shared] for name, df in aligned.items()}
+
+    return aligned, metadata.loc[sample_axis], presence
+
+
+def _print_conversion_report(
+    n_metadata: int,
+    n_union_views: int,
+    n_matched: int,
+    min_views: int,
+    presence: pd.DataFrame,
+    omics: dict[str, pd.DataFrame],
+) -> None:
+    """Print what came in, what went out, and why anything was dropped."""
+    n_final = len(presence)
+
+    def row(label: str, value: int) -> None:
+        print(f"    {label:<28}{value:>8}")
+
+    print("\nConversion report")
+    print("  Samples")
+    row("in metadata:", n_metadata)
+    row("in at least one view:", n_union_views)
+    row("matched on both:", n_matched)
+    row("dropped, no metadata:", n_union_views - n_matched)
+    row("dropped, no view data:", n_metadata - n_matched)
+    if min_views > 1:
+        row(f"dropped, min_views={min_views}:", n_matched - n_final)
+    row("final:", n_final)
+
+    print("  Views")
+    for name, df in omics.items():
+        n_present = int(presence[f"has_{name}"].sum())
+        print(f"    {name:<16}{df.shape[1]:>7} features"
+              f"{n_present:>8} / {n_final} samples present")
+        n_dup = int(df.columns.duplicated().sum())
+        if n_dup:
+            print(f"    {'':<16}{n_dup:>7} duplicate feature name(s), "
+                  f"suffixed at load")
+
+    print("  Samples by view count")
+    n_views = presence.sum(axis=1)
+    for k in range(1, len(omics) + 1):
+        row(f"{k} view{'s' if k > 1 else ''}:", int((n_views == k).sum()))
+    print()
+
+
 # Conversion
 
 def csv_to_mudata(
@@ -491,91 +787,124 @@ def csv_to_mudata(
     output_path: str,
     mutations_path: str | None = None,
     format: str = "h5mu",
+    id_map_path: str | None = None,
+    on_collision: str = "error",
+    min_views: int = 1,
+    metadata_filters: dict[str, list[str]] | None = None,
+    shared_features: bool = False,
 ) -> None:
-    """Convert CSV tables to MuData format.
+    """Convert tabular omic files to MuData format.
 
     Parameters
     ----------
     conditionals_path : str
-        Path to conditionals CSV (requires model_id, model_type; tissue optional).
+        Path to the sample metadata table (requires model_id, model_type;
+        tissue optional).
     view_specs : list of tuple
-        (view_name, csv_path) tuples; CSVs must be features x samples.
+        (view_name, path) tuples; tables must be features x samples. Repeating
+        a view name assembles that omic from several files.
     output_path : str
         Output path for MuData file.
     mutations_path : str or None
-        Optional mutations CSV (features x samples, binary).
+        Optional mutations table (features x samples, binary).
     format : str
         Output format: "h5mu" or "zarr".
+    id_map_path : str or None
+        Optional sample-ID crosswalk (columns: source_id, model_id) applied to
+        every view before alignment.
+    on_collision : str
+        What to do when two columns resolve to one sample: "error" or "first".
+    min_views : int
+        Drop samples with data in fewer than this many views (default 1, which
+        keeps every sample).
+    metadata_filters : dict or None
+        {column: [allowed values]} applied to the metadata before alignment,
+        restricting which samples are eligible at all.
+    shared_features : bool
+        Reduce every view to the features they all share (default off).
     """
     import anndata
 
+    if on_collision not in ("error", "first"):
+        raise ValueError(
+            f"on_collision must be 'error' or 'first', got '{on_collision}'"
+        )
+
     anndata.settings.allow_write_nullable_strings = True
 
-    logger.info("Converting CSV dataset to MuData format")
+    logger.info("Converting dataset to MuData format")
 
     # Pre-flight validation
     _check_format_extension(output_path, format)
     conditionals = _validate_conditionals(conditionals_path)
+    if metadata_filters:
+        conditionals = _filter_metadata(conditionals, metadata_filters, conditionals_path)
     conditionals_ids = set(conditionals.index)
 
+    id_map = _load_id_map(id_map_path) if id_map_path else {}
+    # A source ID mapping into the metadata is a known sample pre-mapping too.
+    orientation_ids = conditionals_ids | {
+        src for src, dst in id_map.items() if dst in conditionals_ids
+    }
+
+    if mutations_path:
+        _require_exists(mutations_path, what="Mutations CSV")
+
+    # Validation and load share one read; these files reach gigabytes. Repeating
+    # a view name in view_specs adds another file to that same omic.
+    logger.debug("Loading view tables")
+    view_frames: dict[str, list[pd.DataFrame]] = {}
     for view_name, csv_path in view_specs:
-        _require_exists(csv_path, what=f"View '{view_name}': CSV file")
+        _require_exists(csv_path, what=f"View '{view_name}': file")
         try:
-            df_raw = pd.read_csv(csv_path, index_col=0)
+            df_raw = _read_table(csv_path)
         except Exception as e:
             raise ValueError(
                 f"View '{view_name}': cannot read '{csv_path}': {e}"
             ) from e
 
-        _check_view_orientation(df_raw, conditionals_ids, view_name, csv_path)
+        _check_view_orientation(df_raw, orientation_ids, view_name, csv_path)
         _validate_view_numeric(df_raw, view_name, csv_path)
 
-    if mutations_path:
-        _require_exists(mutations_path, what="Mutations CSV")
+        df = df_raw.T.astype(np.float32)
+        # astype copied if the source was float64; if it was already float32 the
+        # two share memory and this just drops the name.
+        del df_raw
+        if id_map:
+            df = df.rename(index=id_map)  # unmapped IDs pass through unchanged
+        view_frames.setdefault(view_name, []).append(df)
+        logger.debug("  view '%s' <- %s: %d samples x %d features",
+                     view_name, csv_path, *df.shape)
 
-    # Load views
-    logger.debug("Loading view CSVs")
-    omics: dict[str, pd.DataFrame] = {}
-    view_sample_sets: dict[str, set[str]] = {}
-    for view_name, csv_path in view_specs:
-        df = pd.read_csv(csv_path, index_col=0).T.astype(float)
-        omics[view_name] = df
-        view_sample_sets[view_name] = set(df.index)
-        logger.debug("  view '%s': %d samples x %d features", view_name, *df.shape)
+    omics = {
+        name: _combine_view_files(frames, name, on_collision)
+        for name, frames in view_frames.items()
+    }
 
-    # Sample alignment
-    all_view_samples: set[str] = set()
-    for s in view_sample_sets.values():
-        all_view_samples |= s
-    common_samples = sorted(all_view_samples & conditionals_ids)
+    # Captured pre-alignment so the report can attribute every dropped sample.
+    metadata_ids_pre = set(conditionals.index)
+    union_pre: set[str] = set()
+    for df in omics.values():
+        union_pre |= set(df.index)
+    n_matched = len(union_pre & metadata_ids_pre)
 
-    if not common_samples:
-        conditionals_examples = list(conditionals_ids)[:5]
-        view_name0, _ = view_specs[0]
-        view_examples = list(view_sample_sets[view_name0])[:5]
-        raise ValueError(
-            f"No samples found in the conditionals that appear in any view CSV.\n"
-            f"  Conditionals model_ids (first 5): {conditionals_examples}\n"
-            f"  View '{view_name0}' column names (first 5): {view_examples}\n"
-            f"  Check that sample IDs use the same format in both files."
-        )
+    omics, conditionals, presence = align_views(
+        omics, conditionals, min_views, shared_features
+    )
+    sample_axis = list(conditionals.index)
 
-    logger.debug("Union samples (with conditionals metadata): %d", len(common_samples))
-    for view_name, ss in view_sample_sets.items():
-        n_present = len(ss & set(common_samples))
-        logger.debug("  view '%s': %d / %d samples present",
-                     view_name, n_present, len(common_samples))
+    _print_conversion_report(
+        n_metadata=len(metadata_ids_pre),
+        n_union_views=len(union_pre),
+        n_matched=n_matched,
+        min_views=min_views,
+        presence=presence,
+        omics=omics,
+    )
 
     mutations_df = None
     if mutations_path:
-        mutations_df = pd.read_csv(mutations_path, index_col=0).T
-
-    # Align to common samples
-    conditionals = conditionals.loc[common_samples]
-    for name in omics:
-        omics[name] = omics[name].reindex(common_samples)
-    if mutations_df is not None:
-        mutations_df = mutations_df.reindex(common_samples).fillna(0)
+        mutations_df = _read_table(mutations_path).T.reindex(sample_axis).fillna(0)
 
     # Build AnnData objects
     logger.debug("Creating AnnData objects")
@@ -597,17 +926,12 @@ def csv_to_mudata(
     with mudata.set_options(pull_on_update=False):
         mdata = MuData(adatas)
 
-    # Presence is derived from the mask layer at load time, not persisted here.
-    for view_name in omics:
-        adata = adatas[view_name]
-        mask = adata.layers["mask"]
-        presence = mask.any(axis=1)
-        logger.debug(
-            "  %s: %d / %d samples have ≥1 feature present",
-            view_name, presence.sum(), len(presence),
-        )
-
     mdata.obs = conditionals.copy()
+
+    # A sample absent from a view and one whose values are all NaN share a mask,
+    # so presence is stored beside it.
+    for col in presence.columns:
+        mdata.obs[col] = presence[col].values
 
     if mutations_df is not None:
         mutations_df = mutations_df.add_prefix("mutation_")
@@ -625,7 +949,7 @@ def csv_to_mudata(
     else:
         mdata.write(str(output_path_obj))
     logger.info("Conversion complete: %d samples, %d modalities",
-                len(common_samples), len(adatas))
+                len(sample_axis), len(adatas))
 
 
 # Inspection
@@ -690,7 +1014,8 @@ def inspect_mudata(path: str) -> None:
     else:
         for col in obs.columns:
             s = obs[col]
-            if isinstance(s.dtype, pd.CategoricalDtype) or s.dtype == object:
+            if (isinstance(s.dtype, pd.CategoricalDtype) or s.dtype == object
+                    or pd.api.types.is_bool_dtype(s)):
                 vc = s.value_counts()
                 if len(vc) <= 8:
                     summary = ", ".join(f"{k}: {v}" for k, v in vc.items())
