@@ -156,7 +156,7 @@ def configure_plot_style():
         "figure.figsize": [2.5, 2.5],
         "figure.dpi": 300,
         "font.family": "sans-serif",
-        "font.sans-serif": "Arial",
+        "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
         "axes.titlesize": 7,
         "legend.fontsize": 6,
         "legend.title_fontsize": 6,
