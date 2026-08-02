@@ -16,36 +16,39 @@ logger = logging.getLogger(__name__)
 
 
 def _score_fold(model, val: MultiOmicDataset) -> dict:
-    """Score a fitted model on a held-out fold via masked, variance-normalized MSE.
+    """Squared-error total and observed-entry count per view on a held-out fold.
 
     Uses only the ABC's reconstruct(), so this works for any model implementing
-    the interface. Per view: MSE over observed entries (val.masks), normalized
-    by the variance of the observed targets (fraction of variance unexplained)
-    so views on different scales are comparable. Aggregate is the mean of the
-    per-view normalized errors across views with nonzero variance.
+    the interface. Returns raw sums rather than a finished error: normalizing
+    inside the fold would make each fold's score depend on which views that
+    fold happened to observe. cross_validate pools these across folds first.
     """
     recon = model.reconstruct(val)
 
     per_view = {}
     for view in val.view_names:
         mask = val.masks[view]
-        target = val.views[view]
-        pred = recon[view]
-
-        if mask.sum() == 0:
-            per_view[view] = {"mse": float("nan"), "nmse": float("nan")}
+        n_obs = int(mask.sum())
+        if n_obs == 0:
+            per_view[view] = {"sse": 0.0, "n_obs": 0}
             continue
 
-        observed_target = target[mask]
-        observed_pred = pred[mask]
-        mse = float(np.mean((observed_pred - observed_target) ** 2))
-        var = float(np.var(observed_target))
-        nmse = mse / var if var > 0 else float("nan")
-        per_view[view] = {"mse": mse, "nmse": nmse}
+        error = recon[view][mask] - val.views[view][mask]
+        per_view[view] = {"sse": float(np.sum(error**2)), "n_obs": n_obs}
 
-    valid_nmse = [v["nmse"] for v in per_view.values() if not np.isnan(v["nmse"])]
-    aggregate = float(np.mean(valid_nmse)) if valid_nmse else float("nan")
-    return {"per_view": per_view, "aggregate": aggregate}
+    return per_view
+
+
+def _observed_variance(dataset: MultiOmicDataset, view: str) -> float:
+    """Variance of a view's observed entries over the whole dataset.
+
+    One normalizer per view for every fold, so per-fold errors are comparable
+    to each other and to the pooled total.
+    """
+    mask = dataset.masks[view]
+    if mask.sum() == 0:
+        return 0.0
+    return float(np.var(dataset.views[view][mask]))
 
 
 def _check_folds_fit_data(
@@ -100,6 +103,15 @@ def cross_validate(
     the field exists) and output_dir pointed at a unique, auto-cleaned temp
     directory, so folds never write to the caller's output_dir and never
     clobber each other.
+
+    "mean" is the pooled estimate: squared errors are summed across folds per
+    view, divided by the total observed entries for that view, normalized by
+    that view's whole-dataset variance, then averaged over views. Because the
+    folds partition the data, this scores every observed entry exactly once,
+    by a model that never trained on it. Per-fold aggregates are reported for
+    diagnostics only; a fold that observes no entries for a view covers fewer
+    views than its neighbours, so "std" is a spread indicator rather than an
+    uncertainty on "mean".
     """
     eval_cfg = eval_cfg or EvaluationConfig()
 
@@ -116,7 +128,7 @@ def cross_validate(
 
     splitter = _build_splitter(eval_cfg, getattr(model_cfg, "random_seed", 42))
 
-    per_fold = []
+    fold_totals = []
     for fold_idx, (train_idx, val_idx) in enumerate(
         splitter.split(np.arange(dataset.n_samples), labels)
     ):
@@ -131,14 +143,63 @@ def cross_validate(
 
             model = build_model(data_cfg, fold_model_cfg)
             model.fit(train, val)
-            score = _score_fold(model, val)
+            totals = _score_fold(model, val)
 
-        logger.debug("Fold %d: aggregate=%.4f", fold_idx, score["aggregate"])
-        per_fold.append(score)
+        unobserved = [v for v in dataset.view_names if totals[v]["n_obs"] == 0]
+        if unobserved:
+            logger.warning(
+                "Fold %d has no observed entries for view(s) %s; this split "
+                "cannot assess %s. Consider strategy='stratified' or shuffle=True.",
+                fold_idx, unobserved, "them" if len(unobserved) > 1 else "it",
+            )
+        fold_totals.append(totals)
 
-    aggregates = np.array([f["aggregate"] for f in per_fold])
+    variances = {v: _observed_variance(dataset, v) for v in dataset.view_names}
+
+    pooled = {}
+    for view in dataset.view_names:
+        n_obs = sum(f[view]["n_obs"] for f in fold_totals)
+        if n_obs == 0:
+            raise DataError(
+                f"View '{view}' has no observed entries in any fold, so it "
+                f"cannot be scored. Drop it from data.views or check its mask layer."
+            )
+        if variances[view] == 0:
+            raise DataError(
+                f"View '{view}' has zero variance across its observed entries, "
+                f"so variance-normalized error is undefined. Drop it from data.views."
+            )
+        mse = sum(f[view]["sse"] for f in fold_totals) / n_obs
+        pooled[view] = {"mse": mse, "nmse": mse / variances[view], "n_obs": n_obs}
+
+    aggregate = float(np.mean([pooled[v]["nmse"] for v in dataset.view_names]))
+
+    per_fold = []
+    for fold_idx, totals in enumerate(fold_totals):
+        per_view = {}
+        for view in dataset.view_names:
+            n_obs = totals[view]["n_obs"]
+            if n_obs == 0:
+                per_view[view] = {"mse": float("nan"), "nmse": float("nan"), "n_obs": 0}
+                continue
+            mse = totals[view]["sse"] / n_obs
+            per_view[view] = {
+                "mse": mse, "nmse": mse / variances[view], "n_obs": n_obs,
+            }
+        covered = [v for v in dataset.view_names if per_view[v]["n_obs"] > 0]
+        per_fold.append({
+            "per_view": per_view,
+            "aggregate": float(np.mean([per_view[v]["nmse"] for v in covered])),
+            "n_views": len(covered),
+        })
+        logger.debug(
+            "Fold %d: aggregate=%.4f over %d/%d views",
+            fold_idx, per_fold[-1]["aggregate"], len(covered), len(dataset.view_names),
+        )
+
     return {
         "per_fold": per_fold,
-        "mean": float(np.mean(aggregates)),
-        "std": float(np.std(aggregates)),
+        "per_view": pooled,
+        "mean": aggregate,
+        "std": float(np.std([f["aggregate"] for f in per_fold])),
     }

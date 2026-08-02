@@ -107,6 +107,61 @@ def test_unshuffled_folds_are_contiguous_blocks(make_multi_omic_dataset, strateg
     assert c != a
 
 
+def test_aggregate_covers_every_view_when_a_fold_observes_none(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
+    """A view unobserved in some folds must not shrink the aggregate's denominator.
+
+    Scoring each fold on its own would average 2 views in the starved folds and
+    3 in the rest, so the reported mean would mix incompatible quantities.
+    Pooling squared errors across folds before normalizing keeps one view set.
+    """
+    dataset = make_multi_omic_dataset(
+        n_samples=30, n_groups=2, view_dims={"dense_a": 12, "dense_b": 10, "sparse": 8}
+    )
+    # Observed only in the first third, which unshuffled folds put entirely in
+    # fold 0; folds 1 and 2 then hold no sparse entries at all.
+    dataset.masks["sparse"][10:] = False
+
+    data_cfg, model_cfg = make_mosa_config(
+        dataset, num_epochs=1, output_dir=str(tmp_path)
+    )
+    results = cross_validate(
+        dataset, data_cfg, model_cfg,
+        EvaluationConfig(n_folds=3, strategy="kfold", shuffle=False),
+    )
+
+    assert set(results["per_view"]) == {"dense_a", "dense_b", "sparse"}
+    for view, scores in results["per_view"].items():
+        assert not np.isnan(scores["nmse"]), f"{view} pooled NMSE is NaN"
+    assert results["per_view"]["sparse"]["n_obs"] == 10 * 8
+
+    # The headline number averages all three views, not a per-fold subset.
+    expected = np.mean([results["per_view"][v]["nmse"] for v in dataset.view_names])
+    assert results["mean"] == pytest.approx(expected)
+    assert not np.isnan(results["mean"])
+
+    # The starved folds are still visible as such in the diagnostic table.
+    coverage = [f["n_views"] for f in results["per_fold"]]
+    assert coverage == [3, 2, 2]
+    for fold in results["per_fold"][1:]:
+        assert np.isnan(fold["per_view"]["sparse"]["nmse"])
+        assert fold["per_view"]["sparse"]["n_obs"] == 0
+
+
+def test_unscoreable_view_raises_instead_of_reporting_nan(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
+    dataset = make_multi_omic_dataset(n_samples=20, n_groups=2)
+    dataset.masks["view_b"][:] = False
+
+    data_cfg, model_cfg = make_mosa_config(
+        dataset, num_epochs=1, output_dir=str(tmp_path)
+    )
+    with pytest.raises(ValueError, match="no observed entries in any fold"):
+        cross_validate(dataset, data_cfg, model_cfg, EvaluationConfig(n_folds=2))
+
+
 # Transductive (MOFA-like) models: no out-of-sample projection.
 
 

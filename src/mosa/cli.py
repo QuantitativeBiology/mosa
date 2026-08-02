@@ -185,16 +185,30 @@ def _cross_validate(args):
     eval_cfg = _eval_cfg_from_args(cfg, args)
     results = cross_validate(dataset, cfg.data, cfg.model, eval_cfg)
 
-    views = list(results["per_fold"][0]["per_view"].keys())
-    header = f"{'fold':<6}" + "".join(f"{v + ' (NMSE)':<20}" for v in views) + f"{'aggregate':<12}"
-    print(header)
+    views = list(results["per_view"].keys())
+    n_views = len(views)
+
+    def cell(value):
+        return f"{'n/a':<20}" if value != value else f"{value:<20.4f}"
+
+    print(f"{'fold':<7}" + "".join(f"{v + ' (NMSE)':<20}" for v in views) + "aggregate")
     for i, fold in enumerate(results["per_fold"]):
-        row = f"{i:<6}"
-        for v in views:
-            row += f"{fold['per_view'][v]['nmse']:<20.4f}"
+        row = f"{i:<7}" + "".join(cell(fold["per_view"][v]["nmse"]) for v in views)
         row += f"{fold['aggregate']:<12.4f}"
+        if fold["n_views"] < n_views:
+            row += f"({fold['n_views']}/{n_views} views)"
         print(row)
-    print(f"\nmean ± std (aggregate NMSE): {results['mean']:.4f} ± {results['std']:.4f}")
+
+    print(f"{'pooled':<7}" + "".join(cell(results["per_view"][v]["nmse"]) for v in views)
+          + f"{results['mean']:<12.4f}")
+
+    if any(f["n_views"] < n_views for f in results["per_fold"]):
+        print(
+            "\nSome folds observed no entries for a view (n/a above). Their "
+            "aggregates cover fewer views and are not comparable to each other."
+        )
+    print(f"\nAggregate NMSE (pooled over folds): {results['mean']:.4f}")
+    print(f"Per-fold spread (diagnostic, not an error bar on the above): ±{results['std']:.4f}")
 
 
 def _optimize(args):
