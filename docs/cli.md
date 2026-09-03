@@ -36,6 +36,27 @@ mosa train --config configs/my_experiment.yaml [--debug]
 
 See [Configuration Reference](configuration.md) for all config options.
 
+## transform
+
+Project new data through a trained MOSA checkpoint and write latent embeddings, with optional reconstructions.
+
+```bash
+mosa transform \
+  --checkpoint outputs/my_run/lightning_logs/version_0/checkpoints/epoch=499-step=26000.ckpt \
+  --input data/new_dataset.h5mu \
+  --output outputs/new_dataset_inference \
+  --reconstruct
+```
+
+| Flag | Type | Required | Description |
+|---|---|---|---|
+| `--checkpoint` | path | yes | Trained Lightning checkpoint (`.ckpt`) |
+| `--input` | path | yes | New MuData file (`.h5mu` or `.zarr`) |
+| `--output` | path | yes | Directory where `latent.parquet` and optional `recon_<view>.parquet` files are written |
+| `--reconstruct` | flag | no | Also save per-view reconstructions |
+
+The command restores model config and preprocessing state from the checkpoint, then loads only the views that the model was trained with. Your new data must therefore use the same modality names, compatible feature definitions, and `model_type` labels seen during training.
+
 ## plot
 
 Generate diagnostic plots from a completed training run.
