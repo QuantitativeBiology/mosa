@@ -1,25 +1,24 @@
-# MOSA — Multi-Omic Synthetic Augmentation
+# MOSA: Multi-Omic Synthetic Augmentation
 
-MOSA is a conditional variational autoencoder for integrating multiple omic data sources into a shared latent space. It is part of the Generative Multi-Omics Data Integration Library.
+MOSA is a framework for integrating multiple omic data sources into a shared latent space.
 
-**Features:**
-- Per-view encoders and decoders with configurable MLP architectures
-- Two latent fusion methods: concatenation and Product of Experts (PoE)
-- Optional adversarial batch correction and contrastive learning
-- Tissue, batch, and mutation conditional inputs
-- Feature-level missing data handling
-- Macro (group-balanced) reconstruction loss
-- KL warmup scheduling
+The tool provides a purpose-built conditional variational autoencoder (the MOSA VAE). The VAE supports per-view encoders and decoders with configurable MLP architectures. It provides two latent fusion methods: concatenation and Product of Experts (PoE). You can enable adversarial batch correction and contrastive learning, as well as condition the model on tissue, batch, and mutation inputs. It handles feature-level missing data and applies a macro (group-balanced) reconstruction loss alongside KL warmup scheduling.
+
+Beyond the built-in VAE, MOSA is extensible. You can register custom models to use the same data ingestion, k-fold cross-validation, and Optuna hyperparameter search pipelines.
 
 ## Quick start
 
+Install the tool and run the core pipeline:
+
 ```bash
-pip install -e .
-mosa train --config configs/example.yaml
-mosa plot --config configs/example.yaml
+pip install -e ".[dev]"
+
+mosa inspect  --input <data>.h5mu
+mosa validate --config <your-config>.yaml
+mosa train    --config <your-config>.yaml
+mosa plot     --config <your-config>.yaml
 ```
 
 ## Documentation
 
-- [Getting Started](docs/getting-started.md) — installation, data preparation, running your first experiment
-- [Full documentation index](docs/index.md) — all guides and references
+The [Getting started](docs/manual/01-getting-started.md) guide covers installation and your first run. The [Documentation index](docs/index.md) contains details on data preparation, configuration, and the command-line interface.
