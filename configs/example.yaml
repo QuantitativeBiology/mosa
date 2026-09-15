@@ -65,6 +65,9 @@ model:
     #   loss_type: mean
     #   dropout_p: 0.1
 
+  # Data processing: standardize (z-score) | center (mean by group)| none
+  preprocessing_mode: none
+
   # KL term: optional linear warmup from kl_weight to kl_weight_final over kl_warmup_epochs.
   kl_weight: 0.01
   kl_weight_final: 0.01
@@ -76,9 +79,11 @@ model:
 
   # Adversarial term: adv_weight > 0 enables the discriminator and uses adv_learning_rate.
   adv_weight: 0.0
-  adv_learning_rate: 0.001
+  adv_focal_gamma: 1.5
+  use_adv_class_weights: true    # use class weights in adversarial cross-entropy loss
 
   # Optimiser
+  adv_learning_rate: 0.001
   learning_rate: 0.001
   lr_scheduler: none      # none or step
   lr_step_size: 100       # epochs between StepLR decay steps
@@ -87,8 +92,8 @@ model:
   # Training loop
   num_epochs: 200
   batch_size: 64
+  weighted_random_sampler: false   # use WeightedRandomSampler to balance model_type in training
   scaler_sample_frac: 1.0       # fraction of training data used to fit StandardScaler
-  use_adv_class_weights: true    # use class weights in adversarial cross-entropy loss
 
   # Corrected inference: forces all samples to target_batch if inference=true.
   inference: false
