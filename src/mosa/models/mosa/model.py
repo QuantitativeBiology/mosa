@@ -13,6 +13,7 @@ from pytorch_lightning.strategies import DDPStrategy
 from mosa.models.api import MultiOmicModel
 from mosa.config import DataConfig
 from mosa.data.dataset import MultiOmicDataset
+from mosa.errors import UnsupportedError
 from mosa.models.mosa.config import MOSAConfig, OmicViewConfig
 from mosa.models.mosa.datamodule import MOSADataModule
 from mosa.models.mosa.vae.vae_module import VAE
@@ -271,6 +272,14 @@ class MOSAModel(MultiOmicModel):
         """
         checkpoint = torch.load(str(path), map_location="cpu", weights_only=False)
         hp = checkpoint["hyper_parameters"]
+        # Checkpoints from before the July 2026 config split store a single
+        # "config" dict that no longer maps onto DataConfig/MOSAConfig.
+        if "data_cfg" not in hp:
+            raise UnsupportedError(
+                f"Checkpoint {path} was written by an older MOSA version, "
+                "before the config was split into data and model sections, "
+                "and cannot be loaded. Retrain the model with the current version."
+            )
 
         data_cfg = DataConfig(**hp["data_cfg"])
 

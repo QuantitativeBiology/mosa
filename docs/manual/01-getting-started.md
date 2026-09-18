@@ -35,6 +35,17 @@ Confirm the installation worked by checking the help output:
 mosa --help
 ```
 
+### Updating
+
+Update before testing or reporting a bug. Reinstalling picks up any changed dependency versions:
+
+```bash
+git pull
+pip install -e ".[dev]"
+```
+
+Checkpoints are tied to the MOSA version that trained them. A checkpoint written by an older version may not load in a newer one, so use checkpoints trained with your current version.
+
 ### On a shared server
 
 Training over SSH only survives network disconnections if the process runs in the background. Start your training run inside a multiplexer like `tmux` or `screen`:

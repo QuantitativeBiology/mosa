@@ -88,6 +88,10 @@ The MOFA implementation cannot project samples it did not fit on, making k-fold 
 
 The `transform` command requires every view the model was originally trained on. Extra views in the new input are perfectly fine, but missing views are fatal.
 
+### `Checkpoint <path> was written by an older MOSA version, before the config was split into data and model sections, and cannot be loaded.`
+
+The checkpoint was trained with a MOSA version from before July 2026, which stored its configuration in a format the current version cannot read. Retrain the model with your current version, or use a checkpoint that was.
+
 ### `target_batch '<name>' not in model_type categories: [...]`
 
 The `model.target_batch` key must specify a category that your data actually contains.
@@ -115,5 +119,9 @@ The `plot` command reads the directory structure that a finished `train` run lea
 ### `optuna is required for optimize; install it with pip install '.[hpo]'`
 
 A base `pip install -e .` does not install optional dependencies. You must install the specific groups you need, as detailed in the [Getting started](01-getting-started.md) guide.
+
+### `AttributeError: module 'mudata' has no attribute 'set_options'`
+
+mudata 0.4 removed `set_options`, which MOSA uses. Your installation predates the version pin. Update and reinstall as described in [Getting started](01-getting-started.md#updating), which installs a compatible mudata.
 
 See also: [validate](04-commands/08-validate.md) · [Limitations](10-limitations.md)

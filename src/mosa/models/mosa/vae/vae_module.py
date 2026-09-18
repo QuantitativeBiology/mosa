@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 
+from mosa import __version__
 from mosa.config import DataConfig
 from mosa.models.mosa.config import MOSAConfig
 from mosa.models.mosa.vae.losses import (
@@ -78,6 +79,7 @@ class VAE(pl.LightningModule):
             "view_input_dims": view_input_dims,
             "conditional_dim": conditional_dim,
             "n_batches": n_batches,
+            "mosa_version": __version__,
         }
         if data_cfg is not None:
             hp["data_cfg"] = dataclasses.asdict(data_cfg)
