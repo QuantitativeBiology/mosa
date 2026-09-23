@@ -46,6 +46,32 @@ def test_cross_validate_returns_per_fold_and_summary(
     assert not written, f"cross_validate wrote unexpected files: {written}"
 
 
+def test_cross_validate_reports_epoch_history_and_reconstructions(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
+    dataset = make_multi_omic_dataset(n_samples=30, n_groups=2)
+    data_cfg, model_cfg = make_mosa_config(
+        dataset, num_epochs=2, output_dir=str(tmp_path)
+    )
+
+    results = cross_validate(
+        dataset, data_cfg, model_cfg, EvaluationConfig(n_folds=3)
+    )
+
+    for fold in results["per_fold"]:
+        history = fold["epoch_history"]
+        assert len(history) > 0
+        for entry in history:
+            assert "epoch" in entry and "train_loss" in entry and "val_loss" in entry
+
+    assert set(results["reconstructions"]) == set(dataset.view_names)
+    for view, recon in results["reconstructions"].items():
+        assert recon.shape == dataset.views[view].shape
+        # Every fold contributes disjoint rows, so the whole dataset ends up
+        # covered (no leftover NaN placeholders from the preallocation).
+        assert not np.isnan(recon).any()
+
+
 def test_cross_validate_too_many_folds_raises(make_multi_omic_dataset, make_mosa_config, tmp_path):
     dataset = make_multi_omic_dataset(n_samples=10, n_groups=2)
     data_cfg, model_cfg = make_mosa_config(dataset, output_dir=str(tmp_path))

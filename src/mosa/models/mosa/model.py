@@ -23,6 +23,32 @@ from mosa.utils import ensure_dir
 logger = logging.getLogger(__name__)
 
 
+class _EpochHistoryCallback(pl.Callback):
+    """Record per-epoch train/val loss so callers can plot learning curves.
+
+    Reads from `trainer.callback_metrics` in `on_train_epoch_end`, not
+    `on_validation_epoch_end`: the validation loop runs nested inside the
+    training epoch, but the epoch's `train/loss` (on_epoch=True) isn't
+    reduced into callback_metrics until the training epoch itself finishes,
+    which is after validation. Reading at on_validation_epoch_end would pick
+    up a stale train/loss left over from the previous epoch.
+    """
+
+    def __init__(self):
+        self.history: list[dict] = []
+
+    def on_train_epoch_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+        if not trainer.is_global_zero:
+            return
+        metrics = trainer.callback_metrics
+        entry = {"epoch": trainer.current_epoch}
+        if "train/loss" in metrics:
+            entry["train_loss"] = float(metrics["train/loss"])
+        if "val/loss" in metrics:
+            entry["val_loss"] = float(metrics["val/loss"])
+        self.history.append(entry)
+
+
 class _LoggingModelCheckpoint(ModelCheckpoint):
     """ModelCheckpoint that logs a line each time a checkpoint is written."""
 
@@ -53,6 +79,7 @@ class MOSAModel(MultiOmicModel):
         self._model: VAE | None = None
         self._datamodule: MOSADataModule | None = None
         self._trainer: pl.Trainer | None = None
+        self.epoch_history: list[dict] = []
 
     def fit(
         self,
@@ -87,7 +114,9 @@ class MOSAModel(MultiOmicModel):
         mc = self.model_cfg
         has_val = val is not None
         callbacks = []
+        history_cb = _EpochHistoryCallback() if has_val else None
         if has_val:
+            callbacks.append(history_cb)
             callbacks.append(
                 EarlyStopping(
                     monitor="val/loss",
@@ -129,6 +158,7 @@ class MOSAModel(MultiOmicModel):
 
         self._trainer = pl.Trainer(**trainer_kwargs)
         self._trainer.fit(self._model, self._datamodule, ckpt_path=str(resume_from) if resume_from else None)
+        self.epoch_history = history_cb.history if history_cb is not None else []
 
     def save_outputs(self, output_dir: str | Path | None = None) -> None:
         """Save latent representations and reconstructions for all splits."""

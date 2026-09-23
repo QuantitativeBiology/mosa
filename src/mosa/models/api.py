@@ -21,6 +21,12 @@ class MultiOmicModel(ABC):
     False for transductive models, which cross_validate() rejects before
     training anything."""
 
+    epoch_history: list[dict] = []
+    """Per-epoch training curve, populated by fit() where available: one dict
+    per epoch with at least 'epoch', and 'train_loss'/'val_loss' when a val
+    split was given. Empty for models with no per-epoch training loop (e.g.
+    MOFA) or when fit() was called without validation data."""
+
     @abstractmethod
     def fit(
         self,

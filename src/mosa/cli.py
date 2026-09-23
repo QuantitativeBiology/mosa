@@ -171,6 +171,35 @@ def _eval_cfg_from_args(cfg, args):
     return dataclasses.replace(cfg.evaluation, **overrides)
 
 
+def _save_cv_outputs(results, dataset, output_dir):
+    """Write per-fold-per-epoch train/val loss and out-of-sample reconstructions.
+
+    history.csv has one row per (fold, epoch) with train_loss/val_loss, so it
+    can be grouped by epoch and averaged across folds to plot learning
+    curves. recon_<view>.parquet holds the out-of-sample reconstruction for
+    every sample (see cross_validate's docstring), aligned to dataset order,
+    ready to compare against the original data.
+    """
+    import pandas as pd
+
+    from mosa.utils import ensure_dir
+
+    output_dir = ensure_dir(output_dir)
+
+    history_rows = [
+        {"fold": fold_idx, **epoch_entry}
+        for fold_idx, fold in enumerate(results["per_fold"])
+        for epoch_entry in fold["epoch_history"]
+    ]
+    if history_rows:
+        pd.DataFrame(history_rows).to_csv(output_dir / "history.csv", index=False)
+
+    for view, recon in results["reconstructions"].items():
+        cols = dataset.feature_names.get(view)
+        df = pd.DataFrame(recon, index=dataset.sample_names, columns=cols)
+        df.to_parquet(output_dir / f"recon_{view}.parquet")
+
+
 def _cross_validate(args):
     """Load config and data, run k-fold cross-validation, and print scores."""
     import torch
@@ -184,6 +213,10 @@ def _cross_validate(args):
     seed_everything(cfg.model.random_seed)
     eval_cfg = _eval_cfg_from_args(cfg, args)
     results = cross_validate(dataset, cfg.data, cfg.model, eval_cfg)
+
+    if getattr(cfg.model, "output_dir", None):
+        _save_cv_outputs(results, dataset, cfg.model.output_dir)
+        print(f"Per-epoch history and out-of-sample reconstructions written to {cfg.model.output_dir}\n")
 
     views = list(results["per_view"].keys())
     n_views = len(views)

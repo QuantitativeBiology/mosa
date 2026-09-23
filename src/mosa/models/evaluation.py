@@ -15,16 +15,16 @@ from mosa.models.registry import build_model, model_class_for
 logger = logging.getLogger(__name__)
 
 
-def _score_fold(model, val: MultiOmicDataset) -> dict:
+def _score_fold(recon: dict[str, np.ndarray], val: MultiOmicDataset) -> dict:
     """Squared-error total and observed-entry count per view on a held-out fold.
 
-    Uses only the ABC's reconstruct(), so this works for any model implementing
-    the interface. Returns raw sums rather than a finished error: normalizing
-    inside the fold would make each fold's score depend on which views that
-    fold happened to observe. cross_validate pools these across folds first.
+    Takes the fold's reconstruction (already computed once by the caller, so
+    it can also be reused to assemble out-of-sample reconstructions) rather
+    than calling model.reconstruct() itself. Returns raw sums rather than a
+    finished error: normalizing inside the fold would make each fold's score
+    depend on which views that fold happened to observe. cross_validate pools
+    these across folds first.
     """
-    recon = model.reconstruct(val)
-
     per_view = {}
     for view in val.view_names:
         mask = val.masks[view]
@@ -112,6 +112,21 @@ def cross_validate(
     diagnostics only; a fold that observes no entries for a view covers fewer
     views than its neighbours, so "std" is a spread indicator rather than an
     uncertainty on "mean".
+
+    Each per_fold entry also carries "epoch_history": one dict per training
+    epoch with "epoch", "train_loss", and "val_loss" (val/loss is the same
+    metric EarlyStopping monitors for that fold), so callers can average
+    curves across folds and plot train vs. val loss per epoch. History is
+    empty for a fold whose model has no per-epoch training loop.
+
+    The top-level "reconstructions" dict holds one out-of-sample
+    reconstruction array per view, aligned to `dataset`'s original sample
+    order: since folds partition the data, concatenating each fold's
+    held-out reconstruction covers every sample exactly once, ready to
+    compare directly against `dataset.views[view]` (e.g. MSE, Pearson r)
+    without any extra bookkeeping. Entries for samples missing from a view
+    (per dataset.masks) reconstruct to whatever the model predicts there and
+    should be filtered with dataset.masks[view] before comparing.
     """
     eval_cfg = eval_cfg or EvaluationConfig()
 
@@ -128,7 +143,16 @@ def cross_validate(
 
     splitter = _build_splitter(eval_cfg, getattr(model_cfg, "random_seed", 42))
 
+    # Out-of-sample reconstruction per view, assembled fold by fold. Folds
+    # partition the dataset, so once every fold has run this covers every
+    # sample exactly once, each reconstructed by a model that never trained
+    # on it -- ready to compare against dataset.views directly (MSE, Pearson).
+    reconstructions = {
+        v: np.full_like(dataset.views[v], np.nan) for v in dataset.view_names
+    }
+
     fold_totals = []
+    fold_histories = []
     for fold_idx, (train_idx, val_idx) in enumerate(
         splitter.split(np.arange(dataset.n_samples), labels)
     ):
@@ -143,7 +167,12 @@ def cross_validate(
 
             model = build_model(data_cfg, fold_model_cfg)
             model.fit(train, val)
-            totals = _score_fold(model, val)
+            recon = model.reconstruct(val)
+            totals = _score_fold(recon, val)
+            fold_histories.append(list(model.epoch_history))
+
+        for view, values in recon.items():
+            reconstructions[view][val_idx] = values
 
         unobserved = [v for v in dataset.view_names if totals[v]["n_obs"] == 0]
         if unobserved:
@@ -191,6 +220,7 @@ def cross_validate(
             "per_view": per_view,
             "aggregate": float(np.mean([per_view[v]["nmse"] for v in covered])),
             "n_views": len(covered),
+            "epoch_history": fold_histories[fold_idx],
         })
         logger.debug(
             "Fold %d: aggregate=%.4f over %d/%d views",
@@ -202,4 +232,5 @@ def cross_validate(
         "per_view": pooled,
         "mean": aggregate,
         "std": float(np.std([f["aggregate"] for f in per_fold])),
+        "reconstructions": reconstructions,
     }
