@@ -40,8 +40,13 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Install
+        # PyPI's Linux torch wheel pulls ~3 GB of CUDA libraries, which fills
+        # the runner disk. Install the CPU build at the pinned version first so
+        # the editable install sees torch as already satisfied.
         run: |
           python -m pip install --upgrade pip
+          TORCH=$(python -c 'import tomllib; print(next(r for r in tomllib.load(open("pyproject.toml","rb"))["project"]["dependencies"] if r.startswith("torch==")))')
+          pip install "$TORCH" --index-url https://download.pytorch.org/whl/cpu
           pip install -e ".[dev,lint,mofa]"
 
       - name: Lint
@@ -82,6 +87,8 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
+          TORCH=$(python -c 'import tomllib; print(next(r for r in tomllib.load(open("pyproject.toml","rb"))["project"]["dependencies"] if r.startswith("torch==")))')
+          pip install "$TORCH" --index-url https://download.pytorch.org/whl/cpu
           pip install -e ".[dev,mofa]"
       - name: Tests
         run: pytest -q
