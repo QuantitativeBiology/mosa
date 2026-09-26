@@ -8,7 +8,7 @@ case here still failed, just unreadably.
 
 from __future__ import annotations
 
-import builtins
+import sys
 
 import pytest
 
@@ -61,9 +61,7 @@ def assert_guided_failure(capsys, argv, expected):
 
 def test_missing_data_path(tmp_path, capsys):
     cfg = _config(tmp_path, "does/not/exist.h5mu")
-    assert_guided_failure(
-        capsys, ["train", "--config", cfg], "data.path not found"
-    )
+    assert_guided_failure(capsys, ["train", "--config", cfg], "data.path not found")
 
 
 def test_malformed_yaml(tmp_path, capsys):
@@ -94,9 +92,7 @@ def test_typo_in_per_view_key_names_the_view(tmp_path, capsys, make_h5mu_file):
         "    view_b:\n      hidden_layer_dims: [16, 8]\n      dropout: 0.5\n",
     )
     cfg = _config(tmp_path, h5mu, model=model)
-    assert_guided_failure(
-        capsys, ["validate", "--config", cfg], "model.views.view_b"
-    )
+    assert_guided_failure(capsys, ["validate", "--config", cfg], "model.views.view_b")
 
 
 def test_view_name_key_is_rejected_not_crashed(tmp_path, capsys, make_h5mu_file):
@@ -109,7 +105,9 @@ def test_view_name_key_is_rejected_not_crashed(tmp_path, capsys, make_h5mu_file)
     )
     cfg = _config(tmp_path, h5mu, model=model)
     assert_guided_failure(
-        capsys, ["validate", "--config", cfg], "Unknown key 'name' in model.views.view_a"
+        capsys,
+        ["validate", "--config", cfg],
+        "Unknown key 'name' in model.views.view_a",
     )
 
 
@@ -154,9 +152,12 @@ def test_transform_missing_checkpoint(tmp_path, capsys):
         capsys,
         [
             "transform",
-            "--checkpoint", str(tmp_path / "nope.ckpt"),
-            "--input", str(tmp_path / "in.h5mu"),
-            "--output", str(tmp_path / "out"),
+            "--checkpoint",
+            str(tmp_path / "nope.ckpt"),
+            "--input",
+            str(tmp_path / "in.h5mu"),
+            "--output",
+            str(tmp_path / "out"),
         ],
         "Checkpoint not found",
     )
@@ -173,9 +174,12 @@ def test_convert_bad_view_spec(tmp_path, capsys):
         capsys,
         [
             "convert",
-            "--conditionals", str(tmp_path / "c.csv"),
-            "--view", "no_colon_here",
-            "--output", str(tmp_path / "o.h5mu"),
+            "--conditionals",
+            str(tmp_path / "c.csv"),
+            "--view",
+            "no_colon_here",
+            "--output",
+            str(tmp_path / "o.h5mu"),
         ],
         "Invalid --view format",
     )
@@ -186,20 +190,26 @@ def test_convert_bad_filter_spec(tmp_path, capsys):
         capsys,
         [
             "convert",
-            "--conditionals", str(tmp_path / "c.csv"),
-            "--view", "view_a:a.csv",
-            "--filter", "no_equals_sign",
-            "--output", str(tmp_path / "o.h5mu"),
+            "--conditionals",
+            str(tmp_path / "c.csv"),
+            "--view",
+            "view_a:a.csv",
+            "--filter",
+            "no_equals_sign",
+            "--output",
+            str(tmp_path / "o.h5mu"),
         ],
         "Invalid --filter format",
     )
 
 
 def test_optimize_bad_search_space(tmp_path, capsys, make_h5mu_file):
-    pytest.importorskip("optuna")
     h5mu = make_h5mu_file(tmp_path)
     cfg = _config(tmp_path, h5mu)
-    space = _write(tmp_path / "space.yaml", "learning_rate:\n  dist: gaussian\n  low: 1\n  high: 2\n")
+    space = _write(
+        tmp_path / "space.yaml",
+        "learning_rate:\n  dist: gaussian\n  low: 1\n  high: 2\n",
+    )
     assert_guided_failure(
         capsys,
         ["optimize", "--config", cfg, "--search-space", space],
@@ -208,7 +218,6 @@ def test_optimize_bad_search_space(tmp_path, capsys, make_h5mu_file):
 
 
 def test_plot_without_training_artifacts(tmp_path, capsys, make_h5mu_file):
-    pytest.importorskip("umap")
     h5mu = make_h5mu_file(tmp_path)
     out_dir = tmp_path / "empty_run"
     out_dir.mkdir()
@@ -220,26 +229,21 @@ def test_plot_without_training_artifacts(tmp_path, capsys, make_h5mu_file):
     )
 
 
-def test_plot_missing_extra_names_the_install(tmp_path, capsys, monkeypatch, make_h5mu_file):
-    """Simulated rather than ambient, so this holds whether or not .[plot] is installed."""
-    real_import = builtins.__import__
-
-    def fail_on_plot_deps(name, *args, **kwargs):
-        if name in ("umap", "seaborn", "matplotlib"):
-            raise ImportError(f"No module named {name!r}")
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.delitem(__import__("sys").modules, "mosa.plot", raising=False)
-    monkeypatch.setattr(builtins, "__import__", fail_on_plot_deps)
+def test_mofa_missing_extra_names_the_install(
+    tmp_path, capsys, monkeypatch, make_h5mu_file
+):
+    """Simulated rather than ambient, so this holds whether or not .[mofa] is installed."""
+    # A None entry in sys.modules makes find_spec report the module as absent.
+    monkeypatch.setitem(sys.modules, "mofapy2", None)
 
     h5mu = make_h5mu_file(tmp_path)
-    cfg = _config(tmp_path, h5mu)
-    assert_guided_failure(
-        capsys, ["plot", "--config", cfg], "pip install '.[plot]'"
-    )
+    cfg = _config(tmp_path, h5mu, model="model:\n  type: mofa\n")
+    assert_guided_failure(capsys, ["train", "--config", cfg], "pip install '.[mofa]'")
 
 
-def test_cross_validate_rejects_model_without_out_of_sample(tmp_path, capsys, make_h5mu_file):
+def test_cross_validate_rejects_model_without_out_of_sample(
+    tmp_path, capsys, make_h5mu_file
+):
     pytest.importorskip("mofapy2")
     h5mu = make_h5mu_file(tmp_path)
     cfg = _config(tmp_path, h5mu, model="model:\n  type: mofa\n")

@@ -8,12 +8,12 @@ import pytest
 
 from mosa.config import DataConfig
 from mosa.data.dataset import MultiOmicDataset
-from mosa.data.io import load_mudata, _dearrow_mudata
+from mosa.data.io import _dearrow_mudata, load_mudata
 from mosa.models.mosa.config import MOSAConfig, OmicViewConfig
 from mosa.models.mosa.datamodule import MOSADataModule
 
-
 # Helpers
+
 
 def _make_obs_df(n_samples: int, rng: np.random.RandomState) -> pd.DataFrame:
     index = [f"sample_{i:03d}" for i in range(n_samples)]
@@ -32,16 +32,14 @@ def _create_test_h5mu(path: Path, n_samples: int, view_specs: dict[str, int]) ->
     adatas = {}
     for view_name, n_features in view_specs.items():
         X = rng.randn(n_samples, n_features).astype(np.float32)
-        mask = np.ones((n_samples, n_features), dtype=bool)
+        mask: np.ndarray = np.ones((n_samples, n_features), dtype=bool)
         flat = mask.ravel()
         n_false = max(1, int(len(flat) * 0.2))
         false_idx = rng.choice(len(flat), size=n_false, replace=False)
         flat[false_idx] = False
         mask = flat.reshape(n_samples, n_features)
         obs = pd.DataFrame(index=[f"sample_{i:03d}" for i in range(n_samples)])
-        var = pd.DataFrame(
-            index=[f"{view_name}_feat_{j}" for j in range(n_features)]
-        )
+        var = pd.DataFrame(index=[f"{view_name}_feat_{j}" for j in range(n_features)])
         adata = anndata.AnnData(X=X, obs=obs, var=var)
         adata.layers["mask"] = mask
         adatas[view_name] = adata
@@ -65,16 +63,14 @@ def _create_test_zarr(path: Path, n_samples: int, view_specs: dict[str, int]) ->
     adatas = {}
     for view_name, n_features in view_specs.items():
         X = rng.randn(n_samples, n_features).astype(np.float32)
-        mask = np.ones((n_samples, n_features), dtype=bool)
+        mask: np.ndarray = np.ones((n_samples, n_features), dtype=bool)
         flat = mask.ravel()
         n_false = max(1, int(len(flat) * 0.2))
         false_idx = rng.choice(len(flat), size=n_false, replace=False)
         flat[false_idx] = False
         mask = flat.reshape(n_samples, n_features)
         obs = pd.DataFrame(index=[f"sample_{i:03d}" for i in range(n_samples)])
-        var = pd.DataFrame(
-            index=[f"{view_name}_feat_{j}" for j in range(n_features)]
-        )
+        var = pd.DataFrame(index=[f"{view_name}_feat_{j}" for j in range(n_features)])
         adata = anndata.AnnData(X=X, obs=obs, var=var)
         adata.layers["mask"] = mask
         adatas[view_name] = adata
@@ -128,7 +124,7 @@ def _make_dataset(
         name: rng.randn(n_samples, n_features).astype(np.float32)
         for name, n_features in view_specs.items()
     }
-    masks = {
+    masks: dict[str, np.ndarray] = {
         name: np.ones((n_samples, n_features), dtype=bool)
         for name, n_features in view_specs.items()
     }
@@ -142,14 +138,19 @@ def _make_dataset(
     metadata = pd.DataFrame(
         {
             "model_type": model_types,
-            "tissue": ["tissue_0" if i % 2 == 0 else "tissue_1" for i in range(n_samples)],
+            "tissue": [
+                "tissue_0" if i % 2 == 0 else "tissue_1" for i in range(n_samples)
+            ],
         },
         index=index,
     )
-    return MultiOmicDataset(views=views, masks=masks, metadata=metadata, feature_names=feature_names)
+    return MultiOmicDataset(
+        views=views, masks=masks, metadata=metadata, feature_names=feature_names
+    )
 
 
 # Tests for load_mudata() — h5mu
+
 
 def test_load_h5mu_basic(tmp_path):
     view_specs = {"view_a": 20, "view_b": 15}
@@ -279,12 +280,18 @@ def test_load_h5mu_aligned_values_land_on_right_sample(tmp_path):
 
     anndata.settings.allow_write_nullable_strings = True
     samples = [f"s_{i}" for i in range(6)]
-    Xa = np.arange(6 * 4, dtype=np.float32).reshape(6, 4)      # row i encodes i
+    Xa = np.arange(6 * 4, dtype=np.float32).reshape(6, 4)  # row i encodes i
     Xb = np.arange(6 * 3, dtype=np.float32).reshape(6, 3) + 100.0
-    a = anndata.AnnData(X=Xa, var=pd.DataFrame(index=pd.Index([f"a{j}" for j in range(4)], dtype=object)))
+    a = anndata.AnnData(
+        X=Xa,
+        var=pd.DataFrame(index=pd.Index([f"a{j}" for j in range(4)], dtype=object)),
+    )
     a.obs_names = pd.Index(samples, dtype=object)
     a.layers["mask"] = np.ones((6, 4), dtype=bool)
-    b = anndata.AnnData(X=Xb, var=pd.DataFrame(index=pd.Index([f"b{j}" for j in range(3)], dtype=object)))
+    b = anndata.AnnData(
+        X=Xb,
+        var=pd.DataFrame(index=pd.Index([f"b{j}" for j in range(3)], dtype=object)),
+    )
     b.obs_names = pd.Index(samples, dtype=object)
     b.layers["mask"] = np.ones((6, 3), dtype=bool)
     mdata = mudata.MuData({"a": a, "b": b})
@@ -346,6 +353,7 @@ def test_load_h5mu_sparse_data(tmp_path):
 
 # Tests for load_mudata() — zarr
 
+
 def test_load_zarr_basic(tmp_path):
     view_specs = {"view_a": 20, "view_b": 15}
     p = _create_test_zarr(tmp_path / "test.zarr", 20, view_specs)
@@ -378,6 +386,7 @@ def test_load_zarr_matches_h5mu(tmp_path):
 
 # Tests for MultiOmicDataset.validate()
 
+
 def test_validate_passes():
     dataset = _make_dataset(10, {"view_a": 5})
     dataset.validate()
@@ -407,6 +416,7 @@ def test_validate_missing_model_type():
 
 # Tests for MultiOmicDataset.subset()
 
+
 def test_subset_correct_size():
     dataset = _make_dataset(10, {"view_a": 5, "view_b": 3})
     sub = dataset.subset(np.array([0, 2, 4]))
@@ -429,6 +439,7 @@ def test_subset_metadata_matches():
 
 # Tests for MOSADataModule
 
+
 def _make_datamodule(
     train_data: MultiOmicDataset,
     val_data: MultiOmicDataset,
@@ -438,11 +449,17 @@ def _make_datamodule(
     preprocessing_mode: str = "standardize",
 ) -> MOSADataModule:
     data_cfg, model_cfg = _make_configs(
-        view_specs, train_data.n_samples, tmp_path, discrete_views, preprocessing_mode,
+        view_specs,
+        train_data.n_samples,
+        tmp_path,
+        discrete_views,
+        preprocessing_mode,
     )
     return MOSADataModule(
-        train_data=train_data, val_data=val_data,
-        data_cfg=data_cfg, model_cfg=model_cfg,
+        train_data=train_data,
+        val_data=val_data,
+        data_cfg=data_cfg,
+        model_cfg=model_cfg,
     )
 
 
@@ -482,7 +499,9 @@ def test_datamodule_inverse_transform_view_standardize_roundtrip(tmp_path):
     train_data = _make_dataset(n, view_specs)
     raw_X = train_data.views["view_a"].copy()
 
-    dm = _make_datamodule(train_data, None, tmp_path, view_specs, preprocessing_mode="standardize")
+    dm = _make_datamodule(
+        train_data, None, tmp_path, view_specs, preprocessing_mode="standardize"
+    )
     dm.setup()
 
     transformed = dm.train_dataset.omics["view_a"].numpy()
@@ -508,7 +527,9 @@ def test_datamodule_preprocessing_mode_center_roundtrip(tmp_path):
     assert abs(raw_X[:n_a].mean() - 5.0) < 1.0
     assert abs(raw_X[n_a:].mean() + 5.0) < 1.0
 
-    dm = _make_datamodule(train_data, None, tmp_path, view_specs, preprocessing_mode="center")
+    dm = _make_datamodule(
+        train_data, None, tmp_path, view_specs, preprocessing_mode="center"
+    )
     dm.setup()
 
     # Each group's centered values should be near zero mean.
@@ -540,7 +561,9 @@ def test_datamodule_preprocessing_mode_none_imputes_group_mean(tmp_path):
     train_data.views["view_a"] = X
     train_data.masks["view_a"] = mask
 
-    dm = _make_datamodule(train_data, None, tmp_path, view_specs, preprocessing_mode="none")
+    dm = _make_datamodule(
+        train_data, None, tmp_path, view_specs, preprocessing_mode="none"
+    )
     dm.setup()
 
     filled = dm.train_dataset.omics["view_a"].numpy()
@@ -581,7 +604,9 @@ def test_datamodule_discrete_view_no_scaling(tmp_path):
     train_data = _make_dataset(n, view_specs)
     val_data = _make_dataset(10, view_specs, seed=99)
 
-    dm = _make_datamodule(train_data, val_data, tmp_path, view_specs, discrete_views={"view_a"})
+    dm = _make_datamodule(
+        train_data, val_data, tmp_path, view_specs, discrete_views={"view_a"}
+    )
     dm.setup()
 
     assert dm.scalers["view_a"] is None
@@ -596,12 +621,16 @@ def test_datamodule_class_weights(tmp_path):
     train_data = _make_dataset(n_total, view_specs, model_types=model_types)
 
     data_cfg, model_cfg = _make_configs(view_specs, n_total, tmp_path)
-    dm = MOSADataModule(train_data=train_data, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg)
+    dm = MOSADataModule(
+        train_data=train_data, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg
+    )
     dm.setup()
 
     # sorted categories: TypeA=0, TypeB=1
     weights = dm.class_weights
-    assert weights[1] > weights[0], f"TypeB weight {weights[1]} should exceed TypeA weight {weights[0]}"
+    assert weights[1] > weights[0], (
+        f"TypeB weight {weights[1]} should exceed TypeA weight {weights[0]}"
+    )
 
 
 def test_datamodule_batch_categories(tmp_path):
@@ -611,7 +640,9 @@ def test_datamodule_batch_categories(tmp_path):
     train_data = _make_dataset(n, view_specs, model_types=model_types)
 
     data_cfg, model_cfg = _make_configs(view_specs, n, tmp_path)
-    dm = MOSADataModule(train_data=train_data, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg)
+    dm = MOSADataModule(
+        train_data=train_data, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg
+    )
     dm.setup()
 
     expected = sorted(set(model_types))
@@ -630,7 +661,9 @@ def test_datamodule_mutation_columns_reindexed_on_inference(tmp_path):
     train_data.metadata["mutation_KRAS"] = [0, 1, 0, 1]
 
     data_cfg, model_cfg = _make_configs(view_specs, n, tmp_path)
-    dm = MOSADataModule(train_data=train_data, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg)
+    dm = MOSADataModule(
+        train_data=train_data, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg
+    )
     dm.setup()
 
     assert dm.mutation_columns == ["mutation_TP53", "mutation_KRAS"]
@@ -649,7 +682,7 @@ def test_datamodule_mutation_columns_reindexed_on_inference(tmp_path):
     )
 
     result = dm._process_obs_readonly(infer_obs)
-    mutation_block = result["conditionals"][:, -len(dm.mutation_columns):]
+    mutation_block = result["conditionals"][:, -len(dm.mutation_columns) :]
 
     # Must follow the training-time order (TP53, KRAS); a naive re-derivation
     # from infer_obs's own column order would swap these two columns.
@@ -667,7 +700,9 @@ def test_datamodule_mutation_column_missing_at_inference_zero_filled(tmp_path):
     train_data.metadata["mutation_KRAS"] = [0, 1, 0, 1]
 
     data_cfg, model_cfg = _make_configs(view_specs, n, tmp_path)
-    dm = MOSADataModule(train_data=train_data, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg)
+    dm = MOSADataModule(
+        train_data=train_data, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg
+    )
     dm.setup()
 
     infer_obs = pd.DataFrame(
@@ -681,5 +716,5 @@ def test_datamodule_mutation_column_missing_at_inference_zero_filled(tmp_path):
     )
 
     result = dm._process_obs_readonly(infer_obs)
-    mutation_block = result["conditionals"][:, -len(dm.mutation_columns):]
+    mutation_block = result["conditionals"][:, -len(dm.mutation_columns) :]
     np.testing.assert_array_equal(mutation_block, np.array([[1, 0]], dtype=np.float32))

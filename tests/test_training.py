@@ -3,23 +3,26 @@ from __future__ import annotations
 import copy
 
 import numpy as np
-import pytorch_lightning as pl
 import pytest
+import pytorch_lightning as pl
 import torch
 
 from mosa.models.mosa.datamodule import MOSADataModule
 from mosa.models.mosa.vae.losses import adversarial_loss
 from mosa.models.mosa.vae.vae_module import VAE
 
-
 # Helpers
 
 
-def _make_vae_and_dm(make_multi_omic_dataset, make_mosa_config, tmp_path, **dataset_kwargs):
+def _make_vae_and_dm(
+    make_multi_omic_dataset, make_mosa_config, tmp_path, **dataset_kwargs
+):
     """Return a freshly constructed (VAE, MOSADataModule) pair after setup()."""
     dataset = make_multi_omic_dataset(**dataset_kwargs)
     data_cfg, model_cfg = make_mosa_config(dataset, output_dir=str(tmp_path))
-    dm = MOSADataModule(train_data=dataset, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg)
+    dm = MOSADataModule(
+        train_data=dataset, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg
+    )
     dm.setup()
     vae = VAE(
         config=model_cfg,
@@ -30,14 +33,18 @@ def _make_vae_and_dm(make_multi_omic_dataset, make_mosa_config, tmp_path, **data
     return vae, dm
 
 
-def _make_vae_and_dm_split(make_multi_omic_dataset, make_mosa_config, tmp_path, n_samples=20):
+def _make_vae_and_dm_split(
+    make_multi_omic_dataset, make_mosa_config, tmp_path, n_samples=20
+):
     """Return (VAE, MOSADataModule) with a train/val split."""
     dataset = make_multi_omic_dataset(n_samples=n_samples)
     indices = np.arange(n_samples)
     train = dataset.subset(indices[:16])
     val = dataset.subset(indices[16:])
     data_cfg, model_cfg = make_mosa_config(dataset, output_dir=str(tmp_path))
-    dm = MOSADataModule(train_data=train, val_data=val, data_cfg=data_cfg, model_cfg=model_cfg)
+    dm = MOSADataModule(
+        train_data=train, val_data=val, data_cfg=data_cfg, model_cfg=model_cfg
+    )
     dm.setup()
     vae = VAE(
         config=model_cfg,
@@ -78,15 +85,21 @@ def test_vae_fast_dev_run(make_multi_omic_dataset, make_mosa_config, tmp_path):
 
 
 def test_vae_fast_dev_run_with_val(make_multi_omic_dataset, make_mosa_config, tmp_path):
-    vae, dm = _make_vae_and_dm_split(make_multi_omic_dataset, make_mosa_config, tmp_path)
+    vae, dm = _make_vae_and_dm_split(
+        make_multi_omic_dataset, make_mosa_config, tmp_path
+    )
     trainer = _silent_trainer(fast_dev_run=True)
     trainer.fit(vae, dm)
 
 
 def test_vae_fast_dev_run_poe(make_multi_omic_dataset, make_mosa_config, tmp_path):
     dataset = make_multi_omic_dataset()
-    data_cfg, model_cfg = make_mosa_config(dataset, fusion_method="poe", output_dir=str(tmp_path))
-    dm = MOSADataModule(train_data=dataset, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg)
+    data_cfg, model_cfg = make_mosa_config(
+        dataset, fusion_method="poe", output_dir=str(tmp_path)
+    )
+    dm = MOSADataModule(
+        train_data=dataset, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg
+    )
     dm.setup()
     vae = VAE(
         config=model_cfg,
@@ -115,7 +128,9 @@ def test_vae_forward_no_nan(make_multi_omic_dataset, make_mosa_config, tmp_path)
         assert torch.isfinite(x_hat).all(), f"NaN/Inf in x_hat['{name}']"
 
 
-def test_vae_forward_no_nan_with_missing_data(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_vae_forward_no_nan_with_missing_data(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
     """Missing views (partial masks) must not produce NaN in any output."""
     vae, dm = _make_vae_and_dm(
         make_multi_omic_dataset, make_mosa_config, tmp_path, missing_frac=0.4
@@ -127,7 +142,9 @@ def test_vae_forward_no_nan_with_missing_data(make_multi_omic_dataset, make_mosa
     assert torch.isfinite(out["mu"]).all()
     assert torch.isfinite(out["z"]).all()
     for name, x_hat in out["x_hat"].items():
-        assert torch.isfinite(x_hat).all(), f"NaN/Inf in x_hat['{name}'] with missing data"
+        assert torch.isfinite(x_hat).all(), (
+            f"NaN/Inf in x_hat['{name}'] with missing data"
+        )
 
 
 # Missing-view zeroing: a fully-missing view's embedding must be force-zeroed
@@ -137,7 +154,9 @@ def test_vae_forward_no_nan_with_missing_data(make_multi_omic_dataset, make_mosa
 # for poe too.
 
 
-def test_missing_view_embedding_zeroed(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_missing_view_embedding_zeroed(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
     vae, dm = _make_vae_and_dm(make_multi_omic_dataset, make_mosa_config, tmp_path)
     vae.eval()
 
@@ -168,7 +187,9 @@ def test_missing_view_embedding_zeroed(make_multi_omic_dataset, make_mosa_config
 # smoke test instead.
 
 
-def test_vae_params_all_receive_gradients(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_vae_params_all_receive_gradients(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
     vae, dm = _make_vae_and_dm(make_multi_omic_dataset, make_mosa_config, tmp_path)
     vae.train()
 
@@ -199,7 +220,9 @@ def _make_adversarial_vae_and_dm(make_multi_omic_dataset, make_mosa_config, tmp_
     data_cfg, model_cfg = make_mosa_config(
         dataset, adv_weight=1.0, adv_learning_rate=1e-3, output_dir=str(tmp_path)
     )
-    dm = MOSADataModule(train_data=dataset, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg)
+    dm = MOSADataModule(
+        train_data=dataset, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg
+    )
     dm.setup()
     vae = VAE(
         config=model_cfg,
@@ -210,15 +233,23 @@ def _make_adversarial_vae_and_dm(make_multi_omic_dataset, make_mosa_config, tmp_
     return vae, dm
 
 
-def test_vae_fast_dev_run_adversarial(make_multi_omic_dataset, make_mosa_config, tmp_path):
-    vae, dm = _make_adversarial_vae_and_dm(make_multi_omic_dataset, make_mosa_config, tmp_path)
+def test_vae_fast_dev_run_adversarial(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
+    vae, dm = _make_adversarial_vae_and_dm(
+        make_multi_omic_dataset, make_mosa_config, tmp_path
+    )
     assert vae.discriminator is not None
     trainer = _silent_trainer(no_val=True, max_epochs=1, limit_train_batches=1)
     trainer.fit(vae, dm)
 
 
-def test_discriminator_params_receive_gradients(make_multi_omic_dataset, make_mosa_config, tmp_path):
-    vae, dm = _make_adversarial_vae_and_dm(make_multi_omic_dataset, make_mosa_config, tmp_path)
+def test_discriminator_params_receive_gradients(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
+    vae, dm = _make_adversarial_vae_and_dm(
+        make_multi_omic_dataset, make_mosa_config, tmp_path
+    )
     vae.train()
 
     batch = next(iter(dm.train_dataloader()))
@@ -237,20 +268,28 @@ def test_discriminator_params_receive_gradients(make_multi_omic_dataset, make_mo
     assert not no_grad, f"Discriminator parameters with no gradient: {no_grad}"
 
 
-def test_adversarial_z_detach_wiring(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_adversarial_z_detach_wiring(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
     """Guards the real training_step call sites (vae_module.py:245, 254): phase 1
     calls the discriminator on a detached z, phase 2 on a non-detached z. A hook
     on the discriminator captures both inputs during one real training step."""
-    vae, dm = _make_adversarial_vae_and_dm(make_multi_omic_dataset, make_mosa_config, tmp_path)
+    vae, dm = _make_adversarial_vae_and_dm(
+        make_multi_omic_dataset, make_mosa_config, tmp_path
+    )
     assert vae.discriminator is not None
 
     captured: list[torch.Tensor] = []
-    vae.discriminator.register_forward_pre_hook(lambda module, args: captured.append(args[0]))
+    vae.discriminator.register_forward_pre_hook(
+        lambda module, args: captured.append(args[0])
+    )
 
     trainer = _silent_trainer(no_val=True, max_epochs=1, limit_train_batches=1)
     trainer.fit(vae, dm)
 
-    assert len(captured) >= 2, f"Discriminator called {len(captured)} times, expected >= 2"
+    assert len(captured) >= 2, (
+        f"Discriminator called {len(captured)} times, expected >= 2"
+    )
     # Phase 1 (line 245): disc_pred = self.discriminator(out["z"].detach())
     assert captured[0].grad_fn is None and not captured[0].requires_grad, (
         "Phase-1 discriminator input is not detached from the VAE graph"
@@ -261,12 +300,16 @@ def test_adversarial_z_detach_wiring(make_multi_omic_dataset, make_mosa_config, 
     )
 
 
-def test_vae_fast_dev_run_contrastive(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_vae_fast_dev_run_contrastive(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
     dataset = make_multi_omic_dataset()
     data_cfg, model_cfg = make_mosa_config(
         dataset, contrastive_weight=1.0, output_dir=str(tmp_path)
     )
-    dm = MOSADataModule(train_data=dataset, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg)
+    dm = MOSADataModule(
+        train_data=dataset, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg
+    )
     dm.setup()
     vae = VAE(
         config=model_cfg,
@@ -299,13 +342,24 @@ class _LossTracker(pl.Callback):
             self.losses.append(float(metrics["train/recon"]))
 
 
-def test_vae_training_loop_reduces_loss(make_multi_omic_dataset, make_mosa_config, tmp_path):
-    """The optimizer loop reduces reconstruction loss over many steps on one batch."""
+@pytest.mark.behavioral
+def test_vae_training_loop_reduces_loss(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
+    """The optimizer loop reduces reconstruction loss over many steps on one batch.
+
+    The only test here that asserts the model learns rather than that an
+    interface holds. It is unseeded, so it is the one most likely to go
+    intermittently red on other hardware; the commit gate skips it and the
+    nightly job runs it.
+    """
     dataset = make_multi_omic_dataset(n_samples=8)
     data_cfg, model_cfg = make_mosa_config(
         dataset, num_epochs=50, batch_size=8, output_dir=str(tmp_path)
     )
-    dm = MOSADataModule(train_data=dataset, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg)
+    dm = MOSADataModule(
+        train_data=dataset, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg
+    )
     dm.setup()
     vae = VAE(
         config=model_cfg,

@@ -8,7 +8,6 @@ from mosa.models.mofa.config import MOFAConfig
 from mosa.models.mosa.config import MOSAConfig, OmicViewConfig
 from mosa.utils import load_config
 
-
 # DataConfig
 
 
@@ -228,7 +227,11 @@ def _mosa_payload(path="data/dataset.h5mu"):
             "batch_size": 16,
             "learning_rate": 1e-3,
             "views": {
-                "rna": {"hidden_layer_dims": [256, 128], "loss_type": "mean", "dropout_p": 0.1},
+                "rna": {
+                    "hidden_layer_dims": [256, 128],
+                    "loss_type": "mean",
+                    "dropout_p": 0.1,
+                },
             },
         },
     }
@@ -293,19 +296,25 @@ def test_load_config_missing_data_block(tmp_path):
 
 
 def test_load_config_missing_model_type(tmp_path):
-    yaml_path = _write_yaml(tmp_path / "c.yaml", {
-        "data": {"path": "x.h5mu", "views": ["rna"]},
-        "model": {"n_factors": 10},
-    })
+    yaml_path = _write_yaml(
+        tmp_path / "c.yaml",
+        {
+            "data": {"path": "x.h5mu", "views": ["rna"]},
+            "model": {"n_factors": 10},
+        },
+    )
     with pytest.raises(ValueError, match="model.type"):
         load_config(yaml_path)
 
 
 def test_load_config_unknown_model_type(tmp_path):
-    yaml_path = _write_yaml(tmp_path / "c.yaml", {
-        "data": {"path": "x.h5mu", "views": ["rna"]},
-        "model": {"type": "bogus"},
-    })
+    yaml_path = _write_yaml(
+        tmp_path / "c.yaml",
+        {
+            "data": {"path": "x.h5mu", "views": ["rna"]},
+            "model": {"type": "bogus"},
+        },
+    )
     with pytest.raises(ValueError, match="unknown model.type"):
         load_config(yaml_path)
 

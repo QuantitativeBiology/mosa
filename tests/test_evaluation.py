@@ -6,10 +6,9 @@ import numpy as np
 import pytest
 
 from mosa.config import DataConfig, EvaluationConfig, ModelConfig
-from mosa.data.dataset import MultiOmicDataset
+from mosa.models.api import MultiOmicModel
 from mosa.models.evaluation import cross_validate
 from mosa.models.registry import register_model
-from mosa.models.api import MultiOmicModel
 
 
 def _iter_files(root):
@@ -26,9 +25,7 @@ def test_cross_validate_returns_per_fold_and_summary(
         dataset, num_epochs=1, output_dir=str(tmp_path)
     )
 
-    results = cross_validate(
-        dataset, data_cfg, model_cfg, EvaluationConfig(n_folds=3)
-    )
+    results = cross_validate(dataset, data_cfg, model_cfg, EvaluationConfig(n_folds=3))
 
     assert len(results["per_fold"]) == 3
     for fold in results["per_fold"]:
@@ -54,9 +51,7 @@ def test_cross_validate_reports_epoch_history_and_reconstructions(
         dataset, num_epochs=2, output_dir=str(tmp_path)
     )
 
-    results = cross_validate(
-        dataset, data_cfg, model_cfg, EvaluationConfig(n_folds=3)
-    )
+    results = cross_validate(dataset, data_cfg, model_cfg, EvaluationConfig(n_folds=3))
 
     for fold in results["per_fold"]:
         history = fold["epoch_history"]
@@ -72,7 +67,9 @@ def test_cross_validate_reports_epoch_history_and_reconstructions(
         assert not np.isnan(recon).any()
 
 
-def test_cross_validate_too_many_folds_raises(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_cross_validate_too_many_folds_raises(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
     dataset = make_multi_omic_dataset(n_samples=10, n_groups=2)
     data_cfg, model_cfg = make_mosa_config(dataset, output_dir=str(tmp_path))
 
@@ -124,12 +121,19 @@ def test_unshuffled_folds_are_contiguous_blocks(make_multi_omic_dataset, strateg
     indices = np.arange(dataset.n_samples)
 
     eval_cfg = EvaluationConfig(n_folds=3, strategy=strategy, shuffle=False)
-    a = [v.tolist() for _, v in _build_splitter(eval_cfg, seed=1).split(indices, labels)]
-    b = [v.tolist() for _, v in _build_splitter(eval_cfg, seed=999).split(indices, labels)]
+    a = [
+        v.tolist() for _, v in _build_splitter(eval_cfg, seed=1).split(indices, labels)
+    ]
+    b = [
+        v.tolist()
+        for _, v in _build_splitter(eval_cfg, seed=999).split(indices, labels)
+    ]
     assert a == b
 
     shuffled = EvaluationConfig(n_folds=3, strategy=strategy, shuffle=True)
-    c = [v.tolist() for _, v in _build_splitter(shuffled, seed=1).split(indices, labels)]
+    c = [
+        v.tolist() for _, v in _build_splitter(shuffled, seed=1).split(indices, labels)
+    ]
     assert c != a
 
 
@@ -153,7 +157,9 @@ def test_aggregate_covers_every_view_when_a_fold_observes_none(
         dataset, num_epochs=1, output_dir=str(tmp_path)
     )
     results = cross_validate(
-        dataset, data_cfg, model_cfg,
+        dataset,
+        data_cfg,
+        model_cfg,
         EvaluationConfig(n_folds=3, strategy="kfold", shuffle=False),
     )
 

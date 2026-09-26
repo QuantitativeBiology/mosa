@@ -18,13 +18,15 @@ import pytest
 from mosa.data.dataset import MultiOmicDataset
 from mosa.data.io import csv_to_mudata, load_mudata
 
-
 # CSV-writing helpers
+
 
 def _write_view_csv(path, features, samples, nan_cells=None):
     """Write a features x samples view CSV (rows=features, cols=sample IDs)."""
     rng = np.random.RandomState(0)
-    df = pd.DataFrame(rng.randn(len(features), len(samples)), index=features, columns=samples)
+    df = pd.DataFrame(
+        rng.randn(len(features), len(samples)), index=features, columns=samples
+    )
     if nan_cells:
         for feat, sample in nan_cells:
             df.loc[feat, sample] = np.nan
@@ -46,6 +48,7 @@ def _write_mutations_csv(path, features, samples, values):
 
 
 # Group A: format-agnostic contract
+
 
 def test_output_structure(tmp_path):
     samples = [f"S{i:02d}" for i in range(6)]
@@ -70,6 +73,7 @@ def test_output_structure(tmp_path):
     )
 
     import mudata
+
     mdata = mudata.read(str(out_path))
 
     assert set(mdata.mod.keys()) == {"view_a", "view_b"}
@@ -91,7 +95,13 @@ def test_sample_alignment_and_ordering(tmp_path):
     features_a = ["gA_0", "gA_1"]
     features_b = ["gB_0"]
     view_a_samples = ["S00", "S01", "S02", "S03", "S04"]
-    view_b_samples = ["S01", "S02", "S03", "S04", "S05"]  # missing S00; extra S05 not in conditionals
+    view_b_samples = [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+    ]  # missing S00; extra S05 not in conditionals
 
     view_a_path = _write_view_csv(tmp_path / "view_a.csv", features_a, view_a_samples)
     view_b_path = _write_view_csv(tmp_path / "view_b.csv", features_b, view_b_samples)
@@ -104,6 +114,7 @@ def test_sample_alignment_and_ordering(tmp_path):
     )
 
     import mudata
+
     mdata = mudata.read(str(out_path))
 
     expected = ["S00", "S01", "S02", "S03", "S04"]  # sorted intersection; S05 excluded
@@ -134,6 +145,7 @@ def test_nan_kept_not_imputed(tmp_path):
     csv_to_mudata(str(cond_path), [("view_a", str(view_path))], str(out_path))
 
     import mudata
+
     mdata = mudata.read(str(out_path))
     adata = mdata.mod["view_a"]
 
@@ -156,17 +168,22 @@ def test_mutations_reindexed_with_zero_fill(tmp_path):
 
     mut_samples = ["S00", "S01", "S02"]  # missing S03, S04
     mut_path = _write_mutations_csv(
-        tmp_path / "mutations.csv", ["mut1", "mut2"], mut_samples,
+        tmp_path / "mutations.csv",
+        ["mut1", "mut2"],
+        mut_samples,
         values=[[1, 0, 1], [0, 1, 0]],
     )
 
     out_path = tmp_path / "out.h5mu"
     csv_to_mudata(
-        str(cond_path), [("view_a", str(view_path))], str(out_path),
+        str(cond_path),
+        [("view_a", str(view_path))],
+        str(out_path),
         mutations_path=str(mut_path),
     )
 
     import mudata
+
     mdata = mudata.read(str(out_path))
     obs = mdata.obs
 
@@ -183,7 +200,8 @@ def test_round_trip_load_mudata(tmp_path):
     features_b = [f"gB_{i}" for i in range(3)]
 
     cond_path = _write_conditionals_csv(
-        tmp_path / "conditionals.csv", model_ids=samples,
+        tmp_path / "conditionals.csv",
+        model_ids=samples,
         model_types=["TypeA", "TypeB"] * 4,
         tissues=["tissueX"] * 8,
     )
@@ -223,15 +241,17 @@ def test_h5mu_zarr_parity(tmp_path):
 
     h5mu_path = tmp_path / "out.h5mu"
     zarr_path = tmp_path / "out.zarr"
-    csv_to_mudata(str(cond_path), [("view_a", str(view_a_path))], str(h5mu_path), format="h5mu")
-    csv_to_mudata(str(cond_path), [("view_a", str(view_a_path))], str(zarr_path), format="zarr")
+    csv_to_mudata(
+        str(cond_path), [("view_a", str(view_a_path))], str(h5mu_path), format="h5mu"
+    )
+    csv_to_mudata(
+        str(cond_path), [("view_a", str(view_a_path))], str(zarr_path), format="zarr"
+    )
 
     ds_h5 = load_mudata(str(h5mu_path), ["view_a"])
     ds_zarr = load_mudata(str(zarr_path), ["view_a"])
 
-    assert np.allclose(
-        ds_h5.views["view_a"], ds_zarr.views["view_a"], equal_nan=True
-    )
+    assert np.allclose(ds_h5.views["view_a"], ds_zarr.views["view_a"], equal_nan=True)
     assert np.array_equal(ds_h5.masks["view_a"], ds_zarr.masks["view_a"])
     assert ds_h5.feature_names["view_a"] == ds_zarr.feature_names["view_a"]
 
@@ -242,7 +262,8 @@ def test_multi_file_view_unions_features(tmp_path):
     samples_b = ["S02", "S03"]
     cond_path = _write_conditionals_csv(
         tmp_path / "conditionals.csv",
-        model_ids=samples_a + samples_b, model_types=["TypeA"] * 4,
+        model_ids=samples_a + samples_b,
+        model_types=["TypeA"] * 4,
     )
     # g0/g1 shared; g2 only in file a; g3 only in file b
     path_a = _write_view_csv(tmp_path / "gexp_a.csv", ["g0", "g1", "g2"], samples_a)
@@ -297,10 +318,13 @@ def test_id_map_renames_view_samples(tmp_path):
     """A crosswalk lets two providers' names for one sample line up."""
     cond_path = _write_conditionals_csv(
         tmp_path / "conditionals.csv",
-        model_ids=["SIDM01", "SIDM02"], model_types=["TypeA"] * 2,
+        model_ids=["SIDM01", "SIDM02"],
+        model_types=["TypeA"] * 2,
     )
     # gexp already uses canonical IDs; crispr uses the provider's WTS names.
-    gexp_path = _write_view_csv(tmp_path / "gexp.csv", ["g0", "g1"], ["SIDM01", "SIDM02"])
+    gexp_path = _write_view_csv(
+        tmp_path / "gexp.csv", ["g0", "g1"], ["SIDM01", "SIDM02"]
+    )
     crispr_path = _write_view_csv(tmp_path / "crispr.csv", ["c0"], ["WTS-1", "WTS-2"])
     id_map_path = _write_id_map_csv(
         tmp_path / "id_map.csv", [("WTS-1", "SIDM01"), ("WTS-2", "SIDM02")]
@@ -333,7 +357,9 @@ def test_id_map_collision_errors_by_default(tmp_path):
 
     with pytest.raises(ValueError, match="occur more than once"):
         csv_to_mudata(
-            str(cond_path), [("gexp", str(view_path))], str(tmp_path / "out.h5mu"),
+            str(cond_path),
+            [("gexp", str(view_path))],
+            str(tmp_path / "out.h5mu"),
             id_map_path=str(id_map_path),
         )
 
@@ -343,17 +369,20 @@ def test_id_map_collision_first_keeps_first(tmp_path):
         tmp_path / "conditionals.csv", model_ids=["P01"], model_types=["TypeA"]
     )
     view_path = tmp_path / "gexp.csv"
-    pd.DataFrame(
-        [[1.0, 2.0]], index=["g0"], columns=["P01-A", "P01-B"]
-    ).to_csv(view_path)
+    pd.DataFrame([[1.0, 2.0]], index=["g0"], columns=["P01-A", "P01-B"]).to_csv(
+        view_path
+    )
     id_map_path = _write_id_map_csv(
         tmp_path / "id_map.csv", [("P01-A", "P01"), ("P01-B", "P01")]
     )
 
     out_path = tmp_path / "out.h5mu"
     csv_to_mudata(
-        str(cond_path), [("gexp", str(view_path))], str(out_path),
-        id_map_path=str(id_map_path), on_collision="first",
+        str(cond_path),
+        [("gexp", str(view_path))],
+        str(out_path),
+        id_map_path=str(id_map_path),
+        on_collision="first",
     )
 
     ds = load_mudata(str(out_path), ["gexp"])
@@ -371,7 +400,9 @@ def test_id_map_missing_column_raises(tmp_path):
 
     with pytest.raises(ValueError, match="missing required column"):
         csv_to_mudata(
-            str(cond_path), [("gexp", str(view_path))], str(tmp_path / "out.h5mu"),
+            str(cond_path),
+            [("gexp", str(view_path))],
+            str(tmp_path / "out.h5mu"),
             id_map_path=str(bad_map),
         )
 
@@ -390,7 +421,9 @@ def test_has_view_distinguishes_absent_from_all_nan(tmp_path):
     view_a_path = _write_view_csv(tmp_path / "view_a.csv", ["g0", "g1"], samples)
     # view_b omits S00 entirely, and carries S01 as all-NaN.
     view_b_path = _write_view_csv(
-        tmp_path / "view_b.csv", ["h0", "h1"], ["S01", "S02"],
+        tmp_path / "view_b.csv",
+        ["h0", "h1"],
+        ["S01", "S02"],
         nan_cells=[("h0", "S01"), ("h1", "S01")],
     )
 
@@ -402,10 +435,11 @@ def test_has_view_distinguishes_absent_from_all_nan(tmp_path):
     )
 
     import mudata
+
     obs = mudata.read(str(out_path)).obs
 
     assert not obs.loc["S00", "has_view_b"]  # absent from the file
-    assert obs.loc["S01", "has_view_b"]      # present, but every value missing
+    assert obs.loc["S01", "has_view_b"]  # present, but every value missing
     assert obs.loc["S02", "has_view_b"]
     assert obs["has_view_a"].all()
 
@@ -474,7 +508,9 @@ def test_min_views_above_view_count_raises(tmp_path):
 
     with pytest.raises(ValueError, match="at least 3 views"):
         csv_to_mudata(
-            str(cond_path), [("view_a", str(view_path))], str(tmp_path / "out.h5mu"),
+            str(cond_path),
+            [("view_a", str(view_path))],
+            str(tmp_path / "out.h5mu"),
             min_views=3,
         )
 
@@ -505,6 +541,7 @@ def test_inspect_handles_presence_columns(tmp_path, capsys):
     csv_to_mudata(str(cond_path), [("view_a", str(view_path))], str(out_path))
 
     from mosa.data.io import inspect_mudata
+
     inspect_mudata(str(out_path))
 
     assert "has_view_a" in capsys.readouterr().out
@@ -515,12 +552,15 @@ def test_conversion_report_attributes_every_dropped_sample(tmp_path, capsys):
     # metadata. S00 has only one view, so min_views=2 drops it too.
     cond_path = _write_conditionals_csv(
         tmp_path / "conditionals.csv",
-        model_ids=["S00", "S01", "S02", "S03", "S04"], model_types=["TypeA"] * 5,
+        model_ids=["S00", "S01", "S02", "S03", "S04"],
+        model_types=["TypeA"] * 5,
     )
     view_a_path = _write_view_csv(
         tmp_path / "view_a.csv", ["g0"], ["S00", "S01", "S02", "S03", "GHOST"]
     )
-    view_b_path = _write_view_csv(tmp_path / "view_b.csv", ["h0"], ["S01", "S02", "S03"])
+    view_b_path = _write_view_csv(
+        tmp_path / "view_b.csv", ["h0"], ["S01", "S02", "S03"]
+    )
 
     csv_to_mudata(
         str(cond_path),
@@ -581,14 +621,17 @@ def test_metadata_filter_restricts_sample_axis(tmp_path):
     """Filtering the metadata restricts which samples reach the sample axis."""
     samples = ["S00", "S01", "S02", "S03"]
     cond_path = _write_conditionals_csv(
-        tmp_path / "conditionals.csv", model_ids=samples,
+        tmp_path / "conditionals.csv",
+        model_ids=samples,
         model_types=["Cell_Line", "Organoid", "Tumor", "Cell_Line"],
     )
     view_path = _write_view_csv(tmp_path / "view_a.csv", ["g0"], samples)
 
     out_path = tmp_path / "out.h5mu"
     csv_to_mudata(
-        str(cond_path), [("view_a", str(view_path))], str(out_path),
+        str(cond_path),
+        [("view_a", str(view_path))],
+        str(out_path),
         metadata_filters={"model_type": ["Cell_Line", "Tumor"]},
     )
 
@@ -604,7 +647,9 @@ def test_metadata_filter_unknown_column_raises(tmp_path):
 
     with pytest.raises(ValueError, match="not a column"):
         csv_to_mudata(
-            str(cond_path), [("view_a", str(view_path))], str(tmp_path / "out.h5mu"),
+            str(cond_path),
+            [("view_a", str(view_path))],
+            str(tmp_path / "out.h5mu"),
             metadata_filters={"nope": ["x"]},
         )
 
@@ -617,7 +662,9 @@ def test_metadata_filter_matching_nothing_raises(tmp_path):
 
     with pytest.raises(ValueError, match="matched no samples"):
         csv_to_mudata(
-            str(cond_path), [("view_a", str(view_path))], str(tmp_path / "out.h5mu"),
+            str(cond_path),
+            [("view_a", str(view_path))],
+            str(tmp_path / "out.h5mu"),
             metadata_filters={"model_type": ["Nonexistent"]},
         )
 
@@ -669,16 +716,25 @@ def test_input_format_parity(tmp_path):
     features = [f"g{i}" for i in range(4)]
     view = pd.DataFrame(
         np.random.RandomState(0).randn(len(features), len(samples)),
-        index=features, columns=samples,
+        index=features,
+        columns=samples,
     )
     view.iloc[0, 1] = np.nan  # keep a missing value inside the comparison
-    cond = pd.DataFrame({"model_id": samples, "model_type": ["TypeA", "TypeB"] * 2 + ["TypeA"]})
+    cond = pd.DataFrame(
+        {"model_id": samples, "model_type": ["TypeA", "TypeB"] * 2 + ["TypeA"]}
+    )
 
     writers = {
         "csv": (lambda p: view.to_csv(p), lambda p: cond.to_csv(p, index=False)),
         "csv.gz": (lambda p: view.to_csv(p), lambda p: cond.to_csv(p, index=False)),
-        "tsv": (lambda p: view.to_csv(p, sep="\t"), lambda p: cond.to_csv(p, sep="\t", index=False)),
-        "parquet": (lambda p: view.to_parquet(p), lambda p: cond.to_parquet(p, index=False)),
+        "tsv": (
+            lambda p: view.to_csv(p, sep="\t"),
+            lambda p: cond.to_csv(p, sep="\t", index=False),
+        ),
+        "parquet": (
+            lambda p: view.to_parquet(p),
+            lambda p: cond.to_parquet(p, index=False),
+        ),
     }
 
     outputs = {}
@@ -715,6 +771,7 @@ def test_unsupported_input_format_raises(tmp_path):
 
 
 # Group B: CSV-adapter specifics
+
 
 def test_conditionals_missing_model_id_column(tmp_path):
     cond_path = tmp_path / "conditionals.csv"
@@ -758,7 +815,9 @@ def test_conditionals_missing_tissue_warns_but_succeeds(tmp_path, caplog):
 
 
 def test_view_csv_transposed_raises(tmp_path):
-    samples = [f"S{i:02d}" for i in range(15)]  # >10 overlapping IDs to trip the threshold
+    samples = [
+        f"S{i:02d}" for i in range(15)
+    ]  # >10 overlapping IDs to trip the threshold
     cond_path = _write_conditionals_csv(
         tmp_path / "conditionals.csv", model_ids=samples, model_types=["TypeA"] * 15
     )
@@ -770,7 +829,9 @@ def test_view_csv_transposed_raises(tmp_path):
     transposed.to_csv(view_path)
 
     with pytest.raises(ValueError, match="samples x features"):
-        csv_to_mudata(str(cond_path), [("view_a", str(view_path))], str(tmp_path / "out.h5mu"))
+        csv_to_mudata(
+            str(cond_path), [("view_a", str(view_path))], str(tmp_path / "out.h5mu")
+        )
 
 
 def test_view_csv_non_numeric_cell_raises(tmp_path):
@@ -785,7 +846,9 @@ def test_view_csv_non_numeric_cell_raises(tmp_path):
     df.to_csv(view_path)
 
     with pytest.raises(ValueError, match="non-numeric"):
-        csv_to_mudata(str(cond_path), [("view_a", str(view_path))], str(tmp_path / "out.h5mu"))
+        csv_to_mudata(
+            str(cond_path), [("view_a", str(view_path))], str(tmp_path / "out.h5mu")
+        )
 
 
 def test_missing_view_csv_raises_file_not_found(tmp_path):
@@ -810,7 +873,9 @@ def test_missing_mutations_csv_raises_file_not_found(tmp_path):
 
     with pytest.raises(FileNotFoundError):
         csv_to_mudata(
-            str(cond_path), [("view_a", str(view_path))], str(tmp_path / "out.h5mu"),
+            str(cond_path),
+            [("view_a", str(view_path))],
+            str(tmp_path / "out.h5mu"),
             mutations_path=str(tmp_path / "does_not_exist_mut.csv"),
         )
 
@@ -824,7 +889,9 @@ def test_disjoint_ids_raises_no_samples(tmp_path):
     view_path = _write_view_csv(tmp_path / "view_a.csv", ["g0"], ["T00", "T01", "T02"])
 
     with pytest.raises(ValueError, match="No samples"):
-        csv_to_mudata(str(cond_path), [("view_a", str(view_path))], str(tmp_path / "out.h5mu"))
+        csv_to_mudata(
+            str(cond_path), [("view_a", str(view_path))], str(tmp_path / "out.h5mu")
+        )
 
 
 def test_format_extension_mismatch_warns_but_writes(tmp_path, caplog):
@@ -836,7 +903,9 @@ def test_format_extension_mismatch_warns_but_writes(tmp_path, caplog):
     out_path = tmp_path / "out.h5mu"  # .h5mu extension, but format="zarr"
 
     with caplog.at_level(logging.WARNING):
-        csv_to_mudata(str(cond_path), [("view_a", str(view_path))], str(out_path), format="zarr")
+        csv_to_mudata(
+            str(cond_path), [("view_a", str(view_path))], str(out_path), format="zarr"
+        )
 
     assert out_path.is_dir()  # zarr stores are directories, despite the .h5mu name
     assert "zarr" in caplog.text.lower()

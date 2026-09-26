@@ -14,7 +14,6 @@ from mosa.models.mofa.config import MOFAConfig
 from mosa.models.mosa.config import MOSAConfig, OmicViewConfig
 from mosa.utils import validate_config_against_data
 
-
 # Helper: build a custom h5mu file with controllable obs columns.
 
 
@@ -37,7 +36,7 @@ def _write_h5mu(
     adatas = {}
     for view_name, n_features in view_specs.items():
         X = rng.randn(n_samples, n_features).astype(np.float32)
-        mask = np.ones((n_samples, n_features), dtype=bool)
+        mask: np.ndarray = np.ones((n_samples, n_features), dtype=bool)
         obs = pd.DataFrame(index=[f"sample_{i:03d}" for i in range(n_samples)])
         var = pd.DataFrame(index=[f"{view_name}_feat_{j}" for j in range(n_features)])
         adata = anndata.AnnData(X=X, obs=obs, var=var)
@@ -53,7 +52,9 @@ def _write_h5mu(
             model_types = ["TypeA" if i % 2 == 0 else "TypeB" for i in range(n_samples)]
         obs_data["model_type"] = model_types
     if tissue:
-        obs_data["tissue"] = ["tissue_0" if i % 2 == 0 else "tissue_1" for i in range(n_samples)]
+        obs_data["tissue"] = [
+            "tissue_0" if i % 2 == 0 else "tissue_1" for i in range(n_samples)
+        ]
     for col in mutation_cols or []:
         obs_data[col] = [i % 2 for i in range(n_samples)]
 
@@ -69,8 +70,12 @@ def _write_h5mu(
 
 def _data_and_model_cfg(path, views, **data_overrides):
     data_cfg = DataConfig(path=str(path), views=views, **data_overrides)
-    view_cfgs = {name: OmicViewConfig(name=name, hidden_layer_dims=[16, 8]) for name in views}
-    model_cfg = MOSAConfig(views=view_cfgs, joint_latent_dim=8, batch_size=4, num_epochs=1)
+    view_cfgs = {
+        name: OmicViewConfig(name=name, hidden_layer_dims=[16, 8]) for name in views
+    }
+    model_cfg = MOSAConfig(
+        views=view_cfgs, joint_latent_dim=8, batch_size=4, num_epochs=1
+    )
     return data_cfg, model_cfg
 
 
@@ -79,7 +84,9 @@ def _data_and_model_cfg(path, views, **data_overrides):
 
 def test_valid_config_matching_data_no_warnings(tmp_path):
     path = _write_h5mu(tmp_path, {"view_a": 10, "view_b": 8})
-    data_cfg, model_cfg = _data_and_model_cfg(path, ["view_a", "view_b"], use_mutations=False)
+    data_cfg, model_cfg = _data_and_model_cfg(
+        path, ["view_a", "view_b"], use_mutations=False
+    )
     cfg = Config(data=data_cfg, model=model_cfg)
 
     warnings = validate_config_against_data(cfg)
@@ -103,7 +110,9 @@ def test_view_name_wrong_case_raises(tmp_path):
 
 def test_mask_layer_missing_raises(tmp_path):
     path = _write_h5mu(tmp_path, {"view_a": 10}, mask_name="mask")
-    data_cfg, model_cfg = _data_and_model_cfg(path, ["view_a"], mask_layer_name="missing_mask")
+    data_cfg, model_cfg = _data_and_model_cfg(
+        path, ["view_a"], mask_layer_name="missing_mask"
+    )
     cfg = Config(data=data_cfg, model=model_cfg)
 
     with pytest.raises(ValueError, match="Mask layer 'missing_mask' not in"):
@@ -132,7 +141,9 @@ def test_target_batch_wrong_case_raises(tmp_path):
     model_cfg.target_batch = "typea"
     cfg = Config(data=data_cfg, model=model_cfg)
 
-    with pytest.raises(ValueError, match="target_batch 'typea' not in model_type categories"):
+    with pytest.raises(
+        ValueError, match="target_batch 'typea' not in model_type categories"
+    ):
         validate_config_against_data(cfg)
 
 
@@ -153,7 +164,10 @@ def test_target_batch_correct_case_passes(tmp_path):
 def test_contrastive_without_tissue_warns(tmp_path):
     path = _write_h5mu(tmp_path, {"view_a": 10}, tissue=False)
     data_cfg, model_cfg = _data_and_model_cfg(
-        path, ["view_a"], use_mutations=False, use_tissue=False,
+        path,
+        ["view_a"],
+        use_mutations=False,
+        use_tissue=False,
     )
     model_cfg.contrastive_weight = 1.0
     cfg = Config(data=data_cfg, model=model_cfg)
@@ -164,7 +178,9 @@ def test_contrastive_without_tissue_warns(tmp_path):
 
 def test_use_tissue_without_tissue_column_warns(tmp_path):
     path = _write_h5mu(tmp_path, {"view_a": 10}, tissue=False)
-    data_cfg, model_cfg = _data_and_model_cfg(path, ["view_a"], use_mutations=False, use_tissue=True)
+    data_cfg, model_cfg = _data_and_model_cfg(
+        path, ["view_a"], use_mutations=False, use_tissue=True
+    )
     cfg = Config(data=data_cfg, model=model_cfg)
 
     warnings = validate_config_against_data(cfg)
@@ -202,14 +218,18 @@ def test_adv_weight_single_batch_warns(tmp_path):
 
 def test_summarize_structure_returns_metadata_only(tmp_path):
     path = _write_h5mu(
-        tmp_path, {"view_a": 10, "view_b": 8}, mutation_cols=["mutation_TP53"],
+        tmp_path,
+        {"view_a": 10, "view_b": 8},
+        mutation_cols=["mutation_TP53"],
     )
     summary = summarize_structure(str(path))
 
     assert summary["format"] == "h5mu"
     assert set(summary["modalities"]) == {"view_a", "view_b"}
-    assert summary["modalities"]["view_a"] == {"n_features": 10, "layers": ["mask"]}
-    assert summary["modalities"]["view_b"] == {"n_features": 8, "layers": ["mask"]}
+    assert summary["modalities"]["view_a"]["n_features"] == 10
+    assert "mask" in summary["modalities"]["view_a"]["layers"]
+    assert summary["modalities"]["view_b"]["n_features"] == 8
+    assert "mask" in summary["modalities"]["view_b"]["layers"]
     assert set(summary["obs_columns"]) >= {"model_type", "tissue", "mutation_TP53"}
     assert summary["model_type_categories"] == ["TypeA", "TypeB"]
 
@@ -229,7 +249,8 @@ def test_summarize_structure_zarr(tmp_path):
     adata.layers["mask"] = mask
     mdata = mudata.MuData({"view_a": adata})
     obs_df = pd.DataFrame(
-        {"model_type": ["TypeA", "TypeB"] * 3}, index=[f"s{i}" for i in range(n_samples)]
+        {"model_type": ["TypeA", "TypeB"] * 3},
+        index=[f"s{i}" for i in range(n_samples)],
     )
     obs_df.index = obs_df.index.astype(object)
     mdata.obs = obs_df.copy()

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 import torch
 
 from mosa.models.mosa import MOSAModel
@@ -16,17 +15,23 @@ def _split(dataset, n_train=16):
 # MOSADataModule state serialisation
 
 
-def test_datamodule_state_dict_scaler_fidelity(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_datamodule_state_dict_scaler_fidelity(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
     """Scaler means and scales survive a state_dict / load_state_dict round-trip."""
     dataset = make_multi_omic_dataset()
     data_cfg, model_cfg = make_mosa_config(dataset, output_dir=str(tmp_path))
 
-    dm = MOSADataModule(train_data=dataset, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg)
+    dm = MOSADataModule(
+        train_data=dataset, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg
+    )
     dm.setup()
 
     state = dm.state_dict()
 
-    dm2 = MOSADataModule(train_data=None, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg)
+    dm2 = MOSADataModule(
+        train_data=None, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg
+    )
     dm2.load_state_dict(state)
 
     assert dm2.batch_categories == dm.batch_categories
@@ -43,7 +48,9 @@ def test_datamodule_state_dict_scaler_fidelity(make_multi_omic_dataset, make_mos
 # MOSAModel save / load
 
 
-def test_vae_save_load_config_preserved(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_vae_save_load_config_preserved(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
     """Config fields and arch dims are reconstructed exactly from the checkpoint."""
     dataset = make_multi_omic_dataset(n_samples=20)
     train, val = _split(dataset)
@@ -65,7 +72,9 @@ def test_vae_save_load_config_preserved(make_multi_omic_dataset, make_mosa_confi
     assert loaded._model.n_batches == model._model.n_batches
 
 
-def test_vae_save_writes_lightning_format(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_vae_save_writes_lightning_format(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
     """save() produces a Lightning-shaped checkpoint with state_dict, hparams, datamodule."""
     dataset = make_multi_omic_dataset(n_samples=20)
     train, val = _split(dataset)
@@ -86,7 +95,9 @@ def test_vae_save_writes_lightning_format(make_multi_omic_dataset, make_mosa_con
     assert "view_input_dims" in raw["hyper_parameters"]
 
 
-def test_vae_load_reads_auto_checkpoint(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_vae_load_reads_auto_checkpoint(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
     """load() can read a .ckpt written by Lightning's ModelCheckpoint callback."""
     dataset = make_multi_omic_dataset(n_samples=20)
     train, val = _split(dataset)
@@ -104,7 +115,9 @@ def test_vae_load_reads_auto_checkpoint(make_multi_omic_dataset, make_mosa_confi
     assert z.shape == (dataset.n_samples, model_cfg.joint_latent_dim)
 
 
-def test_vae_save_load_scaler_fidelity(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_vae_save_load_scaler_fidelity(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
     """Scaler state is preserved so loaded model can apply training-time normalisation."""
     dataset = make_multi_omic_dataset(n_samples=20)
     train, val = _split(dataset)
@@ -149,19 +162,25 @@ def test_vae_transform_after_load(make_multi_omic_dataset, make_mosa_config, tmp
 # Resume training
 
 
-def test_vae_resume_produces_valid_output(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_vae_resume_produces_valid_output(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
     """Resuming from last.ckpt completes without error and transform() still works."""
     dataset = make_multi_omic_dataset(n_samples=20)
     train, val = _split(dataset)
 
-    data_cfg, model_cfg = make_mosa_config(dataset, output_dir=str(tmp_path), num_epochs=2)
+    data_cfg, model_cfg = make_mosa_config(
+        dataset, output_dir=str(tmp_path), num_epochs=2
+    )
     model = MOSAModel(data_cfg, model_cfg)
     model.fit(train, val)
 
     last_ckpt = tmp_path / "last.ckpt"
     assert last_ckpt.exists(), "ModelCheckpoint(save_last=True) must write last.ckpt"
 
-    data_cfg2, model_cfg2 = make_mosa_config(dataset, output_dir=str(tmp_path), num_epochs=4)
+    data_cfg2, model_cfg2 = make_mosa_config(
+        dataset, output_dir=str(tmp_path), num_epochs=4
+    )
     model2 = MOSAModel(data_cfg2, model_cfg2)
     model2.fit(train, val, resume_from=last_ckpt)
 

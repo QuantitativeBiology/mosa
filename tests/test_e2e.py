@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """End-to-end tests for the MOSA CLI.
 
 These tests exercise the full pipeline a user runs: a config YAML file + a
@@ -8,20 +6,21 @@ parquet files as the observable result. No internal imports — the CLI is
 invoked via subprocess exactly as a user would call it.
 """
 
+from __future__ import annotations
+
 import subprocess
 import sys
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
-import pytest
 import yaml
-
 
 # Helpers
 
 
-def _write_config(path: Path, data_path: Path, output_dir: Path, view_specs: dict[str, int]) -> Path:
+def _write_config(
+    path: Path, data_path: Path, output_dir: Path, view_specs: dict[str, int]
+) -> Path:
     config = {
         "data": {
             "path": str(data_path),
@@ -35,10 +34,7 @@ def _write_config(path: Path, data_path: Path, output_dir: Path, view_specs: dic
             "batch_size": 8,
             "learning_rate": 1e-3,
             "weighted_random_sampler": False,
-            "views": {
-                name: {"hidden_layer_dims": [16, 8]}
-                for name in view_specs
-            },
+            "views": {name: {"hidden_layer_dims": [16, 8]} for name in view_specs},
             "accelerator": "cpu",
             "devices": 1,
             "precision": "32",
@@ -67,8 +63,11 @@ def test_cli_train_creates_output_files(make_h5mu_file, tmp_path):
     )
     # Use the installed entry point
     result = subprocess.run(
-        [sys.executable, "-c",
-         f"from mosa.cli import main; import sys; sys.argv = ['mosa', 'train', '--config', '{config_path}']; main()"],
+        [
+            sys.executable,
+            "-c",
+            f"from mosa.cli import main; import sys; sys.argv = ['mosa', 'train', '--config', '{config_path}']; main()",
+        ],
         capture_output=True,
         text=True,
     )
@@ -91,8 +90,11 @@ def test_cli_train_output_shapes(make_h5mu_file, tmp_path):
     config_path = _write_config(tmp_path, data_path, output_dir, view_specs)
 
     result = subprocess.run(
-        [sys.executable, "-c",
-         f"from mosa.cli import main; import sys; sys.argv = ['mosa', 'train', '--config', '{config_path}']; main()"],
+        [
+            sys.executable,
+            "-c",
+            f"from mosa.cli import main; import sys; sys.argv = ['mosa', 'train', '--config', '{config_path}']; main()",
+        ],
         capture_output=True,
         text=True,
     )

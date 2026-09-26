@@ -54,7 +54,9 @@ def test_vae_transform_shape(make_multi_omic_dataset, make_mosa_config, tmp_path
     assert not np.isnan(z).any()
 
 
-def test_transform_unseen_model_type_raises(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_transform_unseen_model_type_raises(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
     """Inference data with a model_type absent from the fit-time categories must
     raise, not silently miscode it (previously a negative-index wrap)."""
     dataset = make_multi_omic_dataset(n_samples=20)
@@ -117,6 +119,7 @@ def test_vae_concat_and_poe(
 
 def _mofa_data_cfg(dataset):
     from mosa.config import DataConfig
+
     return DataConfig(path="unused", views=list(dataset.view_names))
 
 
@@ -125,7 +128,9 @@ def test_mofa_fit(make_multi_omic_dataset, tmp_path):
     dataset = make_multi_omic_dataset(n_samples=20)
     train, _ = _split(dataset)
     save_path = str(tmp_path / "mofa.hdf5")
-    model = MOFAModel(_mofa_data_cfg(dataset), MOFAConfig(n_factors=5), save_path=save_path)
+    model = MOFAModel(
+        _mofa_data_cfg(dataset), MOFAConfig(n_factors=5), save_path=save_path
+    )
     model.fit(train)
     assert not (tmp_path / "mofa.hdf5").exists()
     model.save_outputs()
@@ -137,7 +142,9 @@ def test_mofa_transform_shape(make_multi_omic_dataset, tmp_path):
     dataset = make_multi_omic_dataset(n_samples=20)
     train, _ = _split(dataset)
     save_path = str(tmp_path / "mofa.hdf5")
-    model = MOFAModel(_mofa_data_cfg(dataset), MOFAConfig(n_factors=5), save_path=save_path)
+    model = MOFAModel(
+        _mofa_data_cfg(dataset), MOFAConfig(n_factors=5), save_path=save_path
+    )
     model.fit(train)
     model.save_outputs()
     z = model.transform(train)
@@ -153,7 +160,9 @@ def test_mofa_reconstruct_shapes(make_multi_omic_dataset, tmp_path):
     dataset = make_multi_omic_dataset(n_samples=20)
     train, _ = _split(dataset)
     save_path = str(tmp_path / "mofa.hdf5")
-    model = MOFAModel(_mofa_data_cfg(dataset), MOFAConfig(n_factors=5), save_path=save_path)
+    model = MOFAModel(
+        _mofa_data_cfg(dataset), MOFAConfig(n_factors=5), save_path=save_path
+    )
     model.fit(train)
     model.save_outputs()
     recon = model.reconstruct(train)
@@ -168,7 +177,9 @@ def test_mofa_unseen_data_raises(make_multi_omic_dataset, tmp_path):
     dataset = make_multi_omic_dataset(n_samples=20)
     train, _ = _split(dataset)
     save_path = str(tmp_path / "mofa.hdf5")
-    model = MOFAModel(_mofa_data_cfg(dataset), MOFAConfig(n_factors=5), save_path=save_path)
+    model = MOFAModel(
+        _mofa_data_cfg(dataset), MOFAConfig(n_factors=5), save_path=save_path
+    )
     model.fit(train)
     model.save_outputs()
 
@@ -191,7 +202,9 @@ def test_all_models_are_multi_omic_model(sample_dataset, make_mosa_config, tmp_p
 # Error handling: calling API before fit()
 
 
-def test_transform_before_fit_raises(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_transform_before_fit_raises(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
     dataset = make_multi_omic_dataset(n_samples=20)
     data_cfg, model_cfg = make_mosa_config(dataset, output_dir=str(tmp_path))
     model = MOSAModel(data_cfg, model_cfg)
@@ -199,7 +212,9 @@ def test_transform_before_fit_raises(make_multi_omic_dataset, make_mosa_config, 
         model.transform(dataset)
 
 
-def test_reconstruct_before_fit_raises(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_reconstruct_before_fit_raises(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
     dataset = make_multi_omic_dataset(n_samples=20)
     data_cfg, model_cfg = make_mosa_config(dataset, output_dir=str(tmp_path))
     model = MOSAModel(data_cfg, model_cfg)
@@ -241,7 +256,9 @@ def test_vae_reconstruct_no_nan(make_multi_omic_dataset, make_mosa_config, tmp_p
         assert not np.isinf(arr).any(), f"reconstruct() produced Inf for view '{name}'"
 
 
-def test_vae_transform_deterministic(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_vae_transform_deterministic(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
     dataset = make_multi_omic_dataset(n_samples=20)
     train, _ = _split(dataset)
     data_cfg, model_cfg = make_mosa_config(dataset, output_dir=str(tmp_path))
@@ -255,7 +272,9 @@ def test_vae_transform_deterministic(make_multi_omic_dataset, make_mosa_config, 
 # Save / load
 
 
-def test_vae_save_creates_checkpoint(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_vae_save_creates_checkpoint(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
     dataset = make_multi_omic_dataset(n_samples=20)
     train, _ = _split(dataset)
     data_cfg, model_cfg = make_mosa_config(dataset, output_dir=str(tmp_path))
@@ -266,6 +285,7 @@ def test_vae_save_creates_checkpoint(make_multi_omic_dataset, make_mosa_config, 
     model.save(save_path)
 
     import torch
+
     checkpoint = torch.load(str(save_path), weights_only=False)
     assert "state_dict" in checkpoint
     hp = checkpoint["hyper_parameters"]
@@ -274,7 +294,9 @@ def test_vae_save_creates_checkpoint(make_multi_omic_dataset, make_mosa_config, 
     assert "n_batches" in hp
 
 
-def test_vae_load_preserves_architecture(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_vae_load_preserves_architecture(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
     dataset = make_multi_omic_dataset(n_samples=20)
     train, _ = _split(dataset)
     data_cfg, model_cfg = make_mosa_config(dataset, output_dir=str(tmp_path))
@@ -290,7 +312,9 @@ def test_vae_load_preserves_architecture(make_multi_omic_dataset, make_mosa_conf
     assert loaded._model.n_batches == model._model.n_batches
 
 
-def test_vae_load_preserves_weights(make_multi_omic_dataset, make_mosa_config, tmp_path):
+def test_vae_load_preserves_weights(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
     """Weights survive a save/load round-trip: same batch → identical predictions."""
     from mosa.models.mosa.datamodule import MOSADataModule
 
@@ -305,7 +329,9 @@ def test_vae_load_preserves_weights(make_multi_omic_dataset, make_mosa_config, t
     loaded = MOSAModel.load(save_path)
 
     # Use a fresh datamodule with training scalers to get a proper dataloader
-    inf_dm = MOSADataModule(train_data=train, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg)
+    inf_dm = MOSADataModule(
+        train_data=train, val_data=None, data_cfg=data_cfg, model_cfg=model_cfg
+    )
     inf_dm.setup_inference(model._datamodule)
     loader = inf_dm.train_eval_dataloader()
 
@@ -348,7 +374,9 @@ def _shift_dataset(data, shift: float):
     from mosa.data.dataset import MultiOmicDataset
 
     shifted_views = {name: X + shift for name, X in data.views.items()}
-    return MultiOmicDataset(shifted_views, data.masks, data.metadata, data.feature_names)
+    return MultiOmicDataset(
+        shifted_views, data.masks, data.metadata, data.feature_names
+    )
 
 
 def test_transform_reuses_training_scaler_not_refit(
@@ -408,7 +436,9 @@ def test_transform_does_not_mutate_trained_scaler(
     model.reconstruct(shifted)
 
     for name, mean_before in means_before.items():
-        np.testing.assert_array_equal(model._datamodule.scalers[name]["mean"], mean_before)
+        np.testing.assert_array_equal(
+            model._datamodule.scalers[name]["mean"], mean_before
+        )
 
 
 def test_reconstruct_returns_original_scale(
@@ -425,9 +455,7 @@ def test_reconstruct_returns_original_scale(
     from mosa.data.dataset import MultiOmicDataset
 
     dataset = make_multi_omic_dataset(n_samples=20, view_dims={"view_a": 50})
-    rescaled_views = {
-        name: X * 200.0 + 5000.0 for name, X in dataset.views.items()
-    }
+    rescaled_views = {name: X * 200.0 + 5000.0 for name, X in dataset.views.items()}
     dataset = MultiOmicDataset(
         rescaled_views, dataset.masks, dataset.metadata, dataset.feature_names
     )
