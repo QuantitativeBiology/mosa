@@ -1,0 +1,31 @@
+name: Docs
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - '**.md'
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    paths:
+      - '**.md'
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs:
+    name: Documentation check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check markdown links
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --no-progress 'docs/**/*.md' 'README.md'
+          fail: true

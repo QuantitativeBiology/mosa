@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
+      - 'LICENSE'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
+      - 'LICENSE'
+  schedule:
+    # Nightly, for the tests that are too hardware sensitive to gate commits on.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          # torch and pandas are pinned exactly, so a cold install is the slow
+          # part of this job, not the tests.
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,lint,mofa]"
+
+      - name: Lint
+        run: |
+          ruff check src tests
+          ruff format --check src tests
+
+      - name: Types
+        run: mypy
+
+      - name: Tests
+        # The whole suite is the per-commit gate because it is fast, and the
+        # budget check keeps that true: if the suite outgrows it, the gate gets
+        # split into tiers deliberately rather than by someone quietly skipping
+        # tests. Behavioral tests are excluded here and run in the nightly job.
+        run: |
+          start=$(date +%s)
+          pytest -q --cov=src --cov-report=xml --durations=10 -m "not behavioral"
+          elapsed=$(( $(date +%s) - start ))
+          echo "suite ran in ${elapsed}s"
+          if [ "$elapsed" -gt 180 ]; then
+            echo "::error::Test suite took ${elapsed}s (budget: 180s)."
+            exit 1
+          fi
+
+  behavioral:
+    name: Behavioral tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,mofa]"
+      - name: Tests
+        run: pytest -q
+
