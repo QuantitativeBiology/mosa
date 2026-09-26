@@ -272,6 +272,42 @@ def test_load_h5mu_deduplicates_var_names(tmp_path):
     assert len(set(feats)) == 3  # duplicates made unique
 
 
+def test_views_sharing_feature_names_load_without_warning(tmp_path, capsys):
+    """The same genes in several omics is normal, so loading must stay quiet."""
+    import warnings
+
+    import anndata
+    import mudata
+
+    from mosa.data.io import inspect_mudata
+
+    anndata.settings.allow_write_nullable_strings = True
+    genes = pd.Index(["GENE1", "GENE2"], dtype=object)
+    views = {}
+    for name in ("gexp", "meth"):
+        adata = anndata.AnnData(
+            X=np.ones((2, 2), dtype=np.float32), var=pd.DataFrame(index=genes)
+        )
+        adata.obs_names = pd.Index(["S0", "S1"], dtype=object)
+        adata.layers["mask"] = np.ones((2, 2), dtype=bool)
+        views[name] = adata
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        mdata = mudata.MuData(views)
+        mdata.obs["model_type"] = ["T", "T"]
+        _dearrow_mudata(mdata)
+        path = tmp_path / "shared.h5mu"
+        mdata.write(str(path))
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        ds = load_mudata(str(path), ["gexp", "meth"])
+        inspect_mudata(str(path))
+
+    assert not [w for w in caught if "not unique" in str(w.message)]
+    assert ds.feature_names == {"gexp": ["GENE1", "GENE2"], "meth": ["GENE1", "GENE2"]}
+
+
 def test_load_h5mu_aligned_values_land_on_right_sample(tmp_path):
     """Adversarial positive: each row carries a unique signature so a positional
     mix-up would be detectable; aligned data must load each row onto its sample."""

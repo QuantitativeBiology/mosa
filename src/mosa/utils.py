@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -100,10 +101,19 @@ def tensors_to_numpy(t: Tensor) -> np.ndarray:
 
 @contextlib.contextmanager
 def mudata_set_options(**kwargs):
+    """Apply mudata options where supported, and silence cross-view name clashes."""
     import mudata
 
-    if hasattr(mudata, "set_options"):
-        with mudata.set_options(**kwargs):
+    with warnings.catch_warnings():
+        # Views routinely share feature names (the same genes measured in
+        # several omics), so mudata's global var index is never unique. mosa
+        # reads features per view, where names are unique, so the warning is
+        # noise. Duplicates inside one view still warn, from anndata.
+        warnings.filterwarnings(
+            "ignore", message="var_names are not unique", category=UserWarning
+        )
+        if hasattr(mudata, "set_options"):
+            with mudata.set_options(**kwargs):
+                yield
+        else:
             yield
-    else:
-        yield
