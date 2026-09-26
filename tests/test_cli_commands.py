@@ -13,12 +13,13 @@ cli._convert passed every test in the suite.
 
 from __future__ import annotations
 
+import argparse
 import re
 
 import pandas as pd
 import pytest
 
-from mosa.cli import main
+from mosa.cli import build_parser, main
 
 # Subcommands with a success-path test in this file. The completeness test at
 # the bottom fails when a subcommand is added to the CLI and not to this set.
@@ -564,6 +565,55 @@ def test_validate_does_not_train_or_write(make_h5mu_file, make_config_file, tmp_
     main(["validate", "--config", str(config)])
 
     assert not output_dir.exists()
+
+
+def test_short_flags_drive_the_same_commands(
+    make_csv_dataset, make_config_file, tmp_path, capsys
+):
+    """convert, inspect and validate run end to end with short flags only."""
+    csvs = make_csv_dataset(tmp_path, n_samples=16, view_specs=VIEWS)
+    out = tmp_path / "short.h5mu"
+    views = [
+        a for name, path in csvs["views"].items() for a in ("-v", f"{name}:{path}")
+    ]
+    main(["convert", "-m", str(csvs["conditionals"]), *views, "-o", str(out)])
+    assert out.exists()
+
+    main(["inspect", "-i", str(out)])
+    assert "model_type" in capsys.readouterr().out
+
+    config = make_config_file(tmp_path, out, tmp_path / "run", VIEWS)
+    main(["validate", "-c", str(config), "-d"])
+    assert "Config OK" in capsys.readouterr().out
+
+
+def _subcommand_parsers():
+    parser = build_parser()
+    (subparsers,) = [
+        a for a in parser._actions if isinstance(a, argparse._SubParsersAction)
+    ]
+    return subparsers.choices
+
+
+@pytest.mark.parametrize("command", sorted(COVERED_COMMANDS))
+def test_every_flag_has_a_short_form(command):
+    sub = _subcommand_parsers()[command]
+    missing = [
+        a.option_strings[0]
+        for a in sub._actions
+        if a.option_strings
+        and not any(re.fullmatch(r"-[A-Za-z]", o) for o in a.option_strings)
+    ]
+    assert not missing, f"mosa {command}: flags without a short form: {missing}"
+
+
+@pytest.mark.parametrize("command", sorted(COVERED_COMMANDS))
+def test_help_describes_the_command_with_an_example(command):
+    """-h opens with what the command does, not only the flag list."""
+    help_text = _subcommand_parsers()[command].format_help()
+    description, _, example = help_text.partition("example:")
+    assert len(description.split("\n\n", 1)[-1].split()) >= 10, help_text
+    assert f"mosa {command} " in example, help_text
 
 
 # Completeness

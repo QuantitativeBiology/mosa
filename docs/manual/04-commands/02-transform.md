@@ -11,10 +11,10 @@ mosa transform --checkpoint <output-dir>/last.ckpt \
 
 | Flag | Type | Required | Description |
 |---|---|---|---|
-| `--checkpoint` | path | yes | Path to saved model checkpoint (.ckpt) |
-| `--input` | path | yes | Path to .h5mu or .zarr input data |
-| `--output` | path | yes | Directory to write latent.parquet (and reconstructions) |
-| `--reconstruct` | flag | no | Also write per-omic reconstruction parquets |
+| `-m`, `--checkpoint` | path | yes | Path to saved model checkpoint (.ckpt) |
+| `-i`, `--input` | path | yes | Path to .h5mu or .zarr input data |
+| `-o`, `--output` | path | yes | Directory to write latent.parquet (and reconstructions) |
+| `-r`, `--reconstruct` | flag | no | Also write per-omic reconstruction parquets |
 
 ![Transform sequence: a checkpoint is loaded, the input validated against it, and latent representations written](../../images/sequence-transform.png)
 

@@ -8,8 +8,8 @@ mosa train --config <your-config>.yaml
 
 | Flag | Type | Required | Description |
 |---|---|---|---|
-| `--config` | path | yes | Path to the YAML configuration file. |
-| `--resume` | `CKPT` | no | Resume training from an existing Lightning checkpoint (`.ckpt`). |
+| `-c`, `--config` | path | yes | Path to the YAML configuration file. |
+| `-r`, `--resume` | `CKPT` | no | Resume training from an existing Lightning checkpoint (`.ckpt`). |
 
 ![Training sequence: config and data are loaded, split, the model is built through the registry, fitted, and outputs written](../../images/sequence-training_overview.png)
 

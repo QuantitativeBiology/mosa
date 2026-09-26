@@ -17,7 +17,7 @@ The manual pages are numbered in reading order. The first three cover everything
 
 ## Commands
 
-Every command uses the format `mosa <command> [options]`. Running `mosa <command> --help` prints the same flags documented in these pages.
+Every command uses the format `mosa <command> [options]`, and every flag has a short form (`-c` for `--config`, `-o` for `--output`, and so on). Running `mosa <command> -h` explains what the command does, with an example, and lists the same flags documented in these pages.
 
 1. [train](manual/04-commands/01-train.md) — fit a model from a config
 2. [transform](manual/04-commands/02-transform.md) — project data through a saved model
@@ -28,7 +28,7 @@ Every command uses the format `mosa <command> [options]`. Running `mosa <command
 7. [inspect](manual/04-commands/07-inspect.md) — summarise a MuData file
 8. [validate](manual/04-commands/08-validate.md) — check a config and its data
 
-All eight commands accept the `--debug` flag. The [Troubleshooting](manual/09-troubleshooting.md) section explains how failures are reported and what common error messages mean.
+All eight commands accept the `-d`, `--debug` flag. The [Troubleshooting](manual/09-troubleshooting.md) section explains how failures are reported and what common error messages mean.
 
 ## Terminology
 

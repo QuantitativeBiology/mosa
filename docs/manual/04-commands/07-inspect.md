@@ -8,7 +8,7 @@ mosa inspect --input <data>.h5mu
 
 | Flag | Type | Required | Description |
 |---|---|---|---|
-| `--input` | path | yes | Path to .h5mu or .zarr file |
+| `-i`, `--input` | path | yes | Path to .h5mu or .zarr file |
 
 ![Inspect sequence: the file is opened and summarised per view and metadata column](../../images/sequence-inspect.png)
 

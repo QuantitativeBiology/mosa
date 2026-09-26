@@ -8,7 +8,7 @@ mosa validate --config <your-config>.yaml
 
 | Flag | Type | Required | Description |
 |---|---|---|---|
-| `--config` | path | yes | Path to YAML config file |
+| `-c`, `--config` | path | yes | Path to YAML config file |
 
 ![Validate sequence: the config is parsed, the data structure summarised, and requirements checked without loading matrices](../../images/sequence-validate.png)
 

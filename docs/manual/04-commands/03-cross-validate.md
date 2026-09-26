@@ -8,10 +8,10 @@ mosa cross-validate --config <your-config>.yaml
 
 | Flag | Type | Required | Description |
 |---|---|---|---|
-| `--config` | path | yes | Path to YAML config file |
-| `--folds` | int | no | Number of folds, per trial for optimize (overrides evaluation.n_folds) |
-| `--strategy` | `stratified` \| `kfold` | no | Fold assignment: stratified balances model_type, kfold ignores it (overrides evaluation.strategy) |
-| `--no-shuffle` | flag | no | Assign folds as contiguous blocks of sample order instead of shuffling |
+| `-c`, `--config` | path | yes | Path to YAML config file |
+| `-k`, `--folds` | int | no | Number of folds, per trial for optimize (overrides evaluation.n_folds) |
+| `-s`, `--strategy` | `stratified` \| `kfold` | no | Fold assignment: stratified balances model_type, kfold ignores it (overrides evaluation.strategy) |
+| `-N`, `--no-shuffle` | flag | no | Assign folds as contiguous blocks of sample order instead of shuffling |
 
 The flags override `evaluation:` in the config for this run only. An unset flag
 leaves the config value alone.

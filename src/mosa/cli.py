@@ -398,12 +398,14 @@ def _add_eval_args(parser):
     Defaults are None/False so an unset flag leaves the config value alone.
     """
     parser.add_argument(
+        "-k",
         "--folds",
         type=int,
         default=None,
         help="Number of folds, per trial for optimize (overrides evaluation.n_folds)",
     )
     parser.add_argument(
+        "-s",
         "--strategy",
         choices=CV_STRATEGIES,
         default=None,
@@ -411,110 +413,167 @@ def _add_eval_args(parser):
         "(overrides evaluation.strategy)",
     )
     parser.add_argument(
+        "-N",
         "--no-shuffle",
         action="store_true",
         help="Assign folds as contiguous blocks of sample order instead of shuffling",
     )
 
 
-def main(argv=None):
-    """CLI entry point. argv defaults to sys.argv[1:]; tests pass it explicitly."""
+def _add_config_arg(parser):
+    parser.add_argument(
+        "-c", "--config", required=True, help="Path to YAML config file"
+    )
+
+
+def _add_debug_arg(parser):
+    parser.add_argument(
+        "-d", "--debug", action="store_true", help="Enable verbose debug logging"
+    )
+
+
+def _add_command(subparsers, name, summary, description, example):
+    """Add a subcommand whose -h opens with what it does and an example."""
+    return subparsers.add_parser(
+        name,
+        help=summary,
+        description=f"{description}\n\nexample:\n  {example}",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the mosa argument parser with every subcommand."""
     parser = argparse.ArgumentParser(
-        description="MOSA: Multi-Omic Synthetic Augmentation",
+        prog="mosa",
+        description="MOSA: integrate multi-omic views into a shared latent space.",
+        epilog="Typical run: convert, inspect, validate, train, then transform or "
+        "plot. Run 'mosa <command> -h' for what a command does and its flags.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    train_parser = subparsers.add_parser("train", help="Train a model")
-    train_parser.add_argument(
-        "--config", required=True, help="Path to YAML config file"
+    train_parser = _add_command(
+        subparsers,
+        "train",
+        "Train a model from a config",
+        "Fit the model described in a config on its data. Writes the checkpoint,\n"
+        "latent representations and reconstructions to model.output_dir.",
+        "mosa train -c config.yaml",
     )
+    _add_config_arg(train_parser)
     train_parser.add_argument(
+        "-r",
         "--resume",
         default=None,
         metavar="CKPT",
         help="Resume training from a Lightning checkpoint (.ckpt)",
     )
-    train_parser.add_argument(
-        "--debug", action="store_true", help="Enable verbose debug logging"
-    )
+    _add_debug_arg(train_parser)
 
-    transform_parser = subparsers.add_parser(
+    transform_parser = _add_command(
+        subparsers,
         "transform",
-        help="Project data into the latent space using a saved model",
+        "Project data into the latent space using a saved model",
+        "Project samples through a trained model. Scaling uses the statistics\n"
+        "from training, never refit on the new data. Writes latent.parquet, and\n"
+        "per-view reconstructions with -r.",
+        "mosa transform -m run/model.ckpt -i data.h5mu -o projected/",
     )
     transform_parser.add_argument(
-        "--checkpoint", required=True, help="Path to saved model checkpoint (.ckpt)"
+        "-m",
+        "--checkpoint",
+        required=True,
+        help="Path to saved model checkpoint (.ckpt)",
     )
     transform_parser.add_argument(
-        "--input", required=True, help="Path to .h5mu or .zarr input data"
+        "-i", "--input", required=True, help="Path to .h5mu or .zarr input data"
     )
     transform_parser.add_argument(
+        "-o",
         "--output",
         required=True,
         help="Directory to write latent.parquet (and reconstructions)",
     )
     transform_parser.add_argument(
+        "-r",
         "--reconstruct",
         action="store_true",
         help="Also write per-omic reconstruction parquets",
     )
-    transform_parser.add_argument(
-        "--debug", action="store_true", help="Enable verbose debug logging"
-    )
+    _add_debug_arg(transform_parser)
 
-    cv_parser = subparsers.add_parser(
+    cv_parser = _add_command(
+        subparsers,
         "cross-validate",
-        help="Run k-fold cross-validation",
+        "Run k-fold cross-validation",
+        "Score a config without a full run: train on k-1 folds, reconstruct the\n"
+        "held-out fold, and report reconstruction error per view. Use it to\n"
+        "compare configs.",
+        "mosa cross-validate -c config.yaml -k 5",
     )
-    cv_parser.add_argument("--config", required=True, help="Path to YAML config file")
+    _add_config_arg(cv_parser)
     _add_eval_args(cv_parser)
-    cv_parser.add_argument(
-        "--debug", action="store_true", help="Enable verbose debug logging"
-    )
+    _add_debug_arg(cv_parser)
 
-    optimize_parser = subparsers.add_parser(
+    optimize_parser = _add_command(
+        subparsers,
         "optimize",
-        help="Run Optuna hyperparameter search over a config",
+        "Run Optuna hyperparameter search over a config",
+        "Search hyperparameters with Optuna. Each trial samples values from the\n"
+        "search space and is scored by cross-validation. Prints the best values.",
+        "mosa optimize -c config.yaml -p search_space.yaml -n 50",
     )
+    _add_config_arg(optimize_parser)
     optimize_parser.add_argument(
-        "--config", required=True, help="Path to YAML config file"
-    )
-    optimize_parser.add_argument(
+        "-p",
         "--search-space",
         required=True,
         help="Path to search-space YAML (see configs/search_space.yaml)",
     )
     optimize_parser.add_argument(
-        "--trials", type=int, default=20, help="Number of Optuna trials (default: 20)"
+        "-n",
+        "--trials",
+        type=int,
+        default=20,
+        help="Number of Optuna trials (default: 20)",
     )
     _add_eval_args(optimize_parser)
-    optimize_parser.add_argument(
-        "--debug", action="store_true", help="Enable verbose debug logging"
-    )
+    _add_debug_arg(optimize_parser)
 
-    plot_parser = subparsers.add_parser(
-        "plot", help="Generate diagnostic plots from training outputs"
+    plot_parser = _add_command(
+        subparsers,
+        "plot",
+        "Generate diagnostic plots from training outputs",
+        "Draw diagnostic figures from a finished training run: latent UMAPs,\n"
+        "loss curves and reconstruction quality. Writes them to <output_dir>/plots.",
+        "mosa plot -c config.yaml",
     )
-    plot_parser.add_argument("--config", required=True, help="Path to YAML config file")
+    _add_config_arg(plot_parser)
     plot_parser.add_argument(
+        "-o",
         "--output-dir",
         default=None,
         help="Path to training output directory (defaults to model.output_dir in config)",
     )
-    plot_parser.add_argument(
-        "--debug", action="store_true", help="Enable verbose debug logging"
-    )
+    _add_debug_arg(plot_parser)
 
-    convert_parser = subparsers.add_parser(
+    convert_parser = _add_command(
+        subparsers,
         "convert",
-        help="Convert CSV files to MuData (.h5mu or .zarr)",
+        "Convert CSV files to MuData (.h5mu or .zarr)",
+        "Build the MuData file MOSA trains on from per-view tables and a sample\n"
+        "metadata table. Aligns samples across views; never scales, imputes or\n"
+        "filters values.",
+        "mosa convert -m meta.csv -v gexp:gexp.csv -v meth:meth.csv -o data.h5mu",
     )
     convert_parser.add_argument(
+        "-m",
         "--conditionals",
         required=True,
         help="Path to conditionals CSV (required columns: model_id, model_type; optional: tissue)",
     )
     convert_parser.add_argument(
+        "-v",
         "--view",
         required=True,
         action="append",
@@ -524,23 +583,27 @@ def main(argv=None):
         "(delimited ones may be .gz).",
     )
     convert_parser.add_argument(
+        "-M",
         "--mutations",
         default=None,
         help="Path to mutations CSV (features x samples, binary). Columns become mutation_* in .obs.",
     )
     convert_parser.add_argument(
+        "-I",
         "--id-map",
         default=None,
         help="Sample-ID crosswalk table (columns: source_id, model_id) applied to every "
         "view before alignment. Use it when providers name the same sample differently.",
     )
     convert_parser.add_argument(
+        "-x",
         "--on-collision",
         choices=["error", "first"],
         default="error",
         help="What to do when two columns resolve to one sample ID (default: error).",
     )
     convert_parser.add_argument(
+        "-n",
         "--min-views",
         type=int,
         default=1,
@@ -548,6 +611,7 @@ def main(argv=None):
         help="Keep only samples with data in at least N views (default: 1, keep all).",
     )
     convert_parser.add_argument(
+        "-F",
         "--filter",
         action="append",
         default=None,
@@ -556,46 +620,55 @@ def main(argv=None):
         "(e.g. 'model_type=Cell_Line,Organoid'). Repeat for several columns.",
     )
     convert_parser.add_argument(
+        "-s",
         "--shared-features",
         action="store_true",
         help="Reduce every view to the features they all share. Only valid when all "
         "views use one identifier namespace (e.g. every omic at gene level).",
     )
     convert_parser.add_argument(
-        "--output", required=True, help="Output file path (.h5mu or .zarr)"
+        "-o", "--output", required=True, help="Output file path (.h5mu or .zarr)"
     )
     convert_parser.add_argument(
+        "-f",
         "--format",
         choices=["h5mu", "zarr"],
         default="h5mu",
         help="Output format (default: h5mu)",
     )
-    convert_parser.add_argument(
-        "--debug", action="store_true", help="Enable verbose debug logging"
-    )
+    _add_debug_arg(convert_parser)
 
-    inspect_parser = subparsers.add_parser(
+    inspect_parser = _add_command(
+        subparsers,
         "inspect",
-        help="Print a summary of a MuData file (.h5mu or .zarr)",
+        "Print a summary of a MuData file (.h5mu or .zarr)",
+        "Summarise a MuData file: samples, features and missingness per view,\n"
+        "value ranges and metadata columns. Run it after convert, before training.",
+        "mosa inspect -i data.h5mu",
     )
     inspect_parser.add_argument(
-        "--input", required=True, help="Path to .h5mu or .zarr file"
+        "-i", "--input", required=True, help="Path to .h5mu or .zarr file"
     )
-    inspect_parser.add_argument(
-        "--debug", action="store_true", help="Enable verbose debug logging"
-    )
+    _add_debug_arg(inspect_parser)
 
-    validate_parser = subparsers.add_parser(
+    validate_parser = _add_command(
+        subparsers,
         "validate",
-        help="Validate a YAML config without training",
+        "Validate a YAML config without training",
+        "Check a config against the data it points to, without training. Catches\n"
+        "unknown keys, mismatched view names and missing metadata columns in\n"
+        "seconds.",
+        "mosa validate -c config.yaml",
     )
-    validate_parser.add_argument(
-        "--config", required=True, help="Path to YAML config file"
-    )
-    validate_parser.add_argument(
-        "--debug", action="store_true", help="Enable verbose debug logging"
-    )
+    _add_config_arg(validate_parser)
+    _add_debug_arg(validate_parser)
 
+    return parser
+
+
+def main(argv=None):
+    """CLI entry point. argv defaults to sys.argv[1:]; tests pass it explicitly."""
+    parser = build_parser()
     args = parser.parse_args(argv)
     _setup_logging(args.debug)
 

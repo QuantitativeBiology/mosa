@@ -8,8 +8,8 @@ mosa plot --config <your-config>.yaml
 
 | Flag | Type | Required | Description |
 |---|---|---|---|
-| `--config` | path | yes | Path to YAML config file |
-| `--output-dir` | path | no | Path to training output directory (defaults to model.output_dir in config) |
+| `-c`, `--config` | path | yes | Path to YAML config file |
+| `-o`, `--output-dir` | path | no | Path to training output directory (defaults to model.output_dir in config) |
 
 ![Plot sequence: outputs are read from the run directory, figures rendered, and written under plots/](../../images/sequence-plot.png)
 
