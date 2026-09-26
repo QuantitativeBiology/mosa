@@ -8,8 +8,8 @@ version = "0.1.0"
 description = "Generative Multi-Omics Data Integration"
 requires-python = ">=3.11"
 dependencies = [
-    "torch==2.10.0",
-    "pytorch-lightning==2.6.1",
+    "torch==2.14.0",
+    "pytorch-lightning==2.6.6",
     "pytorch-metric-learning==2.9.0",
     "numpy==2.4.2",
     "pandas==3.0.1",
