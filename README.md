@@ -11,7 +11,7 @@ Beyond the built-in VAE, MOSA is extensible. You can register custom models to u
 Install the tool and run the core pipeline:
 
 ```bash
-pip install -e ".[dev]"
+pip install -e .
 
 mosa inspect  --input <data>.h5mu
 mosa validate --config <your-config>.yaml

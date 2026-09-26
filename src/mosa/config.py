@@ -12,7 +12,9 @@ logger = logging.getLogger(__name__)
 CV_STRATEGIES = ("stratified", "kfold")
 
 
-def check_unknown_keys(cls, raw: dict, block: str, ignore: set[str] = frozenset()) -> None:
+def check_unknown_keys(
+    cls, raw: dict, block: str, ignore: frozenset[str] | set[str] = frozenset()
+) -> None:
     """Reject keys that are not fields of `cls`, suggesting the closest valid name.
 
     `block` names the YAML location for the message (e.g. "model:" or
@@ -133,11 +135,21 @@ class ModelConfig:
     output_dir: str = "outputs"
     random_seed: int = 42
 
+    def validate_against_data(
+        self, data_cfg: DataConfig, eval_cfg: EvaluationConfig, summary: dict
+    ) -> list[str]:
+        """Validate model configuration against data characteristics.
+
+        Subclasses can override this to enforce model-specific constraints.
+        Returns a list of warning strings for non-fatal issues.
+        """
+        return []
+
     def __post_init__(self):
         """No base-level invariants; defined so subclasses can call super()."""
 
     @classmethod
-    def from_yaml_dict(cls, raw: dict) -> "ModelConfig":
+    def from_yaml_dict(cls, raw: dict) -> ModelConfig:
         """Build from a raw YAML mapping (model.type already stripped).
 
         Base implementation passes the mapping straight through. Subclasses

@@ -3,23 +3,23 @@ from __future__ import annotations
 import dataclasses
 import logging
 
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-import pytorch_lightning as pl
 
 from mosa import __version__
 from mosa.config import DataConfig
 from mosa.models.mosa.config import MOSAConfig
+from mosa.models.mosa.vae.decoder import OmicDecoder
+from mosa.models.mosa.vae.discriminator import Discriminator
+from mosa.models.mosa.vae.encoder import OmicEncoder
+from mosa.models.mosa.vae.latent import BaseLatentSpace
 from mosa.models.mosa.vae.losses import (
     adversarial_loss,
     contrastive_loss,
     kl_divergence,
     reconstruction_loss,
 )
-from mosa.models.mosa.vae.decoder import OmicDecoder
-from mosa.models.mosa.vae.discriminator import Discriminator
-from mosa.models.mosa.vae.encoder import OmicEncoder
-from mosa.models.mosa.vae.latent import BaseLatentSpace
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +87,11 @@ class VAE(pl.LightningModule):
 
         use_shared_head = config.fusion_method != "poe" or config.poe_use_shared_head
         self.view_encoder_dims: dict[str, int] = {
-            name: (vc.hidden_layer_dims[-1] if use_shared_head else config.joint_latent_dim * 2)
+            name: (
+                vc.hidden_layer_dims[-1]
+                if use_shared_head
+                else config.joint_latent_dim * 2
+            )
             for name, vc in config.views.items()
         }
         self.view_order = list(config.views.keys())
@@ -121,19 +125,29 @@ class VAE(pl.LightningModule):
             use_shared_head=config.poe_use_shared_head,
         )
 
-        logger.debug("Encoders (in, out): %s",
-                      {n: (view_input_dims[n], self.view_encoder_dims[n]) for n in config.views})
-        logger.debug("Decoders (in, out): %s",
-                      {n: (config.joint_latent_dim, view_input_dims[n]) for n in config.views})
-        logger.debug("Latent space: %s, joint_latent_dim=%d",
-                      config.fusion_method, config.joint_latent_dim)
+        logger.debug(
+            "Encoders (in, out): %s",
+            {n: (view_input_dims[n], self.view_encoder_dims[n]) for n in config.views},
+        )
+        logger.debug(
+            "Decoders (in, out): %s",
+            {n: (config.joint_latent_dim, view_input_dims[n]) for n in config.views},
+        )
+        logger.debug(
+            "Latent space: %s, joint_latent_dim=%d",
+            config.fusion_method,
+            config.joint_latent_dim,
+        )
 
         # Optional adversarial discriminator
         self.discriminator: Discriminator | None = None
         if config.adv_weight > 0 and n_batches > 0:
             self.discriminator = Discriminator(config.joint_latent_dim, n_batches)
-            logger.debug("Discriminator: latent_dim=%d, n_batches=%d",
-                         config.joint_latent_dim, n_batches)
+            logger.debug(
+                "Discriminator: latent_dim=%d, n_batches=%d",
+                config.joint_latent_dim,
+                n_batches,
+            )
 
         # Class weights for adversarial loss (set by datamodule after setup)
         self.register_buffer(
@@ -174,7 +188,9 @@ class VAE(pl.LightningModule):
             view_embeddings[name] = emb
 
         # Fuse view embeddings into joint latent space
-        mu, logvar, z = self.latent_space(view_embeddings, self.view_order, sample_masks)
+        mu, logvar, z = self.latent_space(
+            view_embeddings, self.view_order, sample_masks
+        )
 
         # Decode each view
         x_hat = {}
@@ -196,7 +212,9 @@ class VAE(pl.LightningModule):
             Keys: recon, kl, contrastive, recon_metrics.
         """
         loss_types = {name: vc.loss_type for name, vc in self.config.views.items()}
-        recon_weights = {name: vc.recon_weight for name, vc in self.config.views.items()}
+        recon_weights = {
+            name: vc.recon_weight for name, vc in self.config.views.items()
+        }
         needs_group = any(lt == "macro" for lt in loss_types.values())
 
         recon_loss, recon_metrics = reconstruction_loss(
@@ -237,7 +255,6 @@ class VAE(pl.LightningModule):
     def training_step(self, batch: dict, batch_idx: int):
         """Two-phase training step: discriminator update, then VAE update."""
         optimizers = self.optimizers()
-        schedulers = self.lr_schedulers()
 
         if isinstance(optimizers, list):
             opt_vae = optimizers[0]
@@ -255,10 +272,14 @@ class VAE(pl.LightningModule):
         disc_loss_val = torch.tensor(0.0, device=self.device)
 
         if self.discriminator is not None and opt_disc is not None:
-            class_weights = self.class_weights if self.config.use_adv_class_weights else None
+            class_weights = (
+                self.class_weights if self.config.use_adv_class_weights else None
+            )
             disc_pred = self.discriminator(out["z"].detach())
             disc_loss_val = adversarial_loss(
-                disc_pred, batch["source_ids"], class_weights,
+                disc_pred,
+                batch["source_ids"],
+                class_weights,
                 focal_gamma=self.config.adv_focal_gamma,
             )
             opt_disc.zero_grad()
@@ -269,7 +290,9 @@ class VAE(pl.LightningModule):
             # Phase 2: adversarial component for VAE (fool discriminator)
             adv_pred = self.discriminator(out["z"])
             adv_loss_val = adversarial_loss(
-                adv_pred, batch["source_ids"], class_weights,
+                adv_pred,
+                batch["source_ids"],
+                class_weights,
                 focal_gamma=self.config.adv_focal_gamma,
             )
 
@@ -298,18 +321,21 @@ class VAE(pl.LightningModule):
         self.log("train/kl_weight", current_kl_weight, **log_kw)
         for omic_name, omic_loss in losses["recon_metrics"]["omic_losses"].items():
             self.log(f"train/recon_{omic_name}", omic_loss, **log_kw)
-        for omic_name, group_losses in losses["recon_metrics"]["group_omic_losses"].items():
+        for omic_name, group_losses in losses["recon_metrics"][
+            "group_omic_losses"
+        ].items():
             for g_idx, g_loss in group_losses.items():
-                g_name = (self.model_type_names[g_idx]
-                          if self.model_type_names and g_idx < len(self.model_type_names)
-                          else str(g_idx))
+                g_name = (
+                    self.model_type_names[g_idx]
+                    if self.model_type_names and g_idx < len(self.model_type_names)
+                    else str(g_idx)
+                )
                 self.log(f"train/recon_{omic_name}_{g_name}", g_loss, **log_kw)
         if self.config.contrastive_weight > 0:
             self.log("train/contrastive", losses["contrastive"], **log_kw)
         if self.discriminator is not None:
             self.log("train/disc_loss", disc_loss_val, **log_kw)
             self.log("train/adv_loss", adv_loss_val, **log_kw)
-
 
     def on_train_epoch_end(self) -> None:
         """Step LR schedulers at end of training epoch."""
@@ -395,7 +421,9 @@ class VAE(pl.LightningModule):
 
             if force_source_id is not None:
                 if n_batches is None or n_batches <= 0:
-                    raise ValueError("n_batches must be provided when force_source_id is used")
+                    raise ValueError(
+                        "n_batches must be provided when force_source_id is used"
+                    )
                 if force_source_id < 0 or force_source_id >= n_batches:
                     raise ValueError(
                         f"force_source_id={force_source_id} out of range for n_batches={n_batches}"
@@ -420,8 +448,7 @@ class VAE(pl.LightningModule):
             "z": torch.cat(all_z).numpy(),
             "source_ids": torch.cat(all_source_ids).numpy(),
             "x_hat": {
-                omic: torch.cat(chunks).numpy()
-                for omic, chunks in all_x_hat.items()
+                omic: torch.cat(chunks).numpy() for omic, chunks in all_x_hat.items()
             },
             "sample_names": all_names,
         }

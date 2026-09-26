@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import tempfile
+from typing import Any
 
 import numpy as np
 from sklearn.model_selection import KFold, StratifiedKFold
@@ -160,7 +161,7 @@ def cross_validate(
         val = dataset.subset(val_idx)
 
         with tempfile.TemporaryDirectory(prefix=f"mosa_cv_fold{fold_idx}_") as tmp_dir:
-            fold_overrides = {"output_dir": tmp_dir}
+            fold_overrides: dict[str, Any] = {"output_dir": tmp_dir}
             if hasattr(model_cfg, "checkpoint_top_k"):
                 fold_overrides["checkpoint_top_k"] = 0
             fold_model_cfg = dataclasses.replace(model_cfg, **fold_overrides)
@@ -179,7 +180,9 @@ def cross_validate(
             logger.warning(
                 "Fold %d has no observed entries for view(s) %s; this split "
                 "cannot assess %s. Consider strategy='stratified' or shuffle=True.",
-                fold_idx, unobserved, "them" if len(unobserved) > 1 else "it",
+                fold_idx,
+                unobserved,
+                "them" if len(unobserved) > 1 else "it",
             )
         fold_totals.append(totals)
 
@@ -213,18 +216,25 @@ def cross_validate(
                 continue
             mse = totals[view]["sse"] / n_obs
             per_view[view] = {
-                "mse": mse, "nmse": mse / variances[view], "n_obs": n_obs,
+                "mse": mse,
+                "nmse": mse / variances[view],
+                "n_obs": n_obs,
             }
         covered = [v for v in dataset.view_names if per_view[v]["n_obs"] > 0]
-        per_fold.append({
-            "per_view": per_view,
-            "aggregate": float(np.mean([per_view[v]["nmse"] for v in covered])),
-            "n_views": len(covered),
-            "epoch_history": fold_histories[fold_idx],
-        })
+        per_fold.append(
+            {
+                "per_view": per_view,
+                "aggregate": float(np.mean([per_view[v]["nmse"] for v in covered])),
+                "n_views": len(covered),
+                "epoch_history": fold_histories[fold_idx],
+            }
+        )
         logger.debug(
             "Fold %d: aggregate=%.4f over %d/%d views",
-            fold_idx, per_fold[-1]["aggregate"], len(covered), len(dataset.view_names),
+            fold_idx,
+            per_fold[-1]["aggregate"],
+            len(covered),
+            len(dataset.view_names),
         )
 
     return {

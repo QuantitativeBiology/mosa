@@ -12,7 +12,7 @@ from scipy.sparse import issparse
 
 from mosa.data.dataset import MultiOmicDataset
 from mosa.errors import DataError, MissingFileError
-from mosa.utils import ensure_dir
+from mosa.utils import ensure_dir, mudata_set_options
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,7 @@ ORIENTATION_WARN_THRESHOLD = 0.10
 
 
 # Zarr path helpers (shared with datamodule.LazyZarrDataset)
+
 
 def is_zarr_path(path: str | Path) -> bool:
     """Detect zarr vs h5mu from a path: h5mu is always a single file, zarr a directory."""
@@ -39,6 +40,7 @@ def _zarr_view_mask_key(view_name: str, mask_layer: str) -> str:
 
 
 # Zarr encoding helpers (used by load_mudata and LazyZarrDataset)
+
 
 def _zarr_index_key(group) -> str:
     """Return the key that stores the index for a zarr obs/var group.
@@ -73,6 +75,7 @@ def _read_zarr_column(group) -> np.ndarray:
 
 # MuData loading
 
+
 def _summary_from_mdata(mdata) -> dict:
     """Build a summarize_structure()-shaped dict from an already-loaded MuData."""
     return {
@@ -98,7 +101,9 @@ def _verify_mudata_structure(
     """
     from mosa.config import DataConfig
 
-    data_cfg = DataConfig(path="unused", views=view_names, mask_layer_name=mask_layer_name)
+    data_cfg = DataConfig(
+        path="unused", views=view_names, mask_layer_name=mask_layer_name
+    )
     data_cfg.validate_against_data(_summary_from_mdata(mdata))
 
 
@@ -109,11 +114,12 @@ def _load_h5mu(
 ) -> MultiOmicDataset:
     """Load an h5mu file into a MultiOmicDataset."""
     import time
+
     import mudata
 
     logger.info("Loading MuData from %s", path)
     t0 = time.perf_counter()
-    with mudata.set_options(pull_on_update=False):
+    with mudata_set_options(pull_on_update=False):
         mdata = mudata.read(path)
     logger.debug("h5mu read took %.2fs", time.perf_counter() - t0)
     _verify_mudata_structure(mdata, view_names, mask_layer_name)
@@ -149,14 +155,23 @@ def _load_h5mu(
         views[view_name] = X
         masks[view_name] = mask
         feature_names[view_name] = list(adata.var_names)
-        logger.debug("  view '%s': %d samples x %d features (%.2fs)",
-                     view_name, X.shape[0], X.shape[1], time.perf_counter() - tv)
+        logger.debug(
+            "  view '%s': %d samples x %d features (%.2fs)",
+            view_name,
+            X.shape[0],
+            X.shape[1],
+            time.perf_counter() - tv,
+        )
 
     obs_df = mdata.obs.loc[:, ~mdata.obs.columns.str.match(r"^Unnamed")]
     n_samples = len(obs_df)
     view_summary = ", ".join(f"{k}: {v.shape[1]}" for k, v in views.items())
-    logger.info("Loaded %d samples — %s (%.2fs)",
-                n_samples, view_summary, time.perf_counter() - t0)
+    logger.info(
+        "Loaded %d samples — %s (%.2fs)",
+        n_samples,
+        view_summary,
+        time.perf_counter() - t0,
+    )
 
     return MultiOmicDataset(
         views=views,
@@ -226,8 +241,12 @@ def _load_zarr(
 
     view_summary = ", ".join(f"{k}: {v.shape[1]}" for k, v in views.items())
     n_samples = len(obs_df)
-    logger.info("Loaded %d samples — %s (%.2fs)",
-                n_samples, view_summary, time.perf_counter() - t0)
+    logger.info(
+        "Loaded %d samples — %s (%.2fs)",
+        n_samples,
+        view_summary,
+        time.perf_counter() - t0,
+    )
 
     return MultiOmicDataset(
         views=views,
@@ -288,7 +307,7 @@ def summarize_structure(path: str) -> dict:
 def _summarize_h5mu(path: str) -> dict:
     import mudata
 
-    with mudata.set_options(pull_on_update=False):
+    with mudata_set_options(pull_on_update=False):
         mdata = mudata.read_h5mu(path, backed=True)
     modalities = {
         name: {"n_features": adata.n_vars, "layers": list(adata.layers.keys())}
@@ -329,7 +348,9 @@ def _summarize_zarr(path: str) -> dict:
         idx_key = _zarr_index_key(obs_group)
         obs_columns = [k for k in obs_group if k != idx_key]
         if "model_type" in obs_group:
-            model_type_categories = list(pd.unique(_read_zarr_column(obs_group["model_type"])))
+            model_type_categories = list(
+                pd.unique(_read_zarr_column(obs_group["model_type"]))
+            )
 
     return {
         "format": "zarr",
@@ -382,6 +403,7 @@ def _read_table(path: str | Path, index_col: int | None = 0) -> pd.DataFrame:
 
 # Validation helpers
 
+
 def _require_exists(path: str | Path, what: str = "File") -> Path:
     """Raise a descriptive FileNotFoundError if path is missing."""
     p = Path(path)
@@ -425,7 +447,9 @@ def _validate_conditionals(path: str) -> pd.DataFrame:
     conditionals = conditionals.loc[:, ~conditionals.columns.str.match(r"^Unnamed")]
 
     if conditionals.index.duplicated().any():
-        dupes = list(conditionals.index[conditionals.index.duplicated(keep=False)].unique())
+        dupes = list(
+            conditionals.index[conditionals.index.duplicated(keep=False)].unique()
+        )
         raise DataError(
             f"Conditionals '{path}' has duplicate model_id values: {dupes[:10]}"
             + (" (and more)" if len(dupes) > 10 else "")
@@ -454,8 +478,13 @@ def _filter_metadata(
         before = len(metadata)
         observed = list(pd.unique(metadata[column].dropna()))
         metadata = metadata[metadata[column].isin(allowed)]
-        logger.info("filter %s in %s: kept %d of %d samples",
-                    column, allowed, len(metadata), before)
+        logger.info(
+            "filter %s in %s: kept %d of %d samples",
+            column,
+            allowed,
+            len(metadata),
+            before,
+        )
 
         if metadata.empty:
             raise DataError(
@@ -488,7 +517,9 @@ def _load_id_map(path: str) -> dict[str, str]:
             f"'model_id' (the canonical ID used in your metadata)."
         )
 
-    return dict(zip(df["source_id"].astype(str), df["model_id"].astype(str)))
+    return dict(
+        zip(df["source_id"].astype(str), df["model_id"].astype(str), strict=True)
+    )
 
 
 def _check_view_orientation(
@@ -520,7 +551,10 @@ def _check_view_orientation(
             "View '%s' (%s): only %.0f%% of conditionals sample IDs found in CSV column "
             "names (threshold: %.0f%%). If conversion produces 0 samples, check that "
             "sample IDs use the same format in both files (e.g. 'ACH-000001' vs 'ACH000001').",
-            view_name, csv_path, col_overlap * 100, ORIENTATION_WARN_THRESHOLD * 100,
+            view_name,
+            csv_path,
+            col_overlap * 100,
+            ORIENTATION_WARN_THRESHOLD * 100,
         )
 
 
@@ -534,9 +568,10 @@ def _validate_view_numeric(df_raw: pd.DataFrame, view_name: str, csv_path: str) 
             raise DataError(
                 f"View '{view_name}' ({csv_path}): column '{col}' contains non-numeric "
                 f"values: {list(bad_vals[:5])}"
-                + (" (and more)" if len(bad_vals) > 5 else "") + ".\n"
-                f"  All omic CSV values must be numeric. Missing values should be empty "
-                f"cells or NaN, not strings like 'NA' or 'N/A'."
+                + (" (and more)" if len(bad_vals) > 5 else "")
+                + ".\n"
+                "  All omic CSV values must be numeric. Missing values should be empty "
+                "cells or NaN, not strings like 'NA' or 'N/A'."
             )
 
 
@@ -557,6 +592,7 @@ def _check_format_extension(output_path: str, fmt: str) -> None:
 
 
 # Arrow serialisation helpers
+
 
 def _dearrow_df(df: pd.DataFrame) -> None:
     """Convert Arrow-backed string columns/index to object dtype in-place."""
@@ -584,6 +620,7 @@ def _dearrow_mudata(mdata: MuData) -> None:
 
 # Alignment
 
+
 def _combine_view_files(
     frames: list[pd.DataFrame],
     view_name: str,
@@ -604,21 +641,28 @@ def _combine_view_files(
             raise DataError(
                 f"View '{view_name}': {len(duplicates)} sample ID(s) occur more "
                 f"than once: {list(duplicates[:10])}"
-                + (" (and more)" if len(duplicates) > 10 else "") + ".\n"
-                f"  Two columns resolving to one sample is ambiguous. Pass "
-                f"--on-collision first to keep the first occurrence, or "
-                f"resolve it upstream."
+                + (" (and more)" if len(duplicates) > 10 else "")
+                + ".\n"
+                "  Two columns resolving to one sample is ambiguous. Pass "
+                "--on-collision first to keep the first occurrence, or "
+                "resolve it upstream."
             )
         combined = combined[~combined.index.duplicated(keep="first")]
         logger.warning(
             "View '%s': kept the first of %d colliding sample ID(s): %s%s",
-            view_name, len(duplicates), list(duplicates[:10]),
+            view_name,
+            len(duplicates),
+            list(duplicates[:10]),
             " (and more)" if len(duplicates) > 10 else "",
         )
 
     if len(frames) > 1:
-        logger.debug("  view '%s': combined %d files -> %d samples x %d features",
-                     view_name, len(frames), *combined.shape)
+        logger.debug(
+            "  view '%s': combined %d files -> %d samples x %d features",
+            view_name,
+            len(frames),
+            *combined.shape,
+        )
     return combined
 
 
@@ -676,21 +720,33 @@ def align_views(
     # `presence` = the sample appeared in the view's file, which no mask can
     # recover. `observed` = it holds a real value there, which min_views counts.
     presence = pd.DataFrame(
-        {f"has_{name}": [s in samples for s in sample_axis]
-         for name, samples in view_samples.items()},
-        index=sample_axis, dtype=bool,
+        {
+            f"has_{name}": [s in samples for s in sample_axis]
+            for name, samples in view_samples.items()
+        },
+        index=sample_axis,
+        dtype=bool,
     )
     observed = pd.DataFrame(
-        {name: df.notna().any(axis=1).reindex(sample_axis, fill_value=False)
-         for name, df in views.items()},
-        index=sample_axis, dtype=bool,
+        {
+            name: df.notna().any(axis=1).reindex(sample_axis, fill_value=False)
+            for name, df in views.items()
+        },
+        index=sample_axis,
+        dtype=bool,
     )
 
-    logger.debug("Sample axis (union across views, with metadata): %d", len(sample_axis))
+    logger.debug(
+        "Sample axis (union across views, with metadata): %d", len(sample_axis)
+    )
     for name in view_samples:
-        logger.debug("  view '%s': %d in file, %d with data (of %d)",
-                     name, int(presence[f"has_{name}"].sum()),
-                     int(observed[name].sum()), len(sample_axis))
+        logger.debug(
+            "  view '%s': %d in file, %d with data (of %d)",
+            name,
+            int(presence[f"has_{name}"].sum()),
+            int(observed[name].sum()),
+            len(sample_axis),
+        )
 
     if min_views > 1:
         n_views = observed.sum(axis=1)
@@ -701,8 +757,12 @@ def align_views(
                 f"(the most any sample reaches is {int(n_views.max())}).\n"
                 f"  Lower --min-views, or check that sample IDs match across views."
             )
-        logger.info("min_views=%d dropped %d of %d samples",
-                    min_views, len(sample_axis) - len(keep), len(sample_axis))
+        logger.info(
+            "min_views=%d dropped %d of %d samples",
+            min_views,
+            len(sample_axis) - len(keep),
+            len(sample_axis),
+        )
         sample_axis = keep
         presence = presence.loc[keep]
         observed = observed.loc[keep]
@@ -729,10 +789,15 @@ def align_views(
             logger.warning(
                 "shared_features kept only %d features, under 10%% of the "
                 "smallest view (%d). Check that the views really share an "
-                "identifier namespace.", len(shared), smallest,
+                "identifier namespace.",
+                len(shared),
+                smallest,
             )
-        logger.info("shared_features: %d features common to all %d views",
-                    len(shared), len(aligned))
+        logger.info(
+            "shared_features: %d features common to all %d views",
+            len(shared),
+            len(aligned),
+        )
         aligned = {name: df[shared] for name, df in aligned.items()}
 
     return aligned, metadata.loc[sample_axis], presence
@@ -766,12 +831,13 @@ def _print_conversion_report(
     print("  Views")
     for name, df in omics.items():
         n_present = int(presence[f"has_{name}"].sum())
-        print(f"    {name:<16}{df.shape[1]:>7} features"
-              f"{n_present:>8} / {n_final} samples present")
+        print(
+            f"    {name:<16}{df.shape[1]:>7} features"
+            f"{n_present:>8} / {n_final} samples present"
+        )
         n_dup = int(df.columns.duplicated().sum())
         if n_dup:
-            print(f"    {'':<16}{n_dup:>7} duplicate feature name(s), "
-                  f"suffixed at load")
+            print(f"    {'':<16}{n_dup:>7} duplicate feature name(s), suffixed at load")
 
     print("  Samples by view count")
     n_views = presence.sum(axis=1)
@@ -781,6 +847,7 @@ def _print_conversion_report(
 
 
 # Conversion
+
 
 def csv_to_mudata(
     conditionals_path: str,
@@ -839,7 +906,9 @@ def csv_to_mudata(
     _check_format_extension(output_path, format)
     conditionals = _validate_conditionals(conditionals_path)
     if metadata_filters:
-        conditionals = _filter_metadata(conditionals, metadata_filters, conditionals_path)
+        conditionals = _filter_metadata(
+            conditionals, metadata_filters, conditionals_path
+        )
     conditionals_ids = set(conditionals.index)
 
     id_map = _load_id_map(id_map_path) if id_map_path else {}
@@ -860,9 +929,7 @@ def csv_to_mudata(
         try:
             df_raw = _read_table(csv_path)
         except Exception as e:
-            raise DataError(
-                f"View '{view_name}': cannot read '{csv_path}': {e}"
-            ) from e
+            raise DataError(f"View '{view_name}': cannot read '{csv_path}': {e}") from e
 
         _check_view_orientation(df_raw, orientation_ids, view_name, csv_path)
         _validate_view_numeric(df_raw, view_name, csv_path)
@@ -874,8 +941,12 @@ def csv_to_mudata(
         if id_map:
             df = df.rename(index=id_map)  # unmapped IDs pass through unchanged
         view_frames.setdefault(view_name, []).append(df)
-        logger.debug("  view '%s' <- %s: %d samples x %d features",
-                     view_name, csv_path, *df.shape)
+        logger.debug(
+            "  view '%s' <- %s: %d samples x %d features",
+            view_name,
+            csv_path,
+            *df.shape,
+        )
 
     omics = {
         name: _combine_view_files(frames, name, on_collision)
@@ -925,10 +996,9 @@ def csv_to_mudata(
         adatas[view_name] = adata
 
     # Build MuData
-    import mudata
 
     logger.debug("Creating MuData object")
-    with mudata.set_options(pull_on_update=False):
+    with mudata_set_options(pull_on_update=False):
         mdata = MuData(adatas)
 
     mdata.obs = conditionals.copy()
@@ -950,16 +1020,18 @@ def csv_to_mudata(
 
     logger.info("Saving MuData (%s) to %s", format, output_path)
     # Writing runs update(), which pulls per-modality obs/var unless disabled.
-    with mudata.set_options(pull_on_update=False):
+    with mudata_set_options(pull_on_update=False):
         if format == "zarr":
             mdata.write_zarr(str(output_path_obj))
         else:
             mdata.write(str(output_path_obj))
-    logger.info("Conversion complete: %d samples, %d modalities",
-                len(sample_axis), len(adatas))
+    logger.info(
+        "Conversion complete: %d samples, %d modalities", len(sample_axis), len(adatas)
+    )
 
 
 # Inspection
+
 
 def inspect_mudata(path: str) -> None:
     """Print a human-readable summary of a MuData file for post-conversion verification."""
@@ -967,7 +1039,7 @@ def inspect_mudata(path: str) -> None:
 
     _require_exists(path, what="File")
 
-    with mudata.set_options(pull_on_update=False):
+    with mudata_set_options(pull_on_update=False):
         mdata = mudata.read_zarr(path) if is_zarr_path(path) else mudata.read(path)
 
     n_obs = mdata.n_obs
@@ -1012,7 +1084,9 @@ def inspect_mudata(path: str) -> None:
             flags.append("[WARNING: all values are ~zero]")
 
         flag_str = " " + " ".join(flags) if flags else ""
-        print(f"  {mod_name}: {n_feat} features | {presence_str} | {range_str}{flag_str}")
+        print(
+            f"  {mod_name}: {n_feat} features | {presence_str} | {range_str}{flag_str}"
+        )
 
     print("\nSample metadata (obs):")
     obs = mdata.obs
@@ -1021,8 +1095,11 @@ def inspect_mudata(path: str) -> None:
     else:
         for col in obs.columns:
             s = obs[col]
-            if (isinstance(s.dtype, pd.CategoricalDtype) or s.dtype == object
-                    or pd.api.types.is_bool_dtype(s)):
+            if (
+                isinstance(s.dtype, pd.CategoricalDtype)
+                or s.dtype == object
+                or pd.api.types.is_bool_dtype(s)
+            ):
                 vc = s.value_counts()
                 if len(vc) <= 8:
                     summary = ", ".join(f"{k}: {v}" for k, v in vc.items())
@@ -1030,9 +1107,7 @@ def inspect_mudata(path: str) -> None:
                     top = ", ".join(f"{k}: {v}" for k, v in vc.head(5).items())
                     summary = f"{top} ... ({len(vc)} unique values)"
             else:
-                summary = (
-                    f"min={s.min():.3g}, mean={s.mean():.3g}, max={s.max():.3g}"
-                )
+                summary = f"min={s.min():.3g}, mean={s.mean():.3g}, max={s.max():.3g}"
             print(f"  {col}: {summary}")
 
     sample_ids = list(mdata.obs_names[:5])

@@ -17,17 +17,14 @@ cd mosa
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 
-pip install -e ".[dev]"
+pip install -e .
 ```
 
-You can install specific dependency groups if you do not need the full package:
+This installs every command. The only optional piece is the MOFA backend (`model.type: mofa`), which needs mofapy2 and mofax:
 
-| Extra | Provides | Needed by |
-|---|---|---|
-| *(none)* | torch, lightning, mudata, pandas | `train`, `transform`, `convert`, `inspect`, `validate`, `cross-validate` |
-| `plot` | matplotlib, seaborn, umap-learn | `plot` |
-| `hpo` | optuna | `optimize` |
-| `dev` | plot dependencies, plus pytest | development |
+```bash
+pip install -e ".[mofa]"
+```
 
 Confirm the installation worked by checking the help output:
 
@@ -41,7 +38,7 @@ Update before testing or reporting a bug. Reinstalling picks up any changed depe
 
 ```bash
 git pull
-pip install -e ".[dev]"
+pip install -e .
 ```
 
 Checkpoints are tied to the MOSA version that trained them. A checkpoint written by an older version may not load in a newer one, so use checkpoints trained with your current version.

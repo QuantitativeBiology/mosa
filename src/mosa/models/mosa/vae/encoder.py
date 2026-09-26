@@ -40,7 +40,9 @@ class OmicEncoder(nn.Module):
     ):
         super().__init__()
 
-        self.view_dropout = ViewDropout(p=view_dropout_p) if view_dropout_p > 0 else None
+        self.view_dropout = (
+            ViewDropout(p=view_dropout_p) if view_dropout_p > 0 else None
+        )
 
         self.net = MLP(
             layer_sizes=[input_dim] + hidden_dims + [latent_dim],

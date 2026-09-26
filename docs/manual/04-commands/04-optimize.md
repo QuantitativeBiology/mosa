@@ -17,8 +17,6 @@ mosa optimize --config <your-config>.yaml \
 | `--strategy` | `stratified` \| `kfold` | no | Fold assignment: stratified balances model_type, kfold ignores it (overrides evaluation.strategy) |
 | `--no-shuffle` | flag | no | Assign folds as contiguous blocks of sample order instead of shuffling |
 
-Requires the `hpo` extra (`pip install -e ".[hpo]"`).
-
 ## Description
 
 Each trial samples values from the search space, applies them to the config's

@@ -26,18 +26,26 @@ class OmicViewConfig:
 
     def __post_init__(self):
         if not self.hidden_layer_dims:
-            raise ConfigError(f"View '{self.name}': hidden_layer_dims must not be empty")
+            raise ConfigError(
+                f"View '{self.name}': hidden_layer_dims must not be empty"
+            )
         if any(d <= 0 for d in self.hidden_layer_dims):
-            raise ConfigError(f"View '{self.name}': all hidden_layer_dims must be positive")
+            raise ConfigError(
+                f"View '{self.name}': all hidden_layer_dims must be positive"
+            )
         if self.loss_type not in _VALID_LOSS_TYPES:
             raise ConfigError(
                 f"View '{self.name}': loss_type must be one of {_VALID_LOSS_TYPES}, "
                 f"got '{self.loss_type}'"
             )
         if not 0.0 <= self.dropout_p < 1.0:
-            raise ConfigError(f"View '{self.name}': dropout_p must be in [0, 1), got {self.dropout_p}")
+            raise ConfigError(
+                f"View '{self.name}': dropout_p must be in [0, 1), got {self.dropout_p}"
+            )
         if self.recon_weight <= 0:
-            raise ConfigError(f"View '{self.name}': recon_weight must be positive, got {self.recon_weight}")
+            raise ConfigError(
+                f"View '{self.name}': recon_weight must be positive, got {self.recon_weight}"
+            )
 
 
 @dataclass
@@ -49,7 +57,9 @@ class MOSAConfig(ModelConfig):
     joint_latent_dim: int = 64
     fusion_method: str = "concat"
     shared_hidden_layer_dims: list[int] = field(default_factory=list)
-    poe_use_shared_head: bool = True  # PoE: True = shared head, False = direct mu/logvar per view
+    poe_use_shared_head: bool = (
+        True  # PoE: True = shared head, False = direct mu/logvar per view
+    )
     view_dropout_prob: float = 0.2
 
     # Losses
@@ -63,7 +73,9 @@ class MOSAConfig(ModelConfig):
     use_kl_scheduler: bool = False
     contrastive_weight: float = 0.0
     adv_weight: float = 0.0
-    adv_focal_gamma: float = 0.0  # focal loss gamma for adversarial CE; 0 disables (plain CE)
+    adv_focal_gamma: float = (
+        0.0  # focal loss gamma for adversarial CE; 0 disables (plain CE)
+    )
 
     # Optimiser
     learning_rate: float = 1e-3
@@ -77,10 +89,14 @@ class MOSAConfig(ModelConfig):
     batch_size: int = 64
     scaler_sample_frac: float = 1.0
     weighted_random_sampler: bool = True
-    use_adv_class_weights: bool = True  # use class weights in adversarial cross-entropy loss
+    use_adv_class_weights: bool = (
+        True  # use class weights in adversarial cross-entropy loss
+    )
     inference: bool = False
     target_batch: str = ""
-    preprocessing_mode: str = "standardize"  # "standardize", "center", or "none" (group-mean imputation)
+    preprocessing_mode: str = (
+        "standardize"  # "standardize", "center", or "none" (group-mean imputation)
+    )
 
     # Lightning trainer
     accelerator: str = "auto"
@@ -94,7 +110,7 @@ class MOSAConfig(ModelConfig):
     num_workers: int = 0
 
     @classmethod
-    def from_yaml_dict(cls, raw: dict) -> "MOSAConfig":
+    def from_yaml_dict(cls, raw: dict) -> MOSAConfig:
         """Parse the per-view mapping into OmicViewConfig objects before construction."""
         raw = dict(raw)
         check_unknown_keys(cls, raw, "model:")
@@ -115,9 +131,16 @@ class MOSAConfig(ModelConfig):
 
         # YAML may parse floats as strings (e.g. "1e-5")
         for name in (
-            "kl_weight", "kl_weight_final", "contrastive_weight", "adv_weight",
-            "learning_rate", "adv_learning_rate", "lr_gamma", "view_dropout_prob",
-            "scaler_sample_frac", "adv_focal_gamma",
+            "kl_weight",
+            "kl_weight_final",
+            "contrastive_weight",
+            "adv_weight",
+            "learning_rate",
+            "adv_learning_rate",
+            "lr_gamma",
+            "view_dropout_prob",
+            "scaler_sample_frac",
+            "adv_focal_gamma",
         ):
             val = getattr(self, name)
             if not isinstance(val, float):
@@ -125,27 +148,41 @@ class MOSAConfig(ModelConfig):
 
         # Structural validation
         if self.fusion_method not in _VALID_FUSION_METHODS:
-            raise ConfigError(f"fusion_method must be one of {_VALID_FUSION_METHODS}, got '{self.fusion_method}'")
+            raise ConfigError(
+                f"fusion_method must be one of {_VALID_FUSION_METHODS}, got '{self.fusion_method}'"
+            )
         if self.lr_scheduler not in _VALID_LR_SCHEDULERS:
-            raise ConfigError(f"lr_scheduler must be one of {_VALID_LR_SCHEDULERS}, got '{self.lr_scheduler}'")
+            raise ConfigError(
+                f"lr_scheduler must be one of {_VALID_LR_SCHEDULERS}, got '{self.lr_scheduler}'"
+            )
         if self.joint_latent_dim <= 0:
-            raise ConfigError(f"joint_latent_dim must be positive, got {self.joint_latent_dim}")
+            raise ConfigError(
+                f"joint_latent_dim must be positive, got {self.joint_latent_dim}"
+            )
         if self.batch_size <= 0:
             raise ConfigError(f"batch_size must be positive, got {self.batch_size}")
         if self.num_epochs <= 0:
             raise ConfigError(f"num_epochs must be positive, got {self.num_epochs}")
         if not 0.0 <= self.view_dropout_prob < 1.0:
-            raise ConfigError(f"view_dropout_prob must be in [0, 1), got {self.view_dropout_prob}")
+            raise ConfigError(
+                f"view_dropout_prob must be in [0, 1), got {self.view_dropout_prob}"
+            )
         if self.learning_rate <= 0:
-            raise ConfigError(f"learning_rate must be positive, got {self.learning_rate}")
+            raise ConfigError(
+                f"learning_rate must be positive, got {self.learning_rate}"
+            )
         if self.adv_weight > 0 and self.adv_learning_rate <= 0:
             raise ConfigError(
                 f"adv_learning_rate must be positive when adv_weight > 0, got {self.adv_learning_rate}"
             )
         if not 0.0 < self.scaler_sample_frac <= 1.0:
-            raise ConfigError(f"scaler_sample_frac must be in (0.0, 1.0], got {self.scaler_sample_frac}")
+            raise ConfigError(
+                f"scaler_sample_frac must be in (0.0, 1.0], got {self.scaler_sample_frac}"
+            )
         if self.adv_focal_gamma < 0:
-            raise ConfigError(f"adv_focal_gamma must be >= 0, got {self.adv_focal_gamma}")
+            raise ConfigError(
+                f"adv_focal_gamma must be >= 0, got {self.adv_focal_gamma}"
+            )
         if self.preprocessing_mode not in _VALID_PREPROCESSING_MODES:
             raise ConfigError(
                 f"preprocessing_mode must be one of {_VALID_PREPROCESSING_MODES}, "
@@ -154,15 +191,23 @@ class MOSAConfig(ModelConfig):
 
         # Lightning
         if self.precision not in _VALID_PRECISIONS:
-            raise ConfigError(f"precision must be one of {_VALID_PRECISIONS}, got '{self.precision}'")
+            raise ConfigError(
+                f"precision must be one of {_VALID_PRECISIONS}, got '{self.precision}'"
+            )
         if self.accelerator not in _VALID_ACCELERATORS:
-            raise ConfigError(f"accelerator must be one of {_VALID_ACCELERATORS}, got '{self.accelerator}'")
+            raise ConfigError(
+                f"accelerator must be one of {_VALID_ACCELERATORS}, got '{self.accelerator}'"
+            )
         if isinstance(self.devices, int) and self.devices < 1:
             raise ConfigError(f"devices must be >= 1, got {self.devices}")
         if self.accumulate_grad_batches < 1:
-            raise ConfigError(f"accumulate_grad_batches must be >= 1, got {self.accumulate_grad_batches}")
+            raise ConfigError(
+                f"accumulate_grad_batches must be >= 1, got {self.accumulate_grad_batches}"
+            )
         if self.gradient_clip_val < 0:
-            raise ConfigError(f"gradient_clip_val must be >= 0, got {self.gradient_clip_val}")
+            raise ConfigError(
+                f"gradient_clip_val must be >= 0, got {self.gradient_clip_val}"
+            )
 
         # Cross-field: PoE with a shared head requires equal last hidden dims across views
         if self.fusion_method == "poe" and self.views and self.poe_use_shared_head:
@@ -196,12 +241,16 @@ class MOSAConfig(ModelConfig):
                 )
 
         result: list[str] = []
-        if (data_cfg.use_tissue or self.contrastive_weight > 0) and "tissue" not in obs_columns:
+        if (
+            data_cfg.use_tissue or self.contrastive_weight > 0
+        ) and "tissue" not in obs_columns:
             result.append(
                 "No 'tissue' column in data; tissue conditioning will be disabled and "
                 "the contrastive loss will degrade to zero."
             )
-        if data_cfg.use_mutations and not any(c.startswith("mutation_") for c in obs_columns):
+        if data_cfg.use_mutations and not any(
+            c.startswith("mutation_") for c in obs_columns
+        ):
             result.append(
                 "No 'mutation_*' columns in data; mutation conditioning will be disabled."
             )

@@ -3,24 +3,25 @@
 Generates UMAP visualizations, loss curves, reconstruction scatter plots,
 and clustering quality metrics from training outputs.
 """
+
 import colorsys
 import logging
 import warnings
 import zlib
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
 import umap
-import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import calinski_harabasz_score, davies_bouldin_score
+from sklearn.preprocessing import StandardScaler
 
 from mosa.errors import DataError
-from mosa.utils import ensure_dir
+from mosa.utils import ensure_dir, mudata_set_options
 
 logger = logging.getLogger(__name__)
 
@@ -137,50 +138,61 @@ def _infer_layer_styles(plot_df, model_type_col="model_type"):
 
     layers = []
     for i, mt in enumerate(ordered):
-        share = counts[mt] / total          # 0..1, larger = more common
-        rarity = 1.0 - share                # larger = rarer -> more emphasis
-        layers.append({
-            "model_type": mt,
-            "marker": _MARKER_CYCLE[i % len(_MARKER_CYCLE)],
-            "alpha": float(np.clip(0.35 + 0.5 * rarity, 0.35, 0.9)),
-            "size": float(np.clip(4 + 6 * rarity, 4, 10)),
-            "zorder": i + 1,
-            "edgecolor": "black" if rarity > 0.5 else None,
-            "linewidth": 0.2 if rarity > 0.5 else 0.1,
-        })
+        share = counts[mt] / total  # 0..1, larger = more common
+        rarity = 1.0 - share  # larger = rarer -> more emphasis
+        layers.append(
+            {
+                "model_type": mt,
+                "marker": _MARKER_CYCLE[i % len(_MARKER_CYCLE)],
+                "alpha": float(np.clip(0.35 + 0.5 * rarity, 0.35, 0.9)),
+                "size": float(np.clip(4 + 6 * rarity, 4, 10)),
+                "zorder": i + 1,
+                "edgecolor": "black" if rarity > 0.5 else None,
+                "linewidth": 0.2 if rarity > 0.5 else 0.1,
+            }
+        )
     return layers
 
 
 def configure_plot_style():
     """Apply matplotlib styling for publication-ready figures."""
-    plt.rcParams.update({
-        "figure.figsize": [2.5, 2.5],
-        "figure.dpi": 300,
-        "font.family": "sans-serif",
-        "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
-        "axes.titlesize": 7,
-        "legend.fontsize": 6,
-        "legend.title_fontsize": 6,
-        "axes.labelsize": 6,
-        "xtick.labelsize": 6,
-        "ytick.labelsize": 6,
-        "grid.linewidth": 0.15,
-        "axes.spines.top": False,
-        "axes.spines.right": False,
-        "axes.grid": True,
-        "grid.linestyle": "--",
-        "grid.color": "black",
-        "grid.alpha": 0.5,
-        "legend.frameon": False,
-        "legend.loc": "best",
-        "axes.axisbelow": True,
-        "pdf.fonttype": 42,
-        "ps.fonttype": 42,
-    })
+    plt.rcParams.update(
+        {
+            "figure.figsize": [2.5, 2.5],
+            "figure.dpi": 300,
+            "font.family": "sans-serif",
+            "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
+            "axes.titlesize": 7,
+            "legend.fontsize": 6,
+            "legend.title_fontsize": 6,
+            "axes.labelsize": 6,
+            "xtick.labelsize": 6,
+            "ytick.labelsize": 6,
+            "grid.linewidth": 0.15,
+            "axes.spines.top": False,
+            "axes.spines.right": False,
+            "axes.grid": True,
+            "grid.linestyle": "--",
+            "grid.color": "black",
+            "grid.alpha": 0.5,
+            "legend.frameon": False,
+            "legend.loc": "best",
+            "axes.axisbelow": True,
+            "pdf.fonttype": 42,
+            "ps.fonttype": 42,
+        }
+    )
 
 
-def compute_umap_embedding(df, n_neighbors=25, min_dist=0.25, metric="euclidean",
-                           n_components=2, random_state=42, pca_components=None):
+def compute_umap_embedding(
+    df,
+    n_neighbors=25,
+    min_dist=0.25,
+    metric="euclidean",
+    n_components=2,
+    random_state=42,
+    pca_components=None,
+):
     """Compute UMAP embedding with optional PCA pre-reduction.
 
     Parameters
@@ -207,12 +219,16 @@ def compute_umap_embedding(df, n_neighbors=25, min_dist=0.25, metric="euclidean"
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
         embedding = umap.UMAP(
-            n_neighbors=n_neighbors, min_dist=min_dist,
-            metric=metric, n_components=n_components, random_state=random_state,
+            n_neighbors=n_neighbors,
+            min_dist=min_dist,
+            metric=metric,
+            n_components=n_components,
+            random_state=random_state,
         ).fit_transform(X)
 
-    return pd.DataFrame(embedding, index=index,
-                        columns=[f"UMAP{i+1}" for i in range(n_components)])
+    return pd.DataFrame(
+        embedding, index=index, columns=[f"UMAP{i + 1}" for i in range(n_components)]
+    )
 
 
 def plot_umap(plot_df, palette, title=None, model_type_col="model_type"):
@@ -246,39 +262,67 @@ def plot_umap(plot_df, palette, title=None, model_type_col="model_type"):
         if subset.empty:
             continue
         scatter_kw = dict(
-            data=subset, x="UMAP1", y="UMAP2",
-            hue="tissue", palette=palette,
-            style=model_type_col, markers=markers,
-            size=model_type_col, sizes=sizes,
-            alpha=layer["alpha"], zorder=layer["zorder"],
-            linewidth=layer["linewidth"], legend=False, ax=ax,
+            data=subset,
+            x="UMAP1",
+            y="UMAP2",
+            hue="tissue",
+            palette=palette,
+            style=model_type_col,
+            markers=markers,
+            size=model_type_col,
+            sizes=sizes,
+            alpha=layer["alpha"],
+            zorder=layer["zorder"],
+            linewidth=layer["linewidth"],
+            legend=False,
+            ax=ax,
         )
         if layer["edgecolor"]:
             scatter_kw["edgecolor"] = layer["edgecolor"]
         sns.scatterplot(**scatter_kw)
 
     type_handles = [
-        Line2D([0], [0], marker=layer["marker"], color="w", label=layer["model_type"],
-               markerfacecolor="gray", markersize=6,
-               **({"markeredgecolor": layer["edgecolor"], "markeredgewidth": 0.6}
-                  if layer["edgecolor"] else {}))
+        Line2D(
+            [0],
+            [0],
+            marker=layer["marker"],
+            color="w",
+            label=layer["model_type"],
+            markerfacecolor="gray",
+            markersize=6,
+            **(
+                {"markeredgecolor": layer["edgecolor"], "markeredgewidth": 0.6}
+                if layer["edgecolor"]
+                else {}
+            ),
+        )
         for layer in layers
     ]
     legend_markers = ax.legend(
-        handles=type_handles, title="Sample Type",
-        loc="upper left", bbox_to_anchor=(1.05, 1.0), frameon=False,
+        handles=type_handles,
+        title="Sample Type",
+        loc="upper left",
+        bbox_to_anchor=(1.05, 1.0),
+        frameon=False,
     )
     ax.add_artist(legend_markers)
 
     tissues_present = plot_df["tissue"].dropna().unique()
     color_handles = [
-        Line2D([0], [0], marker="o", color=palette[t], label=t, linestyle="", markersize=6)
+        Line2D(
+            [0], [0], marker="o", color=palette[t], label=t, linestyle="", markersize=6
+        )
         for t in tissues_present
     ]
     ax.legend(
-        handles=color_handles, title="Tissue",
-        loc="upper left", bbox_to_anchor=(1.5, 1.0),
-        ncol=2, columnspacing=0.5, handletextpad=0.3, frameon=False,
+        handles=color_handles,
+        title="Tissue",
+        loc="upper left",
+        bbox_to_anchor=(1.5, 1.0),
+        ncol=2,
+        columnspacing=0.5,
+        handletextpad=0.3,
+        frameon=False,
     )
 
     ax.set_xticks([])
@@ -289,6 +333,7 @@ def plot_umap(plot_df, palette, title=None, model_type_col="model_type"):
 
 
 # Helpers
+
 
 def _try_read(parquet_path, csv_path):
     """Try reading parquet first, fall back to CSV."""
@@ -302,7 +347,10 @@ def _try_read(parquet_path, csv_path):
 def _read_split(output_dir, splits, filename):
     """Try reading filename.parquet/csv from each split subdir in order, first hit wins."""
     for split in splits:
-        data = _try_read(output_dir / split / f"{filename}.parquet", output_dir / split / f"{filename}.csv")
+        data = _try_read(
+            output_dir / split / f"{filename}.parquet",
+            output_dir / split / f"{filename}.csv",
+        )
         if data is not None:
             return data
     return None
@@ -366,6 +414,7 @@ def _save_fig(fig, out_path):
 
 # Loss plots
 
+
 def _load_lightning_metrics(output_dir):
     """Load metrics from latest Lightning log version.
 
@@ -377,7 +426,9 @@ def _load_lightning_metrics(output_dir):
     log_dir = Path(output_dir) / "lightning_logs"
     if not log_dir.exists():
         return {}
-    versions = sorted(log_dir.glob("version_*"), key=lambda p: int(p.name.split("_")[1]))
+    versions = sorted(
+        log_dir.glob("version_*"), key=lambda p: int(p.name.split("_")[1])
+    )
     if not versions:
         return {}
     metrics_path = versions[-1] / "metrics.csv"
@@ -414,10 +465,10 @@ def _plot_composite_loss(metrics, out_path):
 
     cmap = plt.get_cmap("tab20")
     components = [
-        ("train/loss",     "Total VAE Loss", cmap(0)),
-        ("train/adv_loss", "Adversarial",    cmap(2)),
-        ("train/kl",       "KL Divergence",  cmap(4)),
-        ("train/recon",    "MSE",            cmap(6)),
+        ("train/loss", "Total VAE Loss", cmap(0)),
+        ("train/adv_loss", "Adversarial", cmap(2)),
+        ("train/kl", "KL Divergence", cmap(4)),
+        ("train/recon", "MSE", cmap(6)),
     ]
 
     fig, ax = plt.subplots(figsize=(3, 2))
@@ -454,19 +505,35 @@ def _plot_omic_mse(metrics, omic, out_path):
     color_idx = 0
 
     if has_total:
-        ax.plot(metrics[total_key]["epoch"], metrics[total_key]["value"],
-                label="Total", color=cmap(color_idx), linewidth=2)
+        ax.plot(
+            metrics[total_key]["epoch"],
+            metrics[total_key]["value"],
+            label="Total",
+            color=cmap(color_idx),
+            linewidth=2,
+        )
         color_idx += 2
 
     for key in group_keys:
-        group_name = key[len(group_prefix):]
-        ax.plot(metrics[key]["epoch"], metrics[key]["value"],
-                label=group_name, color=cmap(color_idx), linewidth=2)
+        group_name = key[len(group_prefix) :]
+        ax.plot(
+            metrics[key]["epoch"],
+            metrics[key]["value"],
+            label=group_name,
+            color=cmap(color_idx),
+            linewidth=2,
+        )
         color_idx += 2
 
     if has_val:
-        ax.plot(metrics[val_key]["epoch"], metrics[val_key]["value"],
-                label="Val", color=cmap(color_idx), linewidth=2, linestyle="--")
+        ax.plot(
+            metrics[val_key]["epoch"],
+            metrics[val_key]["value"],
+            label="Val",
+            color=cmap(color_idx),
+            linewidth=2,
+            linestyle="--",
+        )
 
     ax.set_xlabel("epoch")
     ax.set_ylabel("Loss")
@@ -483,9 +550,9 @@ def _generate_loss_plots(output_dir, views, plots_dir):
 
     cmap = plt.get_cmap("tab20")
     individual_losses = [
-        ("train/kl",        "KL Divergence Loss",       "loss_kl.png",   cmap(4)),
-        ("train/adv_loss",  "Adversarial Loss for VAE",  "loss_adv.png",  cmap(2)),
-        ("train/disc_loss", "Discriminator Loss",        "loss_disc.png", cmap(2)),
+        ("train/kl", "KL Divergence Loss", "loss_kl.png", cmap(4)),
+        ("train/adv_loss", "Adversarial Loss for VAE", "loss_adv.png", cmap(2)),
+        ("train/disc_loss", "Discriminator Loss", "loss_disc.png", cmap(2)),
     ]
     for key, title, filename, color in individual_losses:
         df = metrics.get(key)
@@ -500,6 +567,7 @@ def _generate_loss_plots(output_dir, views, plots_dir):
 
 # Reconstruction scatter plots
 
+
 def _scatter_with_identity(ax, x, y, **scatter_kw):
     """Plot scatter with y=x identity line."""
     ax.scatter(x, y, **scatter_kw)
@@ -512,8 +580,14 @@ def _plot_sample_scatter(plot_df, out_path, xlabel, ylabel):
     """Scatter of per-sample means, colored by model type."""
     fig, ax = plt.subplots(figsize=(3, 3))
     for model_type, group in plot_df.groupby("model_type"):
-        _scatter_with_identity(ax, group["input_mean"], group["recon_mean"],
-                               label=model_type, alpha=0.6, s=20)
+        _scatter_with_identity(
+            ax,
+            group["input_mean"],
+            group["recon_mean"],
+            label=model_type,
+            alpha=0.6,
+            s=20,
+        )
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     ax.legend()
@@ -523,8 +597,14 @@ def _plot_sample_scatter(plot_df, out_path, xlabel, ylabel):
 def _plot_feature_scatter(plot_df, out_path, xlabel, ylabel):
     """Scatter of per-feature means."""
     fig, ax = plt.subplots(figsize=(3, 3))
-    _scatter_with_identity(ax, plot_df["input_mean"], plot_df["recon_mean"],
-                           alpha=0.5, s=10, color="steelblue")
+    _scatter_with_identity(
+        ax,
+        plot_df["input_mean"],
+        plot_df["recon_mean"],
+        alpha=0.5,
+        s=10,
+        color="steelblue",
+    )
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     ax.legend()
@@ -555,32 +635,44 @@ def _generate_reconstruction_plots(data, views, plots_dir):
                 continue
             inp, rec = input_df.loc[common], recon_df.loc[common]
 
-            sample_df = pd.DataFrame({
-                "input_mean": inp.mean(axis=1),
-                "recon_mean": rec.mean(axis=1),
-            })
+            sample_df = pd.DataFrame(
+                {
+                    "input_mean": inp.mean(axis=1),
+                    "recon_mean": rec.mean(axis=1),
+                }
+            )
             common_conditionals = sample_df.index.intersection(conditionals.index)
             if not common_conditionals.empty:
                 sample_df = sample_df.loc[common_conditionals]
-                sample_df["model_type"] = conditionals.loc[common_conditionals, "model_type"]
+                sample_df["model_type"] = conditionals.loc[
+                    common_conditionals, "model_type"
+                ]
 
-                tag = recon_key.replace("recon_inf", "corrected").replace("recon", "recon")
+                tag = recon_key.replace("recon_inf", "corrected").replace(
+                    "recon", "recon"
+                )
                 _plot_sample_scatter(
-                    sample_df, plots_dir / f"input_recon_sample_{name}_{tag}.png",
+                    sample_df,
+                    plots_dir / f"input_recon_sample_{name}_{tag}.png",
                     f"Sample mean {name}{suffix} (original)",
                     f"Sample mean {name}{suffix} (reconstructed)",
                 )
 
             common_feats = inp.columns.intersection(rec.columns)
             if not common_feats.empty:
-                feat_df = pd.DataFrame({
-                    "input_mean": inp[common_feats].mean(axis=0).values,
-                    "recon_mean": rec[common_feats].mean(axis=0).values,
-                })
+                feat_df = pd.DataFrame(
+                    {
+                        "input_mean": inp[common_feats].mean(axis=0).values,
+                        "recon_mean": rec[common_feats].mean(axis=0).values,
+                    }
+                )
 
-                tag = recon_key.replace("recon_inf", "corrected").replace("recon", "recon")
+                tag = recon_key.replace("recon_inf", "corrected").replace(
+                    "recon", "recon"
+                )
                 _plot_feature_scatter(
-                    feat_df, plots_dir / f"input_recon_feature_{name}_{tag}.png",
+                    feat_df,
+                    plots_dir / f"input_recon_feature_{name}_{tag}.png",
                     f"Feature mean {name}{suffix} (original)",
                     f"Feature mean {name}{suffix} (reconstructed)",
                 )
@@ -588,14 +680,19 @@ def _generate_reconstruction_plots(data, views, plots_dir):
 
 # Clustering metrics
 
+
 def _compute_clustering_metrics(X, labels, dataset_name, label_type):
     """Compute Calinski-Harabasz and Davies-Bouldin scores."""
     n_samples = len(labels)
     n_unique = len(np.unique(labels))
     # sklearn's check_number_of_labels requires 2 <= n_labels <= n_samples - 1.
     if n_unique < 2 or n_unique > n_samples - 1:
-        return {"dataset": dataset_name, "label_type": label_type,
-                "calinski_harabasz": np.nan, "davies_bouldin": np.nan}
+        return {
+            "dataset": dataset_name,
+            "label_type": label_type,
+            "calinski_harabasz": np.nan,
+            "davies_bouldin": np.nan,
+        }
 
     X_scaled = StandardScaler().fit_transform(X)
     return {
@@ -616,7 +713,10 @@ def _try_compute_metrics(df, labels_series, dataset_name, label_type):
         return None
     labels = labels_series.loc[aligned.index]
     return _compute_clustering_metrics(
-        aligned.values, pd.factorize(labels)[0], dataset_name, label_type,
+        aligned.values,
+        pd.factorize(labels)[0],
+        dataset_name,
+        label_type,
     )
 
 
@@ -637,7 +737,10 @@ def _compute_all_clustering_metrics(data, views, conditionals):
             omic_data = data["omics"].get(name, {})
             for prefix in ("input", "recon", "recon_inf"):
                 result = _try_compute_metrics(
-                    omic_data.get(prefix), labels, f"{prefix}_{name}", label_col,
+                    omic_data.get(prefix),
+                    labels,
+                    f"{prefix}_{name}",
+                    label_col,
                 )
                 if result:
                     rows.append(result)
@@ -646,6 +749,7 @@ def _compute_all_clustering_metrics(data, views, conditionals):
 
 
 # Data loading
+
 
 def _load_data_files(output_dir, views, data_path):
     """Load latents, reconstructions, and inputs for plotting.
@@ -660,7 +764,7 @@ def _load_data_files(output_dir, views, data_path):
     output_dir = Path(output_dir)
 
     data_path_obj = Path(data_path)
-    with mudata.set_options(pull_on_update=False):
+    with mudata_set_options(pull_on_update=False):
         if is_zarr_path(data_path_obj):
             mdata = mudata.read_zarr(str(data_path))
         else:
@@ -683,7 +787,9 @@ def _load_data_files(output_dir, views, data_path):
             if issparse(X):
                 X = X.toarray()
             omic_data["input"] = pd.DataFrame(
-                X, index=mdata.mod[name].obs_names, columns=mdata.mod[name].var_names,
+                X,
+                index=mdata.mod[name].obs_names,
+                columns=mdata.mod[name].var_names,
             )
 
         recon_data = _read_split(output_dir, ["full", "train"], f"recon_{name}")
@@ -701,6 +807,7 @@ def _load_data_files(output_dir, views, data_path):
 
 # UMAP plot generation
 
+
 def _make_umap_plot(df, conditionals, palette, title, out_path, pca_components):
     """Compute UMAP and save scatter plot."""
     logger.debug("Computing UMAP: %s (%d samples x %d features)", title, *df.shape)
@@ -717,24 +824,42 @@ def _generate_umap_plots(data, views, plots_dir, palette, pca_components):
     conditionals = data["conditionals"]
 
     if "z" in data:
-        _make_umap_plot(data["z"], conditionals, palette,
-                        "Latent UMAP", plots_dir / "umap_z.png", pca_components)
+        _make_umap_plot(
+            data["z"],
+            conditionals,
+            palette,
+            "Latent UMAP",
+            plots_dir / "umap_z.png",
+            pca_components,
+        )
 
     for name in views:
         omic_data = data["omics"].get(name, {})
 
         if "recon" in omic_data:
-            _make_umap_plot(omic_data["recon"], conditionals, palette,
-                            f"Reconstructed {name.upper()} UMAP",
-                            plots_dir / f"umap_recon_{name}.png", pca_components)
+            _make_umap_plot(
+                omic_data["recon"],
+                conditionals,
+                palette,
+                f"Reconstructed {name.upper()} UMAP",
+                plots_dir / f"umap_recon_{name}.png",
+                pca_components,
+            )
 
         if "recon_inf" in omic_data:
-            _make_umap_plot(omic_data["recon_inf"], conditionals, palette,
-                            f"Reconstructed corrected {name.upper()} UMAP",
-                            plots_dir / f"umap_recon_corrected_{name}.png", pca_components)
+            _make_umap_plot(
+                omic_data["recon_inf"],
+                conditionals,
+                palette,
+                f"Reconstructed corrected {name.upper()} UMAP",
+                plots_dir / f"umap_recon_corrected_{name}.png",
+                pca_components,
+            )
 
 
-def generate_all_plots(output_dir, data_cfg, model_cfg=None, palette=None, pca_components=50):
+def generate_all_plots(
+    output_dir, data_cfg, model_cfg=None, palette=None, pca_components=50
+):
     """Generate diagnostic plots and clustering metrics.
 
     Parameters
@@ -788,8 +913,12 @@ def generate_all_plots(output_dir, data_cfg, model_cfg=None, palette=None, pca_c
     metrics_rows = _compute_all_clustering_metrics(data, views, data["conditionals"])
     if metrics_rows:
         metrics_out = ensure_dir(output_dir / "metrics")
-        pd.DataFrame(metrics_rows).to_csv(metrics_out / "clustering_metrics.csv", index=False)
+        pd.DataFrame(metrics_rows).to_csv(
+            metrics_out / "clustering_metrics.csv", index=False
+        )
     else:
-        warnings.warn("Clustering metrics not computed: missing labels or data.")
+        warnings.warn(
+            "Clustering metrics not computed: missing labels or data.", stacklevel=2
+        )
 
     return plots_dir

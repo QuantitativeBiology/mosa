@@ -28,10 +28,12 @@ def register_model(name: str, config_cls: type[ModelConfig]):
     string) can resolve the same registration. Also stamps the model class
     with `registered_name` so instances can embed it in saved checkpoints.
     """
+
     def decorator(model_cls: type[MultiOmicModel]) -> type[MultiOmicModel]:
         _REGISTRY[name] = _Registration(config_cls, model_cls)
         model_cls.registered_name = name
         return model_cls
+
     return decorator
 
 

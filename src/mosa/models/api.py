@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from mosa.config import DataConfig, ModelConfig
 
 from mosa.data.dataset import MultiOmicDataset
 
@@ -21,11 +25,22 @@ class MultiOmicModel(ABC):
     False for transductive models, which cross_validate() rejects before
     training anything."""
 
+    registered_name: str
+    """The name the model is registered under. Stamped by @register_model, so
+    it is annotated rather than assigned: an unregistered subclass must not
+    silently report an empty name."""
+
     epoch_history: list[dict] = []
     """Per-epoch training curve, populated by fit() where available: one dict
     per epoch with at least 'epoch', and 'train_loss'/'val_loss' when a val
     split was given. Empty for models with no per-epoch training loop (e.g.
     MOFA) or when fit() was called without validation data."""
+
+    # Documents the constructor build_model() calls; abstract would change
+    # how subclasses may be defined.
+    def __init__(self, data_cfg: DataConfig, model_cfg: ModelConfig) -> None:  # noqa: B027
+        """Initialize the model with data and model configurations."""
+        ...
 
     @abstractmethod
     def fit(

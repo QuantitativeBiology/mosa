@@ -32,7 +32,9 @@ class MLP(nn.Module):
                 if use_batch_norm:
                     layers.append(
                         nn.BatchNorm1d(
-                            layer_sizes[i], momentum=bn_momentum, eps=bn_eps,
+                            layer_sizes[i],
+                            momentum=bn_momentum,
+                            eps=bn_eps,
                         )
                     )
                 layers.append(activation())
@@ -46,4 +48,3 @@ class MLP(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
-

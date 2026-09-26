@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 from pathlib import Path
 
@@ -50,7 +51,9 @@ def load_config(yaml_path: str | Path) -> Config:
     raw = read_yaml(yaml_path)
 
     if "data" not in raw or "model" not in raw:
-        raise ConfigError(f"Config {yaml_path} must contain top-level 'data:' and 'model:' blocks")
+        raise ConfigError(
+            f"Config {yaml_path} must contain top-level 'data:' and 'model:' blocks"
+        )
 
     check_unknown_keys(DataConfig, raw["data"], "data:")
     data = DataConfig(**raw["data"])
@@ -93,3 +96,14 @@ def validate_config_against_data(cfg: Config) -> list[str]:
 def tensors_to_numpy(t: Tensor) -> np.ndarray:
     """Convert tensor to numpy array on CPU."""
     return t.detach().cpu().numpy()
+
+
+@contextlib.contextmanager
+def mudata_set_options(**kwargs):
+    import mudata
+
+    if hasattr(mudata, "set_options"):
+        with mudata.set_options(**kwargs):
+            yield
+    else:
+        yield

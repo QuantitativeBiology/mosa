@@ -114,11 +114,9 @@ The `plot` command reads the directory structure that a finished `train` run lea
 
 ## Dependencies
 
-### `plot requires matplotlib, seaborn, and umap-learn: pip install '.[plot]'`
+### `the mofa model requires mofapy2 and mofax: pip install '.[mofa]'`
 
-### `optuna is required for optimize; install it with pip install '.[hpo]'`
-
-A base `pip install -e .` does not install optional dependencies. You must install the specific groups you need, as detailed in the [Getting started](01-getting-started.md) guide.
+The MOFA backend is optional and a base `pip install -e .` does not include it. Install the `mofa` extra, as detailed in the [Getting started](01-getting-started.md) guide.
 
 ### `AttributeError: module 'mudata' has no attribute 'set_options'`
 

@@ -1,19 +1,28 @@
 from __future__ import annotations
 
-# Optional dependencies: mofapy2 and mofax are not listed in pyproject.toml
-# required deps. Install via: pip install mofapy2 mofax
-
+import importlib.util
 import shutil
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
-from mosa.models.api import MultiOmicModel
 from mosa.config import DataConfig
 from mosa.data.dataset import MultiOmicDataset
+from mosa.errors import MissingDependencyError
+from mosa.models.api import MultiOmicModel
 from mosa.models.mofa.config import MOFAConfig
 from mosa.models.registry import register_model
+
+
+def _require_mofa() -> None:
+    """Fail early with the install command when the mofa extra is absent."""
+    missing = [m for m in ("mofapy2", "mofax") if importlib.util.find_spec(m) is None]
+    if missing:
+        raise MissingDependencyError(
+            f"the mofa model requires {' and '.join(missing)}: pip install '.[mofa]'"
+        )
 
 
 @register_model("mofa", MOFAConfig)
@@ -35,8 +44,8 @@ class MOFAModel(MultiOmicModel):
         self.data_cfg = data_cfg
         self.model_cfg = model_cfg or MOFAConfig()
         self.save_path = save_path
-        self._model = None
-        self._ent = None
+        self._model: Any = None
+        self._ent: Any = None
 
     def _to_long_df(self, data: MultiOmicDataset) -> pd.DataFrame:
         """Convert MultiOmicDataset to MOFA long-format DataFrame."""
@@ -45,7 +54,7 @@ class MOFAModel(MultiOmicModel):
 
         frames: list[pd.DataFrame] = []
         for view_name in data.view_names:
-            matrix = data.views[view_name].copy().astype(float)
+            matrix: np.ndarray = data.views[view_name].copy().astype(float)
             mask = data.masks[view_name]
             matrix[~mask] = np.nan
 
@@ -75,6 +84,7 @@ class MOFAModel(MultiOmicModel):
         resume_from: str | Path | None = None,
     ) -> None:
         """Train the MOFA model. val and resume_from are ignored."""
+        _require_mofa()
         from mofapy2.run.entry_point import entry_point
 
         mc = self.model_cfg
@@ -145,6 +155,7 @@ class MOFAModel(MultiOmicModel):
         self._ent.save(save_path, save_data=True)
 
         import mofax as mfx
+
         self._model = mfx.mofa_model(save_path)
 
     def save(self, path: str | Path) -> None:
@@ -165,9 +176,12 @@ class MOFAModel(MultiOmicModel):
         DataConfig fields (path, mask_layer_name, tissue/mutation flags) are
         not recoverable from the HDF5 and are left at defaults.
         """
+        _require_mofa()
         import mofax as mfx
 
         instance = cls(save_path=str(path))
         instance._model = mfx.mofa_model(str(path))
-        instance.data_cfg = DataConfig(path=str(path), views=list(instance._model.views))
+        instance.data_cfg = DataConfig(
+            path=str(path), views=list(instance._model.views)
+        )
         return instance

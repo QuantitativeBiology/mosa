@@ -44,7 +44,7 @@ def reconstruction_loss(
     loss_types = loss_types or {}
     device = next(iter(x.values())).device
     omic_losses = {}
-    group_omic_losses = defaultdict(dict)
+    group_omic_losses: dict[str, dict[int, torch.Tensor]] = defaultdict(dict)
 
     for omic in x:
         feature_mask = mask[omic]  # [B, D]

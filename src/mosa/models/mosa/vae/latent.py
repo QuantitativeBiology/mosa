@@ -12,9 +12,11 @@ _REGISTRY: dict[str, type] = {}
 
 def register_latent(name: str):
     """Decorator to register a latent space subclass."""
+
     def decorator(cls: type) -> type:
         _REGISTRY[name] = cls
         return cls
+
     return decorator
 
 
@@ -25,7 +27,12 @@ class BaseLatentSpace(ABC, nn.Module):
     Instantiate via BaseLatentSpace.create(method, ...).
     """
 
-    def __init__(self, view_dims: dict[str, int], latent_dim: int, shared_hidden_dims: list[int] | None = None):
+    def __init__(
+        self,
+        view_dims: dict[str, int],
+        latent_dim: int,
+        shared_hidden_dims: list[int] | None = None,
+    ):
         super().__init__()
         self.view_dims = view_dims
         self.latent_dim = latent_dim
@@ -62,11 +69,12 @@ class BaseLatentSpace(ABC, nn.Module):
     ) -> BaseLatentSpace:
         if method not in _REGISTRY:
             raise ValueError(
-                f"Unknown fusion method '{method}'. "
-                f"Available: {list(_REGISTRY.keys())}"
+                f"Unknown fusion method '{method}'. Available: {list(_REGISTRY.keys())}"
             )
         if method == "poe":
-            return _REGISTRY[method](view_dims, latent_dim, shared_hidden_dims, use_shared_head)
+            return _REGISTRY[method](
+                view_dims, latent_dim, shared_hidden_dims, use_shared_head
+            )
         return _REGISTRY[method](view_dims, latent_dim, shared_hidden_dims)
 
 
@@ -143,7 +151,8 @@ class PoELatentSpace(BaseLatentSpace):
             )
 
     def _project_view(
-        self, embedding: torch.Tensor,
+        self,
+        embedding: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         stats = self.shared_head(embedding) if self.use_shared_head else embedding
         return stats.split(self.latent_dim, dim=1)

@@ -5,15 +5,15 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import torch
 import pytorch_lightning as pl
+import torch
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.strategies import DDPStrategy
 
-from mosa.models.api import MultiOmicModel
 from mosa.config import DataConfig
 from mosa.data.dataset import MultiOmicDataset
 from mosa.errors import UnsupportedError
+from mosa.models.api import MultiOmicModel
 from mosa.models.mosa.config import MOSAConfig, OmicViewConfig
 from mosa.models.mosa.datamodule import MOSADataModule
 from mosa.models.mosa.vae.vae_module import VAE
@@ -37,7 +37,9 @@ class _EpochHistoryCallback(pl.Callback):
     def __init__(self):
         self.history: list[dict] = []
 
-    def on_train_epoch_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+    def on_train_epoch_end(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ) -> None:
         if not trainer.is_global_zero:
             return
         metrics = trainer.callback_metrics
@@ -52,7 +54,7 @@ class _EpochHistoryCallback(pl.Callback):
 class _LoggingModelCheckpoint(ModelCheckpoint):
     """ModelCheckpoint that logs a line each time a checkpoint is written."""
 
-    def _save_checkpoint(self, trainer: "pl.Trainer", filepath: str) -> None:
+    def _save_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
         import time
 
         t0 = time.perf_counter()
@@ -157,7 +159,11 @@ class MOSAModel(MultiOmicModel):
             trainer_kwargs["num_sanity_val_steps"] = 0
 
         self._trainer = pl.Trainer(**trainer_kwargs)
-        self._trainer.fit(self._model, self._datamodule, ckpt_path=str(resume_from) if resume_from else None)
+        self._trainer.fit(
+            self._model,
+            self._datamodule,
+            ckpt_path=str(resume_from) if resume_from else None,
+        )
         self.epoch_history = history_cb.history if history_cb is not None else []
 
     def save_outputs(self, output_dir: str | Path | None = None) -> None:
@@ -167,7 +173,11 @@ class MOSAModel(MultiOmicModel):
         if self._model is None or self._datamodule is None:
             raise RuntimeError("Model must be fit before calling save_outputs()")
 
-        output_dir = Path(output_dir) if output_dir is not None else Path(self.model_cfg.output_dir)
+        output_dir = (
+            Path(output_dir)
+            if output_dir is not None
+            else Path(self.model_cfg.output_dir)
+        )
         dm = self._datamodule
 
         logger.info("Saving outputs to %s", output_dir)
@@ -192,7 +202,10 @@ class MOSAModel(MultiOmicModel):
                     f"target_batch '{target}' not in model_type categories: {categories}"
                 )
             target_idx = categories.index(target) if target else 0
-            logger.info("Predicting inference split with target_batch='%s'", target or categories[0])
+            logger.info(
+                "Predicting inference split with target_batch='%s'",
+                target or categories[0],
+            )
             self._save_split(
                 dm.full_dataloader(),
                 output_dir / "inference",
@@ -210,31 +223,55 @@ class MOSAModel(MultiOmicModel):
         """Run predict on a dataloader and write latent/recon parquet files."""
         import time
 
+        assert self._datamodule is not None
+        assert self._model is not None
+
         ensure_dir(out_dir)
-        n_batches = len(self._datamodule.batch_categories) if force_source_id is not None else None
+        n_batches = (
+            len(self._datamodule.batch_categories)
+            if force_source_id is not None
+            else None
+        )
 
         t = time.perf_counter()
-        results = self._model.predict(loader, force_source_id=force_source_id, n_batches=n_batches)
-        logger.debug("  predict %d samples in %.1fs", len(results["sample_names"]), time.perf_counter() - t)
+        results = self._model.predict(
+            loader, force_source_id=force_source_id, n_batches=n_batches
+        )
+        logger.debug(
+            "  predict %d samples in %.1fs",
+            len(results["sample_names"]),
+            time.perf_counter() - t,
+        )
 
         source_ids = results.get("source_ids")
         if force_source_id is not None:
-            source_ids = np.full(len(results["sample_names"]), force_source_id, dtype=np.int64)
+            source_ids = np.full(
+                len(results["sample_names"]), force_source_id, dtype=np.int64
+            )
 
         t = time.perf_counter()
-        pd.DataFrame(results["z"], index=results["sample_names"]).to_parquet(out_dir / "latent.parquet")
+        pd.DataFrame(results["z"], index=results["sample_names"]).to_parquet(
+            out_dir / "latent.parquet"
+        )
         logger.debug("  wrote latent.parquet (%.1fs)", time.perf_counter() - t)
 
         for omic, recon in results["x_hat"].items():
             t = time.perf_counter()
-            recon = self._datamodule.inverse_transform_view(omic, recon, source_ids=source_ids)
+            recon = self._datamodule.inverse_transform_view(
+                omic, recon, source_ids=source_ids
+            )
             cols = self._datamodule.feature_names.get(omic)
             if cols and len(cols) == recon.shape[1]:
                 df = pd.DataFrame(recon, index=results["sample_names"], columns=cols)
             else:
                 df = pd.DataFrame(recon, index=results["sample_names"])
             df.to_parquet(out_dir / f"recon_{omic}.parquet")
-            logger.debug("  wrote recon_%s.parquet shape=%s (%.1fs)", omic, recon.shape, time.perf_counter() - t)
+            logger.debug(
+                "  wrote recon_%s.parquet shape=%s (%.1fs)",
+                omic,
+                recon.shape,
+                time.perf_counter() - t,
+            )
 
     def transform(self, data: MultiOmicDataset) -> np.ndarray:
         """Project data into the learned latent space."""
@@ -288,6 +325,7 @@ class MOSAModel(MultiOmicModel):
         # Embed the registered model-type name in the module's hyperparameters
         # before writing, so registry.load_model can dispatch polymorphically
         # and the checkpoint is serialized in a single pass.
+        assert self._model is not None
         self._model.hparams["model_type_name"] = self.registered_name
         self._trainer.save_checkpoint(str(path))
 
@@ -332,8 +370,10 @@ class MOSAModel(MultiOmicModel):
         dm_key = MOSADataModule.__name__
         if dm_key in checkpoint:
             dm = MOSADataModule(
-                train_data=None, val_data=None,
-                data_cfg=data_cfg, model_cfg=model_cfg,
+                train_data=None,
+                val_data=None,
+                data_cfg=data_cfg,
+                model_cfg=model_cfg,
             )
             dm.load_state_dict(checkpoint[dm_key])
             instance._datamodule = dm

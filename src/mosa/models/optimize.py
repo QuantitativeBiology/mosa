@@ -6,7 +6,7 @@ from pathlib import Path
 
 from mosa.config import DataConfig, EvaluationConfig, ModelConfig
 from mosa.data.dataset import MultiOmicDataset
-from mosa.errors import ConfigError, MissingDependencyError, UnsupportedError
+from mosa.errors import ConfigError, UnsupportedError
 from mosa.models.evaluation import cross_validate
 from mosa.utils import read_yaml
 
@@ -49,7 +49,9 @@ def parse_search_space(raw: dict) -> dict:
     """
     for name, spec in raw.items():
         if not isinstance(spec, dict) or "dist" not in spec:
-            raise ConfigError(f"Search-space entry '{name}' must be a mapping with a 'dist' key")
+            raise ConfigError(
+                f"Search-space entry '{name}' must be a mapping with a 'dist' key"
+            )
         dist = spec["dist"]
         if dist not in _SUPPORTED_DISTS:
             raise ConfigError(
@@ -113,17 +115,11 @@ def optimize(
     trial completes, the first failure's message is carried into the raised
     error, since the logs are otherwise the only record of the cause.
 
-    Requires optuna (`pip install '.[hpo]'`); imported lazily so importing
-    mosa never requires it.
+    optuna is imported lazily to keep `import mosa` fast.
 
     Returns {"best_params": dict, "best_value": float, "study": optuna.Study}.
     """
-    try:
-        import optuna
-    except ImportError as e:
-        raise MissingDependencyError(
-            "optuna is required for optimize(); install it with pip install '.[hpo]'"
-        ) from e
+    import optuna
 
     search_space = parse_search_space(search_space)
     _check_search_space_fields(search_space, base_model_cfg)
@@ -133,8 +129,10 @@ def optimize(
     # that explains why, and it would otherwise be buried in the logs.
     first_failure: list[str] = []
 
-    def objective(trial: "optuna.Trial") -> float:
-        sampled = {name: _suggest(trial, name, spec) for name, spec in search_space.items()}
+    def objective(trial: optuna.Trial) -> float:
+        sampled = {
+            name: _suggest(trial, name, spec) for name, spec in search_space.items()
+        }
         try:
             trial_model_cfg = dataclasses.replace(base_model_cfg, **sampled)
         except (ValueError, TypeError) as e:
@@ -163,7 +161,9 @@ def optimize(
     study.optimize(objective, n_trials=n_trials)
 
     if not any(t.state == optuna.trial.TrialState.COMPLETE for t in study.trials):
-        reason = f" First failure: {first_failure[0].rstrip('.')}." if first_failure else ""
+        reason = (
+            f" First failure: {first_failure[0].rstrip('.')}." if first_failure else ""
+        )
         raise UnsupportedError(
             f"No trial completed out of {n_trials}.{reason} "
             f"Re-run with --debug for the full tracebacks."
