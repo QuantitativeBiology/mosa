@@ -987,12 +987,17 @@ def test_reconstruct_returns_original_scale(
 
 
 @skip_mofa
-@pytest.mark.parametrize("scale_views,scale_groups", [(False, False), (True, False), (False, True), (True, True)])
+@pytest.mark.parametrize(
+    "scale_views,scale_groups",
+    [(False, False), (True, False), (False, True), (True, True)],
+)
 def test_mofa_heldout_projection_roundtrip(tmp_path, scale_views, scale_groups):
     dataset = _planted_dataset(80)
     train = dataset.subset(np.arange(60))
     heldout = dataset.subset(np.arange(60, 80))
-    model = _fit_mofa(train, tmp_path, scale_views=scale_views, scale_groups=scale_groups)
+    model = _fit_mofa(
+        train, tmp_path, scale_views=scale_views, scale_groups=scale_groups
+    )
     # Inference works before explicit output export, as required by cross-validation.
     z = model.transform(heldout)
     recon = model.reconstruct(heldout)
@@ -1022,7 +1027,9 @@ def test_mofa_projection_errors_and_mixed_order(tmp_path):
     mixed = dataset.subset(np.array([31, 2, 32, 4]))
     combined = model.transform(mixed)
     for i in range(mixed.n_samples):
-        np.testing.assert_allclose(combined[i:i+1], model.transform(mixed.subset(np.array([i]))))
+        np.testing.assert_allclose(
+            combined[i : i + 1], model.transform(mixed.subset(np.array([i])))
+        )
     unseen = dataset.subset(np.array([31]))
     unseen.metadata["model_type"] = "unknown"
     with pytest.raises(UnsupportedError, match="unknown groups"):
@@ -1041,7 +1048,8 @@ def test_mofa_cross_validation_projects_heldout(tmp_path):
 
     dataset = _planted_dataset()
     result = cross_validate(
-        dataset, _mofa_data_cfg(dataset),
+        dataset,
+        _mofa_data_cfg(dataset),
         MOFAConfig(n_factors=5, iterations=30, drop_r2=None, output_dir=str(tmp_path)),
         EvaluationConfig(n_folds=2),
     )
@@ -1053,7 +1061,9 @@ def test_mofa_cross_validation_projects_heldout(tmp_path):
 @skip_mofa
 def test_mofa_projection_reuses_training_preprocessing(tmp_path):
     dataset = _planted_dataset()
-    model = _fit_mofa(dataset.subset(np.arange(30)), tmp_path, scale_views=True, scale_groups=True)
+    model = _fit_mofa(
+        dataset.subset(np.arange(30)), tmp_path, scale_views=True, scale_groups=True
+    )
     heldout = dataset.subset(np.arange(30, 40))
     before = model.transform(heldout)
     for view in heldout.views:
@@ -1062,7 +1072,9 @@ def test_mofa_projection_reuses_training_preprocessing(tmp_path):
     # Transforming a batch or its individual rows uses the same fitted statistics.
     after = model.transform(heldout)
     for i in range(heldout.n_samples):
-        np.testing.assert_allclose(after[i:i+1], model.transform(heldout.subset(np.array([i]))))
+        np.testing.assert_allclose(
+            after[i : i + 1], model.transform(heldout.subset(np.array([i])))
+        )
 
 
 @skip_mofa

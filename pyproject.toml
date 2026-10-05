@@ -31,6 +31,8 @@ dependencies = [
 mofa = [
     "mofapy2",
     "mofax",
+    # CPU training needs no CuPy. For gpu_mode=true, install the CuPy wheel
+    # matching the CUDA toolkit separately (e.g. cupy-cuda12x).
 ]
 dev = [
     "pytest>=8.0",

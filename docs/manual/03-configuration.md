@@ -158,6 +158,15 @@ model:
 
 MOFA is included to allow benchmarking against identical data. It requires the optional `mofapy2` and `mofax` packages.
 
+The `mofa` extra supports CPU training. To run with `gpu_mode: true`, install CuPy separately using the wheel that matches your CUDA toolkit. For example, with CUDA 12.x:
+
+```bash
+pip install -e ".[mofa]"
+pip install cupy-cuda12x
+```
+
+GPU training requires an NVIDIA GPU and a compatible CUDA driver. See the [CuPy installation guide](https://docs.cupy.dev/en/stable/install.html) for other CUDA versions and setup options.
+
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `n_factors` | `int` | `50` | Number of factors to infer. Must be positive. |

@@ -370,7 +370,9 @@ class MOFAModel(MultiOmicModel):
                 or not np.isfinite(scales).all()
                 or np.any(scales <= 0)
             ):
-                raise DataError(f"View '{view}' has undefined training preprocessing statistics.")
+                raise DataError(
+                    f"View '{view}' has undefined training preprocessing statistics."
+                )
             matrices.append((x - offsets) / scales[:, None])
             weights.append(self._model.get_weights(views=view, df=True).values)
         x = np.concatenate(matrices, axis=1)
@@ -379,9 +381,13 @@ class MOFAModel(MultiOmicModel):
         for i, row in enumerate(x):
             observed = ~np.isnan(row)
             if not observed.any():
-                raise DataError(f"Sample '{data.sample_names[i]}' has no observed features to project.")
+                raise DataError(
+                    f"Sample '{data.sample_names[i]}' has no observed features to project."
+                )
             if not np.isfinite(row[observed]).all():
-                raise DataError(f"Sample '{data.sample_names[i]}' contains infinite observed values.")
+                raise DataError(
+                    f"Sample '{data.sample_names[i]}' contains infinite observed values."
+                )
             result[i] = np.linalg.lstsq(w[observed], row[observed], rcond=None)[0]
         return result
 
