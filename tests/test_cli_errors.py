@@ -13,6 +13,7 @@ import sys
 import pytest
 
 from mosa.cli import main
+from mosa.models import MOSAModel
 
 MOSA_VAE_MODEL = (
     "model:\n"
@@ -242,11 +243,12 @@ def test_mofa_missing_extra_names_the_install(
 
 
 def test_cross_validate_rejects_model_without_out_of_sample(
-    tmp_path, capsys, make_h5mu_file
+    tmp_path, capsys, make_h5mu_file, monkeypatch
 ):
-    pytest.importorskip("mofapy2")
+    # Simulate an unsupported model; MOFA now supports held-out projection.
+    monkeypatch.setattr(MOSAModel, "supports_out_of_sample", False)
     h5mu = make_h5mu_file(tmp_path)
-    cfg = _config(tmp_path, h5mu, model="model:\n  type: mofa\n")
+    cfg = _config(tmp_path, h5mu)
     assert_guided_failure(
         capsys,
         ["cross-validate", "--config", cfg],
@@ -257,19 +259,20 @@ def test_cross_validate_rejects_model_without_out_of_sample(
 def test_optimize_rejects_model_without_out_of_sample(
     tmp_path, capsys, make_h5mu_file, monkeypatch
 ):
-    pytest.importorskip("mofapy2")
     pytest.importorskip("optuna")
     import optuna
+
+    monkeypatch.setattr(MOSAModel, "supports_out_of_sample", False)
 
     def no_study(*args, **kwargs):
         raise AssertionError("optimize created a study before rejecting the model")
 
     monkeypatch.setattr(optuna, "create_study", no_study)
     h5mu = make_h5mu_file(tmp_path)
-    cfg = _config(tmp_path, h5mu, model="model:\n  type: mofa\n")
+    cfg = _config(tmp_path, h5mu)
     space = _write(
         tmp_path / "space.yaml",
-        "n_factors:\n  dist: int\n  low: 2\n  high: 5\n",
+        "joint_latent_dim:\n  dist: int\n  low: 2\n  high: 5\n",
     )
     assert_guided_failure(
         capsys,
