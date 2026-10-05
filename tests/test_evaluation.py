@@ -207,6 +207,7 @@ class _FakeTransductiveModel(MultiOmicModel):
     """Stand-in for a transductive model (e.g. MOFA), which cannot be cross-validated."""
 
     supports_out_of_sample = False
+    checkpoint_suffixes = (".fake",)
 
     def __init__(self, data_cfg, model_cfg):
         self.data_cfg = data_cfg

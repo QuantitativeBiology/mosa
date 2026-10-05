@@ -150,7 +150,6 @@ model:
 | `precision` | `str` | `32` | Numeric precision. Options are `32`, `16-mixed`, or `bf16-mixed`. |
 | `gradient_clip_val` | `float` | `0.0` | Gradient-norm clipping threshold. Setting it to `0` disables clipping. Must be >= 0. |
 | `accumulate_grad_batches` | `int` | `1` | Number of batches to accumulate before taking an optimiser step. Must be >= 1. |
-| `log_every_n_steps` | `int` | `50` | Steps between logging metrics. |
 | `early_stopping_patience` | `int` | `20` | Epochs without validation improvement before training stops. This requires a validation split. |
 | `checkpoint_top_k` | `int` | `3` | Number of top checkpoints to retain. Setting it to `0` disables checkpointing entirely. |
 | `num_workers` | `int` | `0` | Number of DataLoader worker processes. Setting it to `0` loads data in the main process. |
@@ -163,12 +162,13 @@ MOFA is included to allow benchmarking against identical data. It requires the o
 |---|---|---|---|
 | `n_factors` | `int` | `50` | Number of factors to infer. Must be positive. |
 | `ard_factors` | `bool` | `true` | Applies automatic relevance determination to the factors. |
-| `drop_r2` | `float` | `0.001` | Drops factors that explain less variance than this threshold. |
+| `drop_r2` | `float` or `null` | `0.001` | Drops factors that explain no more variance than this threshold in every view and group. `null` keeps every factor. |
 | `scale_views` | `bool` | `false` | Scales views to unit variance before fitting. |
 | `scale_groups` | `bool` | `false` | Scales groups to unit variance before fitting. |
 | `convergence_mode` | `str` | `fast` | Convergence tolerance. Options are `fast`, `medium`, or `slow`. |
+| `iterations` | `int` | `1000` | Maximum number of training updates. Must be positive. `train` warns when a run stops at this cap without converging. |
 
-MOFA does not support out-of-sample projection, meaning `mosa cross-validate` rejects it before training begins. Because `mosa optimize` scores through cross-validation, it cannot use MOFA either. However, it discovers this limitation per trial: it prunes every trial, causing the entire study to fail at the end rather than upfront. Its `fit()` method ignores validation data entirely. You should set `evaluation.test_size` to `0` when using it. The `mosa validate` command warns you when it is not.
+MOFA does not support out-of-sample projection, meaning `mosa cross-validate` rejects it before training begins. Because `mosa optimize` scores through cross-validation, it cannot use MOFA either, and it also rejects it before the first trial. Its `fit()` method ignores validation data entirely. You should set `evaluation.test_size` to `0` when using it. The `mosa validate` command warns you when it is not. MOFA treats the value `-2147483648` (R's integer missing-value code) as missing, like a masked entry.
 
 ## Cross-block checks
 

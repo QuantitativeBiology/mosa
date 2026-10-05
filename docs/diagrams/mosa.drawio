@@ -899,7 +899,7 @@
         <mxCell id="U3YVdsKy9cUkyspkeb0g-3_sep" parent="U3YVdsKy9cUkyspkeb0g-3" style="line;html=1;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;strokeColor=#388E3C;" value="" vertex="1">
           <mxGeometry height="8" width="240" y="110" as="geometry" />
         </mxCell>
-        <mxCell id="U3YVdsKy9cUkyspkeb0g-3_h0" parent="U3YVdsKy9cUkyspkeb0g-3" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=6;spacingRight=6;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontSize=11;" value="− _to_long_df(data): DataFrame" vertex="1">
+        <mxCell id="U3YVdsKy9cUkyspkeb0g-3_h0" parent="U3YVdsKy9cUkyspkeb0g-3" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=6;spacingRight=6;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontSize=11;" value="− _group_matrices(data, views): tuple" vertex="1">
           <mxGeometry height="22" width="240" y="118" as="geometry" />
         </mxCell>
         <mxCell id="U3YVdsKy9cUkyspkeb0g-3_m3" parent="U3YVdsKy9cUkyspkeb0g-3" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=6;spacingRight=6;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontSize=11;" value="+ fit(train: MultiOmicDataset)" vertex="1">

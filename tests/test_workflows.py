@@ -77,7 +77,7 @@ def test_full_pipeline_from_csvs_to_plots(
     main(["train", "--config", str(config)])
     for split in ("train", "val", "full"):
         assert (run_dir / split / "latent.parquet").exists()
-    checkpoint = run_dir / "last.ckpt"
+    checkpoint = run_dir / "checkpoints" / "last.ckpt"
     assert checkpoint.exists()
     stages.append("train")
 

@@ -25,6 +25,10 @@ class MultiOmicModel(ABC):
     False for transductive models, which cross_validate() rejects before
     training anything."""
 
+    checkpoint_suffixes: tuple[str, ...] = ()
+    """File suffixes save() writes. registry.load_model() offers a path to
+    every model through owns_checkpoint(), which by default matches these."""
+
     registered_name: str
     """The name the model is registered under. Stamped by @register_model, so
     it is annotated rather than assigned: an unregistered subclass must not
@@ -115,3 +119,22 @@ class MultiOmicModel(ABC):
     @abstractmethod
     def load(cls, path: str | Path, **kwargs) -> MultiOmicModel:
         """Load a saved model from disk."""
+
+    @classmethod
+    def require_checkpoint_suffix(cls, path: str | Path) -> None:
+        """Raise unless path has a suffix load_model() routes back to this class."""
+        if Path(path).suffix not in cls.checkpoint_suffixes:
+            raise ValueError(
+                f"Cannot save to '{path}': {cls.__name__} files must end in one "
+                f"of {list(cls.checkpoint_suffixes)}, or load_model() cannot "
+                f"tell which model wrote them."
+            )
+
+    @classmethod
+    def owns_checkpoint(cls, path: str | Path) -> bool:
+        """Whether path is a file this class's save() wrote.
+
+        Models sharing a suffix override this to inspect the file, so
+        registry.load_model() finds exactly one owner.
+        """
+        return Path(path).suffix in cls.checkpoint_suffixes

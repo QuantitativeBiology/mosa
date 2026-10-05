@@ -74,7 +74,7 @@ mosa train --config <your-config>.yaml
 mosa plot --config <your-config>.yaml
 
 # 5. Project new samples through the trained model
-mosa transform --checkpoint <output-dir>/last.ckpt \
+mosa transform --checkpoint <output-dir>/checkpoints/last.ckpt \
                --input <new-samples>.h5mu \
                --output <projection-dir>/ --reconstruct
 ```

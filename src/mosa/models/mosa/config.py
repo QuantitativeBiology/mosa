@@ -104,7 +104,6 @@ class MOSAConfig(ModelConfig):
     precision: str = "32"
     gradient_clip_val: float = 0.0
     accumulate_grad_batches: int = 1
-    log_every_n_steps: int = 50
     early_stopping_patience: int = 20
     checkpoint_top_k: int = 3
     num_workers: int = 0

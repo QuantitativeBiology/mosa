@@ -7,7 +7,7 @@ from pathlib import Path
 from mosa.config import DataConfig, EvaluationConfig, ModelConfig
 from mosa.data.dataset import MultiOmicDataset
 from mosa.errors import ConfigError, UnsupportedError
-from mosa.models.evaluation import cross_validate
+from mosa.models.evaluation import cross_validate, require_out_of_sample
 from mosa.utils import read_yaml
 
 logger = logging.getLogger(__name__)
@@ -123,6 +123,9 @@ def optimize(
 
     search_space = parse_search_space(search_space)
     _check_search_space_fields(search_space, base_model_cfg)
+    # Every trial scores through cross_validate, which would reject the model
+    # per trial and only fail once all of them were pruned.
+    require_out_of_sample(base_model_cfg, "Hyperparameter search")
 
     # Every trial failure becomes TrialPruned so one bad combo cannot abort the
     # study. Keep the first reason: if nothing completes, it is the only thing

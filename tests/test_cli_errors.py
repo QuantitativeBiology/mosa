@@ -254,6 +254,30 @@ def test_cross_validate_rejects_model_without_out_of_sample(
     )
 
 
+def test_optimize_rejects_model_without_out_of_sample(
+    tmp_path, capsys, make_h5mu_file, monkeypatch
+):
+    pytest.importorskip("mofapy2")
+    pytest.importorskip("optuna")
+    import optuna
+
+    def no_study(*args, **kwargs):
+        raise AssertionError("optimize created a study before rejecting the model")
+
+    monkeypatch.setattr(optuna, "create_study", no_study)
+    h5mu = make_h5mu_file(tmp_path)
+    cfg = _config(tmp_path, h5mu, model="model:\n  type: mofa\n")
+    space = _write(
+        tmp_path / "space.yaml",
+        "n_factors:\n  dist: int\n  low: 2\n  high: 5\n",
+    )
+    assert_guided_failure(
+        capsys,
+        ["optimize", "--config", cfg, "--search-space", space],
+        "Hyperparameter search is not supported",
+    )
+
+
 # --- escape hatch ----------------------------------------------------------
 
 

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from mosa.config import DataConfig, ModelConfig
+from mosa.errors import DataError
 from mosa.models.api import MultiOmicModel
 
 # Self-contained: no imports of concrete model modules here. Model modules
@@ -56,28 +57,23 @@ def build_model(data_cfg: DataConfig, model_cfg: ModelConfig) -> MultiOmicModel:
 
 
 def load_model(path: str | Path) -> MultiOmicModel:
-    """Load a saved model, dispatching to the registered class that wrote it.
+    """Load a saved model with the one registered class that owns the file.
 
-    Artifact-based models are dispatched by file extension. Checkpoint-based
-    models embed their registered name under
-    hyper_parameters["model_type_name"] on save, but auto-checkpoints written
-    by Lightning's ModelCheckpoint callback during training (last.ckpt,
-    epoch-NNN.ckpt) go through a different path and carry no such key;
-    absence of the key falls back to "mosa_vae".
+    Each model class decides ownership through owns_checkpoint(), so this
+    function holds no knowledge of any model's file format.
     """
     path = Path(path)
-    if path.suffix == ".hdf5":
-        if "mofa" not in _REGISTRY:
-            raise ValueError("mofa model type is not registered")
-        return _REGISTRY["mofa"].model_cls.load(path)
-
-    import torch
-
-    checkpoint = torch.load(str(path), map_location="cpu", weights_only=False)
-    name = checkpoint.get("hyper_parameters", {}).get("model_type_name", "mosa_vae")
-    if name not in _REGISTRY:
-        raise ValueError(
-            f"Cannot determine registered model type for checkpoint '{path}' "
-            f"(found model_type_name={name!r}); known types: {list(_REGISTRY)}"
+    owners = [
+        name for name, reg in _REGISTRY.items() if reg.model_cls.owns_checkpoint(path)
+    ]
+    if len(owners) != 1:
+        suffixes = {
+            name: list(reg.model_cls.checkpoint_suffixes)
+            for name, reg in _REGISTRY.items()
+        }
+        found = f"claimed by {owners}" if owners else "claimed by no model"
+        raise DataError(
+            f"Cannot determine which model wrote '{path}': {found}. "
+            f"Registered file types: {suffixes}"
         )
-    return _REGISTRY[name].model_cls.load(path)
+    return _REGISTRY[owners[0]].model_cls.load(path)

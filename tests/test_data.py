@@ -48,12 +48,13 @@ def _create_test_h5mu(path: Path, n_samples: int, view_specs: dict[str, int]) ->
         adata.layers["mask"] = mask
         adatas[view_name] = adata
 
-    mdata = mudata.MuData(adatas)
-    obs_df = _make_obs_df(n_samples, rng)
-    obs_df.index = obs_df.index.astype(object)
-    mdata.obs = obs_df.copy()
-    _dearrow_mudata(mdata)
-    mdata.write(str(path))
+    with mudata.set_options(pull_on_update=False):
+        mdata = mudata.MuData(adatas)
+        obs_df = _make_obs_df(n_samples, rng)
+        obs_df.index = obs_df.index.astype(object)
+        mdata.obs = obs_df.copy()
+        _dearrow_mudata(mdata)
+        mdata.write(str(path))
     return path
 
 
@@ -79,12 +80,13 @@ def _create_test_zarr(path: Path, n_samples: int, view_specs: dict[str, int]) ->
         adata.layers["mask"] = mask
         adatas[view_name] = adata
 
-    mdata = mudata.MuData(adatas)
-    obs_df = _make_obs_df(n_samples, rng)
-    obs_df.index = obs_df.index.astype(object)
-    mdata.obs = obs_df.copy()
-    _dearrow_mudata(mdata)
-    mdata.write_zarr(str(path))
+    with mudata.set_options(pull_on_update=False):
+        mdata = mudata.MuData(adatas)
+        obs_df = _make_obs_df(n_samples, rng)
+        obs_df.index = obs_df.index.astype(object)
+        mdata.obs = obs_df.copy()
+        _dearrow_mudata(mdata)
+        mdata.write_zarr(str(path))
     return path
 
 
@@ -198,11 +200,12 @@ def test_load_h5mu_misaligned_modality_raises(tmp_path):
     )
     b.obs_names = pd.Index(["S2", "S1", "S0"], dtype=object)
     b.layers["mask"] = np.ones((3, 1), dtype=bool)
-    mdata = mudata.MuData({"a": a, "b": b})
-    mdata.obs["model_type"] = ["T", "T", "T"]
-    _dearrow_mudata(mdata)
     p = tmp_path / "misaligned.h5mu"
-    mdata.write(str(p))
+    with mudata.set_options(pull_on_update=False):
+        mdata = mudata.MuData({"a": a, "b": b})
+        mdata.obs["model_type"] = ["T", "T", "T"]
+        _dearrow_mudata(mdata)
+        mdata.write(str(p))
 
     with pytest.raises(ValueError, match="sample order does not match"):
         load_mudata(str(p), ["a", "b"])
@@ -228,19 +231,27 @@ def _build_two_view_mdata(reverse_b: bool, extra_obs: dict | None = None):
     )
     b.obs_names = pd.Index(b_order, dtype=object)
     b.layers["mask"] = np.ones((3, 1), dtype=bool)
-    mdata = mudata.MuData({"a": a, "b": b})
-    mdata.obs["model_type"] = ["T", "T", "T"]
-    if extra_obs:
-        for k, v in extra_obs.items():
-            mdata.obs[k] = v
-    _dearrow_mudata(mdata)
+    with mudata.set_options(pull_on_update=False):
+        mdata = mudata.MuData({"a": a, "b": b})
+        mdata.obs["model_type"] = ["T", "T", "T"]
+        if extra_obs:
+            for k, v in extra_obs.items():
+                mdata.obs[k] = v
+        _dearrow_mudata(mdata)
     return mdata
+
+
+def _write_zarr(mdata, path):
+    import mudata
+
+    with mudata.set_options(pull_on_update=False):
+        mdata.write_zarr(str(path))
 
 
 def test_load_zarr_misaligned_modality_raises(tmp_path):
     mdata = _build_two_view_mdata(reverse_b=True)
     p = tmp_path / "misaligned.zarr"
-    mdata.write_zarr(str(p))
+    _write_zarr(mdata, p)
     with pytest.raises(ValueError, match="sample order does not match"):
         load_mudata(str(p), ["a", "b"])
 
@@ -248,7 +259,7 @@ def test_load_zarr_misaligned_modality_raises(tmp_path):
 def test_load_zarr_preserves_extra_obs_column(tmp_path):
     mdata = _build_two_view_mdata(reverse_b=False, extra_obs={"age": [30, 40, 50]})
     p = tmp_path / "extra.zarr"
-    mdata.write_zarr(str(p))
+    _write_zarr(mdata, p)
     ds = load_mudata(str(p), ["a", "b"])
     assert "age" in ds.metadata.columns
     assert list(ds.metadata["age"]) == [30, 40, 50]
@@ -259,18 +270,25 @@ def test_load_h5mu_deduplicates_var_names(tmp_path):
     import mudata
 
     anndata.settings.allow_write_nullable_strings = True
-    a = anndata.AnnData(
-        X=np.array([[1.0, 2.0, 3.0]], dtype=np.float32),
-        var=pd.DataFrame(index=pd.Index(["GENE1", "GENE1", "GENE2"], dtype=object)),
-    )
+    with pytest.warns(UserWarning, match="Variable names are not unique"):
+        a = anndata.AnnData(
+            X=np.array([[1.0, 2.0, 3.0]], dtype=np.float32),
+            var=pd.DataFrame(index=pd.Index(["GENE1", "GENE1", "GENE2"], dtype=object)),
+        )
     a.obs_names = pd.Index(["S0"], dtype=object)
     a.layers["mask"] = np.ones((1, 3), dtype=bool)
-    mdata = mudata.MuData({"a": a})
-    mdata.obs["model_type"] = ["T"]
-    _dearrow_mudata(mdata)
     p = tmp_path / "dup.h5mu"
-    mdata.write(str(p))
-    ds = load_mudata(str(p), ["a"])
+    with (
+        mudata.set_options(pull_on_update=False),
+        pytest.warns(UserWarning, match="var_names are not unique"),
+    ):
+        mdata = mudata.MuData({"a": a})
+        mdata.obs["model_type"] = ["T"]
+        _dearrow_mudata(mdata)
+        mdata.write(str(p))
+    # Duplicates inside one view reach the user as anndata's warning on load.
+    with pytest.warns(UserWarning, match="Variable names are not unique"):
+        ds = load_mudata(str(p), ["a"])
     feats = ds.feature_names["a"]
     assert len(feats) == 3
     assert len(set(feats)) == 3  # duplicates made unique
@@ -295,7 +313,7 @@ def test_views_sharing_feature_names_load_without_warning(tmp_path, capsys):
         adata.obs_names = pd.Index(["S0", "S1"], dtype=object)
         adata.layers["mask"] = np.ones((2, 2), dtype=bool)
         views[name] = adata
-    with warnings.catch_warnings():
+    with warnings.catch_warnings(), mudata.set_options(pull_on_update=False):
         warnings.simplefilter("ignore")
         mdata = mudata.MuData(views)
         mdata.obs["model_type"] = ["T", "T"]
@@ -334,11 +352,12 @@ def test_load_h5mu_aligned_values_land_on_right_sample(tmp_path):
     )
     b.obs_names = pd.Index(samples, dtype=object)
     b.layers["mask"] = np.ones((6, 3), dtype=bool)
-    mdata = mudata.MuData({"a": a, "b": b})
-    mdata.obs["model_type"] = ["T"] * 6
-    _dearrow_mudata(mdata)
     p = tmp_path / "aligned.h5mu"
-    mdata.write(str(p))
+    with mudata.set_options(pull_on_update=False):
+        mdata = mudata.MuData({"a": a, "b": b})
+        mdata.obs["model_type"] = ["T"] * 6
+        _dearrow_mudata(mdata)
+        mdata.write(str(p))
 
     ds = load_mudata(str(p), ["a", "b"])
     assert list(ds.metadata.index) == samples
@@ -377,13 +396,14 @@ def test_load_h5mu_sparse_data(tmp_path):
     var = pd.DataFrame(index=[f"feat_{j}" for j in range(n_features)])
     adata = anndata.AnnData(X=X, obs=obs, var=var)
     adata.layers["mask"] = mask
-    mdata = mudata.MuData({"view_a": adata})
-    obs_df = _make_obs_df(n_samples, rng)
-    obs_df.index = obs_df.index.astype(object)
-    mdata.obs = obs_df.copy()
-    _dearrow_mudata(mdata)
     p = tmp_path / "sparse.h5mu"
-    mdata.write(str(p))
+    with mudata.set_options(pull_on_update=False):
+        mdata = mudata.MuData({"view_a": adata})
+        obs_df = _make_obs_df(n_samples, rng)
+        obs_df.index = obs_df.index.astype(object)
+        mdata.obs = obs_df.copy()
+        _dearrow_mudata(mdata)
+        mdata.write(str(p))
 
     dataset = load_mudata(str(p), ["view_a"])
     assert isinstance(dataset.views["view_a"], np.ndarray)

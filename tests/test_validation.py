@@ -43,7 +43,6 @@ def _write_h5mu(
         adata.layers[mask_name] = mask
         adatas[view_name] = adata
 
-    mdata = mudata.MuData(adatas)
     index = [f"sample_{i:03d}" for i in range(n_samples)]
 
     obs_data: dict[str, list] = {}
@@ -60,11 +59,13 @@ def _write_h5mu(
 
     obs_df = pd.DataFrame(obs_data, index=index)
     obs_df.index = obs_df.index.astype(object)
-    mdata.obs = obs_df.copy()
-    _dearrow_mudata(mdata)
 
     path = tmp_path / "data.h5mu"
-    mdata.write(str(path))
+    with mudata.set_options(pull_on_update=False):
+        mdata = mudata.MuData(adatas)
+        mdata.obs = obs_df.copy()
+        _dearrow_mudata(mdata)
+        mdata.write(str(path))
     return path
 
 
@@ -247,16 +248,17 @@ def test_summarize_structure_zarr(tmp_path):
     var = pd.DataFrame(index=[f"f{j}" for j in range(n_features)])
     adata = anndata.AnnData(X=X, obs=obs, var=var)
     adata.layers["mask"] = mask
-    mdata = mudata.MuData({"view_a": adata})
     obs_df = pd.DataFrame(
         {"model_type": ["TypeA", "TypeB"] * 3},
         index=[f"s{i}" for i in range(n_samples)],
     )
     obs_df.index = obs_df.index.astype(object)
-    mdata.obs = obs_df.copy()
-    _dearrow_mudata(mdata)
     path = tmp_path / "data.zarr"
-    mdata.write_zarr(str(path))
+    with mudata.set_options(pull_on_update=False):
+        mdata = mudata.MuData({"view_a": adata})
+        mdata.obs = obs_df.copy()
+        _dearrow_mudata(mdata)
+        mdata.write_zarr(str(path))
 
     summary = summarize_structure(str(path))
     assert summary["format"] == "zarr"

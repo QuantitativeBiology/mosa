@@ -67,7 +67,7 @@ def test_train_writes_outputs_for_every_split(trained_run):
 
 
 def test_train_writes_a_loadable_checkpoint(trained_run):
-    assert (trained_run["output_dir"] / "last.ckpt").exists()
+    assert (trained_run["output_dir"] / "checkpoints" / "last.ckpt").exists()
 
 
 def test_train_resume_continues_from_a_checkpoint(
@@ -80,7 +80,7 @@ def test_train_resume_continues_from_a_checkpoint(
     weights as 3 epochs from random init under the same seed. Anything less
     than a comparison passes even when --resume is ignored entirely.
     """
-    checkpoint = trained_run["output_dir"] / "last.ckpt"
+    checkpoint = trained_run["output_dir"] / "checkpoints" / "last.ckpt"
 
     def _run(name, *extra):
         out_dir = tmp_path / name
@@ -115,7 +115,7 @@ def test_transform_writes_latent_parquet(trained_run, tmp_path):
         [
             "transform",
             "--checkpoint",
-            str(trained_run["output_dir"] / "last.ckpt"),
+            str(trained_run["output_dir"] / "checkpoints" / "last.ckpt"),
             "--input",
             str(trained_run["data"]),
             "--output",
@@ -134,7 +134,7 @@ def test_transform_reconstruct_flag_adds_per_view_parquets(trained_run, tmp_path
         [
             "transform",
             "--checkpoint",
-            str(trained_run["output_dir"] / "last.ckpt"),
+            str(trained_run["output_dir"] / "checkpoints" / "last.ckpt"),
             "--input",
             str(trained_run["data"]),
             "--output",
@@ -146,6 +146,109 @@ def test_transform_reconstruct_flag_adds_per_view_parquets(trained_run, tmp_path
     for view, n_features in VIEWS.items():
         recon = pd.read_parquet(out / f"recon_{view}.parquet")
         assert recon.shape == (16, n_features)
+        assert list(recon.columns) == [f"{view}_feat_{j}" for j in range(n_features)]
+
+
+def test_transform_clears_stale_reconstructions(trained_run, tmp_path):
+    out = tmp_path / "projected_stale"
+    out.mkdir()
+    (out / "recon_old_view.parquet").write_text("from another model")
+    main(
+        [
+            "transform",
+            "--checkpoint",
+            str(trained_run["output_dir"] / "checkpoints" / "last.ckpt"),
+            "--input",
+            str(trained_run["data"]),
+            "--output",
+            str(out),
+        ]
+    )
+    assert not (out / "recon_old_view.parquet").exists()
+
+
+def test_auto_checkpoints_carry_the_model_name(trained_run):
+    import torch
+
+    ckpt = torch.load(
+        str(trained_run["output_dir"] / "checkpoints" / "last.ckpt"),
+        map_location="cpu",
+        weights_only=False,
+    )
+    assert ckpt["hyper_parameters"]["model_type_name"] == "mosa_vae"
+
+
+def test_failed_transform_keeps_previous_outputs(trained_run, tmp_path, monkeypatch):
+    from mosa.errors import DataError
+    from mosa.models.mosa import MOSAModel
+
+    out = tmp_path / "projected_keep"
+    args = [
+        "transform",
+        "--checkpoint",
+        str(trained_run["output_dir"] / "checkpoints" / "last.ckpt"),
+        "--input",
+        str(trained_run["data"]),
+        "--output",
+        str(out),
+        "--reconstruct",
+    ]
+    main(args)
+    before = {p.name: p.read_bytes() for p in out.iterdir()}
+
+    def fails(self, data):
+        raise DataError("input rejected")
+
+    monkeypatch.setattr(MOSAModel, "reconstruct", fails)
+    with pytest.raises(SystemExit):
+        main(args)
+    assert {p.name: p.read_bytes() for p in out.iterdir()} == before
+
+
+def test_mofa_train_then_transform_reconstruct(
+    make_h5mu_file, make_config_file, tmp_path, monkeypatch
+):
+    pytest.importorskip("mofapy2")
+    pytest.importorskip("mofax")
+    h5mu = make_h5mu_file(tmp_path, n_samples=16, view_specs=VIEWS)
+    output_dir = tmp_path / "run"
+    config = make_config_file(
+        tmp_path,
+        h5mu,
+        output_dir,
+        VIEWS,
+        model_type="mofa",
+        evaluation={"test_size": 0},
+        n_factors=3,
+        # The fixture is pure noise, so any threshold drops every factor.
+        drop_r2=None,
+    )
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+
+    main(["train", "--config", str(config)])
+    assert list(cwd.iterdir()) == []
+    assert (output_dir / "full" / "latent.parquet").exists()
+
+    out = tmp_path / "projected"
+    main(
+        [
+            "transform",
+            "--checkpoint",
+            str(output_dir / "mofa_model.hdf5"),
+            "--input",
+            str(h5mu),
+            "--output",
+            str(out),
+            "--reconstruct",
+        ]
+    )
+    for view, n_features in VIEWS.items():
+        recon = pd.read_parquet(out / f"recon_{view}.parquet")
+        trained = pd.read_parquet(output_dir / "full" / f"recon_{view}.parquet")
+        assert list(recon.columns) == [f"{view}_feat_{j}" for j in range(n_features)]
+        pd.testing.assert_frame_equal(recon, trained)
 
 
 # cross-validate

@@ -18,6 +18,14 @@ import pytest
 from mosa.data.dataset import MultiOmicDataset
 from mosa.data.io import csv_to_mudata, load_mudata
 
+
+def _read_mudata(path):
+    import mudata
+
+    with mudata.set_options(pull_on_update=False):
+        return mudata.read(str(path))
+
+
 # CSV-writing helpers
 
 
@@ -72,9 +80,7 @@ def test_output_structure(tmp_path):
         format="h5mu",
     )
 
-    import mudata
-
-    mdata = mudata.read(str(out_path))
+    mdata = _read_mudata(out_path)
 
     assert set(mdata.mod.keys()) == {"view_a", "view_b"}
 
@@ -113,9 +119,7 @@ def test_sample_alignment_and_ordering(tmp_path):
         str(out_path),
     )
 
-    import mudata
-
-    mdata = mudata.read(str(out_path))
+    mdata = _read_mudata(out_path)
 
     expected = ["S00", "S01", "S02", "S03", "S04"]  # sorted intersection; S05 excluded
     assert list(mdata.obs_names) == expected
@@ -144,9 +148,7 @@ def test_nan_kept_not_imputed(tmp_path):
     out_path = tmp_path / "out.h5mu"
     csv_to_mudata(str(cond_path), [("view_a", str(view_path))], str(out_path))
 
-    import mudata
-
-    mdata = mudata.read(str(out_path))
+    mdata = _read_mudata(out_path)
     adata = mdata.mod["view_a"]
 
     sample_idx = list(mdata.obs_names).index("S01")
@@ -182,9 +184,7 @@ def test_mutations_reindexed_with_zero_fill(tmp_path):
         mutations_path=str(mut_path),
     )
 
-    import mudata
-
-    mdata = mudata.read(str(out_path))
+    mdata = _read_mudata(out_path)
     obs = mdata.obs
 
     assert "mutation_mut1" in obs.columns
@@ -434,9 +434,7 @@ def test_has_view_distinguishes_absent_from_all_nan(tmp_path):
         str(out_path),
     )
 
-    import mudata
-
-    obs = mudata.read(str(out_path)).obs
+    obs = _read_mudata(out_path).obs
 
     assert not obs.loc["S00", "has_view_b"]  # absent from the file
     assert obs.loc["S01", "has_view_b"]  # present, but every value missing

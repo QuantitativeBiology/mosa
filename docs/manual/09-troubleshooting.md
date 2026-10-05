@@ -82,7 +82,15 @@ You passed an unsupported file format, such as an Excel spreadsheet. You must co
 
 ### `Cross-validation is not supported for the 'mofa' model: it has no out-of-sample projection.`
 
-The MOFA implementation cannot project samples it did not fit on, making k-fold scoring mathematically impossible. The tool raises this error before any training starts.
+The MOFA implementation cannot project samples it did not fit on, making k-fold scoring mathematically impossible. The tool raises this error before any training starts. `mosa optimize` raises the same error, starting with `Hyperparameter search is not supported`, before its first trial.
+
+### `MOFA does not support out-of-sample projection. Unseen samples: [...]`
+
+`transform` with a MOFA model only accepts samples the model was trained on. Train a new model that includes the new samples.
+
+### `MOFA cannot project new data: the values of <n> sample(s) differ from training, in values or feature order: [...]`
+
+The input reuses training sample IDs but holds different values, or the same values with features in a different order. MOFA would return the training factors for them, not factors for the new values. Pass the data the model was trained on, or train a new model.
 
 ### `Input <path> is missing view(s) ['meth'] required by the checkpoint. Checkpoint was trained on ['gexp', 'meth']; input has ['gexp'].`
 
@@ -91,6 +99,34 @@ The `transform` command requires every view the model was originally trained on.
 ### `Checkpoint <path> was written by an older MOSA version, before the config was split into data and model sections, and cannot be loaded.`
 
 The checkpoint was trained with a MOSA version from before July 2026, which stored its configuration in a format the current version cannot read. Retrain the model with your current version, or use a checkpoint that was.
+
+### `Cannot determine which model wrote '<path>': claimed by no model. Registered file types: {...}`
+
+`transform` picks the model class from the checkpoint file. Each model declares the file types it writes: `.ckpt` or `.pt` for `mosa_vae`, `.hdf5` for `mofa`. Check that you passed the model file itself and not an output such as a parquet. If the message says the file is claimed by more than one model, two registered models accept the same file, and one of them has to tell its files apart.
+
+### `MOFA only supports ASCII names, but <n> sample name(s) are not: [...]`
+
+MOFA's model file reader decodes sample, feature, view and `model_type` names as ASCII, so a model trained on other names could not be opened again. The check runs before training. Rename the listed entries, for example with `mosa convert --id-map` for sample IDs.
+
+### `Cannot reconstruct with '<path>': the file does not record how MOFA preprocessed the data.`
+
+The MOFA model file was written by mofapy2 directly, or by a MOSA version from before September 2026. Neither records how the data was centered and scaled, so reconstructions cannot be returned to the original scale. `transform` without `--reconstruct` still works. Retrain the model to reconstruct.
+
+### `model_type values [...] name the same group once written as text (e.g. 1 and '1').`
+
+MOFA stores group names as text, so a number and a string that read the same would be merged into one group. Give each `model_type` a distinct label.
+
+### `MOFA dropped every factor during training: none explained more than drop_r2 of the variance in any view and group.`
+
+MOFA found no structure above the `drop_r2` threshold, so no model was written. Check the input first: this is what pure noise produces. Setting `model.drop_r2: null` turns factor dropping off. A value of `0` still drops factors that explain nothing.
+
+### `Cannot reconstruct view '<name>': MOFA fit it with a bernoulli likelihood (guessed from its values)`
+
+MOFA fits views whose values are all 0 or 1 as `bernoulli`, and views whose values are all integers as `poisson`. Their reconstructions are not on the data scale, so `transform --reconstruct` raises and `train` skips their `recon_<view>.parquet`. `latent.parquet` is unaffected.
+
+### `View '<name>' features do not match the ones the model was trained on, in names or in order.`
+
+Both models read features by position, so `transform` checks that each view lists the training features in the training order before using them. Reorder or rename the input's features to match the training data.
 
 ### `target_batch '<name>' not in model_type categories: [...]`
 

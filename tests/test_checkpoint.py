@@ -106,13 +106,52 @@ def test_vae_load_reads_auto_checkpoint(
     model = MOSAModel(data_cfg, model_cfg)
     model.fit(train, val)
 
-    # ModelCheckpoint(save_last=True) writes last.ckpt into output_dir during fit()
-    last_ckpt = tmp_path / "last.ckpt"
+    # ModelCheckpoint(save_last=True) writes last.ckpt into output_dir/checkpoints during fit()
+    last_ckpt = tmp_path / "checkpoints" / "last.ckpt"
     assert last_ckpt.exists(), "Lightning should have auto-saved last.ckpt"
 
     loaded = MOSAModel.load(last_ckpt)
     z = loaded.transform(dataset)
     assert z.shape == (dataset.n_samples, model_cfg.joint_latent_dim)
+
+
+def test_vae_load_ignores_removed_config_fields(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
+    """A checkpoint saved before log_every_n_steps was removed still loads."""
+    dataset = make_multi_omic_dataset(n_samples=20)
+    train, val = _split(dataset)
+    data_cfg, model_cfg = make_mosa_config(dataset, output_dir=str(tmp_path))
+
+    model = MOSAModel(data_cfg, model_cfg)
+    model.fit(train, val)
+    ckpt = tmp_path / "old.ckpt"
+    model.save(ckpt)
+
+    raw = torch.load(str(ckpt), weights_only=False)
+    raw["hyper_parameters"]["model_cfg"]["log_every_n_steps"] = 50
+    torch.save(raw, str(ckpt))
+
+    loaded = MOSAModel.load(ckpt)
+    z = loaded.transform(dataset)
+    assert z.shape == (dataset.n_samples, model_cfg.joint_latent_dim)
+
+
+def test_vae_best_checkpoints_are_flat_files(
+    make_multi_omic_dataset, make_mosa_config, tmp_path
+):
+    """The val/loss metric name must not turn into a subdirectory."""
+    dataset = make_multi_omic_dataset(n_samples=20)
+    train, val = _split(dataset)
+    data_cfg, model_cfg = make_mosa_config(dataset, output_dir=str(tmp_path))
+
+    MOSAModel(data_cfg, model_cfg).fit(train, val)
+
+    entries = list((tmp_path / "checkpoints").iterdir())
+    assert all(p.is_file() for p in entries)
+    best = [p.name for p in entries if p.name.startswith("mosa-epoch=")]
+    assert best
+    assert all("-val_loss=" in name for name in best)
 
 
 def test_vae_save_load_scaler_fidelity(
@@ -175,7 +214,7 @@ def test_vae_resume_produces_valid_output(
     model = MOSAModel(data_cfg, model_cfg)
     model.fit(train, val)
 
-    last_ckpt = tmp_path / "last.ckpt"
+    last_ckpt = tmp_path / "checkpoints" / "last.ckpt"
     assert last_ckpt.exists(), "ModelCheckpoint(save_last=True) must write last.ckpt"
 
     data_cfg2, model_cfg2 = make_mosa_config(

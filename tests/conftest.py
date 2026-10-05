@@ -11,10 +11,10 @@ from mosa.config import DataConfig
 from mosa.data.dataset import MultiOmicDataset
 from mosa.models.mosa.config import MOSAConfig, OmicViewConfig
 
-# Test fixtures build MuData objects directly and never rely on the
-# pull-obs/var-on-update behavior; adopt the post-0.4 default to match
-# production code (see mosa/data/io.py) instead of leaving it a FutureWarning.
-# mudata.set_options(pull_on_update=False)
+# Tests that build, write or read MuData directly wrap those calls in
+# mudata.set_options(pull_on_update=False), as production code does. The
+# option is not set globally: pyproject turns mudata's FutureWarning into an
+# error, so a src/ call missing the wrapper still fails the suite.
 
 
 @pytest.fixture
@@ -157,7 +157,6 @@ def make_h5mu_file():
             adata.layers["mask"] = mask
             adatas[view_name] = adata
 
-        mdata = mudata.MuData(adatas)
         index = [f"sample_{i:03d}" for i in range(n_samples)]
         obs_df = pd.DataFrame(
             {
@@ -171,11 +170,13 @@ def make_h5mu_file():
             index=index,
         )
         obs_df.index = obs_df.index.astype(object)
-        mdata.obs = obs_df.copy()
-        _dearrow_mudata(mdata)
 
         path = tmp_path / "test.h5mu"
-        mdata.write(str(path))
+        with mudata.set_options(pull_on_update=False):
+            mdata = mudata.MuData(adatas)
+            mdata.obs = obs_df.copy()
+            _dearrow_mudata(mdata)
+            mdata.write(str(path))
         return path
 
     return _make

@@ -4,8 +4,9 @@ A finished `mosa train` run populates the directory specified in `model.output_d
 
 ```
 <output_dir>/
-├── last.ckpt                              most recent checkpoint
-├── mosa-epoch=NNN-val/loss=N.NNNN.ckpt    best checkpoints, up to checkpoint_top_k
+├── checkpoints/
+│   ├── last.ckpt                          most recent checkpoint
+│   └── mosa-epoch=NNN-val_loss=N.NNNN.ckpt  best checkpoints, up to checkpoint_top_k
 ├── lightning_logs/version_N/
 │   ├── metrics.csv                        per-epoch metrics
 │   └── hparams.yaml
@@ -20,7 +21,17 @@ If you run `mosa plot` later, the command adds a `plots/` directory and a `metri
 
 Setting `model.inference: true` creates an additional `inference/` split directory, which is explained below. Setting `evaluation.test_size: 0` disables the validation split entirely, meaning the run skips writing the `val/` directory and any best-epoch checkpoints. Read the [train](04-commands/01-train.md) page for details.
 
-A MOFA run generates none of these files. The `MOFAModel.save_outputs()` method writes a single `mofa_model.hdf5` file containing both the model and its outputs. Because the training loop calls this method without arguments, the file lands in your working directory instead of under `output_dir`.
+A MOFA run writes a smaller set of files to the same `output_dir`:
+
+```
+<output_dir>/
+├── mofa_model.hdf5                        trained model, pass to transform
+└── full/                                  every training sample
+    ├── latent.parquet
+    └── recon_<view>.parquet
+```
+
+MOFA ignores validation data, so there are no `train/`, `val/` or `inference/` directories. With `evaluation.test_size` above 0, `full/` holds only the samples the model was trained on. MOFA picks a likelihood per view from its values: `bernoulli` when every value is 0 or 1, `poisson` when every value is an integer, `gaussian` otherwise. Only `gaussian` views can be returned to the original scale, so the run skips `recon_<view>.parquet` for the others and logs a warning. The model file also records how MOFA centered and scaled the data. Files without that record, written by mofapy2 directly or by an earlier MOSA version, still work with `transform` but not with `--reconstruct`; retrain them.
 
 ## Parquet outputs
 
@@ -50,11 +61,11 @@ Enabling `model.inference: true` reconstructs the entire dataset a second time. 
 
 ## Checkpoints
 
-The `last.ckpt` file captures the exact state at the end of training. The `mosa-epoch=...` checkpoints capture the best iterations based on validation loss, retaining up to `checkpoint_top_k` files.
+Checkpoints live in `checkpoints/`. The `last.ckpt` file captures the exact state at the end of training. The `mosa-epoch=...` checkpoints capture the best iterations based on validation loss, retaining up to `checkpoint_top_k` files.
 
 You can pass any of these checkpoints to the [transform](04-commands/02-transform.md) command. Checkpoints bundle their own data configuration and their fitted scalers, meaning they do not require the original configuration file to run.
 
-> Note: The checkpoint filename template includes the metric name `val/loss`. Because file systems interpret the `/` character as a directory separator, the best checkpoints land in per-epoch directories named `mosa-epoch=NNN-val/`, with each holding a single `loss=N.NNNN.ckpt` file. This is purely cosmetic; the files load normally.
+> Note: Training into a folder that already holds checkpoints from an earlier run leaves the old files next to the new ones, and Lightning warns that the checkpoint directory is not empty. Use a fresh `output_dir` for each new run. Resuming with `--resume` into the same folder is expected and shows the same warning once.
 
 ## Metrics
 

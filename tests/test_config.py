@@ -201,6 +201,11 @@ def test_mofa_invalid_n_factors():
         MOFAConfig(n_factors=0)
 
 
+def test_mofa_invalid_iterations():
+    with pytest.raises(ValueError, match="iterations"):
+        MOFAConfig(iterations=0)
+
+
 def test_mofa_invalid_convergence_mode():
     with pytest.raises(ValueError, match="convergence_mode"):
         MOFAConfig(convergence_mode="invalid")

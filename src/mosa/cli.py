@@ -154,17 +154,25 @@ def _transform(args):
         model.data_cfg.mask_layer_name,
     )
 
-    out_dir = ensure_dir(args.output)
-
+    # Compute everything first: a failed run must leave a previous run's
+    # outputs untouched.
     z = model.transform(dataset)
+    recon = model.reconstruct(dataset) if args.reconstruct else {}
+
+    out_dir = ensure_dir(args.output)
+    # A previous transform into this directory may have written views this
+    # model does not have, or reconstructions this run does not ask for.
+    for stale in out_dir.glob("recon_*.parquet"):
+        stale.unlink()
     pd.DataFrame(z, index=dataset.sample_names).to_parquet(out_dir / "latent.parquet")
     print(f"Latent representations saved to {out_dir / 'latent.parquet'}")
 
-    if args.reconstruct:
-        recon = model.reconstruct(dataset)
-        for omic, arr in recon.items():
-            df = pd.DataFrame(arr, index=dataset.sample_names)
-            df.to_parquet(out_dir / f"recon_{omic}.parquet")
+    for omic, arr in recon.items():
+        df = pd.DataFrame(
+            arr, index=dataset.sample_names, columns=dataset.feature_names[omic]
+        )
+        df.to_parquet(out_dir / f"recon_{omic}.parquet")
+    if recon:
         print(f"Reconstructions saved to {out_dir}/")
 
 

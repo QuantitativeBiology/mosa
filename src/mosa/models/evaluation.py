@@ -84,6 +84,17 @@ def _build_splitter(eval_cfg: EvaluationConfig, seed: int):
     )
 
 
+def require_out_of_sample(model_cfg: ModelConfig, action: str) -> None:
+    """Raise before any training when model_cfg's model cannot score held-out samples."""
+    model_cls = model_class_for(model_cfg)
+    if not model_cls.supports_out_of_sample:
+        raise UnsupportedError(
+            f"{action} is not supported for the "
+            f"'{getattr(model_cls, 'registered_name', model_cls.__name__)}' "
+            f"model: it has no out-of-sample projection."
+        )
+
+
 def cross_validate(
     dataset: MultiOmicDataset,
     data_cfg: DataConfig,
@@ -130,14 +141,7 @@ def cross_validate(
     should be filtered with dataset.masks[view] before comparing.
     """
     eval_cfg = eval_cfg or EvaluationConfig()
-
-    model_cls = model_class_for(model_cfg)
-    if not model_cls.supports_out_of_sample:
-        raise UnsupportedError(
-            f"Cross-validation is not supported for the "
-            f"'{getattr(model_cls, 'registered_name', model_cls.__name__)}' "
-            f"model: it has no out-of-sample projection."
-        )
+    require_out_of_sample(model_cfg, "Cross-validation")
 
     labels = dataset.metadata["model_type"].to_numpy()
     _check_folds_fit_data(dataset, labels, eval_cfg)

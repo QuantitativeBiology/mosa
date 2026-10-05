@@ -13,15 +13,18 @@ class MOFAConfig(ModelConfig):
 
     n_factors: int = 50
     ard_factors: bool = True
-    drop_r2: float = 0.001
+    drop_r2: float | None = 0.001
     scale_views: bool = False
     scale_groups: bool = False
     convergence_mode: str = "fast"
+    iterations: int = 1000
 
     def __post_init__(self):
         super().__post_init__()
         if self.n_factors <= 0:
             raise ValueError(f"n_factors must be positive, got {self.n_factors}")
+        if self.iterations <= 0:
+            raise ValueError(f"iterations must be positive, got {self.iterations}")
         if self.convergence_mode not in _VALID_CONVERGENCE:
             raise ValueError(
                 f"convergence_mode must be one of {_VALID_CONVERGENCE}, got '{self.convergence_mode}'"

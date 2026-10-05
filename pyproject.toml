@@ -17,7 +17,8 @@ dependencies = [
     "scipy==1.17.1",
     "PyYAML==6.0.3",
     "mudata>=0.3.10,<0.4",
-    "anndata>=0.10",
+    # 0.14 drops the zarr_write_format setting mudata <0.4 still reads.
+    "anndata>=0.10,<0.14",
     "zarr>=3",
     "pyarrow>=15.0",
     "matplotlib==3.10.8",
@@ -54,6 +55,20 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 markers = [
     "behavioral: asserts that training learns rather than that an interface holds; unseeded and hardware sensitive, so it runs nightly rather than on every commit",
+]
+filterwarnings = [
+    # Every MuData build, read and write must run under
+    # set_options(pull_on_update=False), in src/ and in tests alike.
+    "error:From 0.4:FutureWarning",
+    # mudata <0.4 reads an anndata setting deprecated in 0.13; anndata is
+    # capped below 0.14, where it is removed.
+    "ignore:This setting will be removed in 0.14:DeprecationWarning:mudata",
+    # Raised at import by mudata's namespace decorator, not by our calls.
+    "ignore:The decorator_name argument is deprecated:DeprecationWarning:mudata",
+    "ignore:The docstring_style argument is deprecated:DeprecationWarning:mudata",
+    # S*log(S) at S == 0 in the ELBO; mofapy2 zeroes the NaN right after.
+    "ignore:divide by zero encountered in log:RuntimeWarning:mofapy2",
+    "ignore:invalid value encountered in multiply:RuntimeWarning:mofapy2",
 ]
 
 [tool.ruff.lint]

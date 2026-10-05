@@ -140,6 +140,15 @@ def test_config_class_keeps_the_base_orchestration_fields(registration):
     )
 
 
+def test_checkpoint_suffixes_are_declared(registration):
+    """load_model finds a file's model only through the suffixes it declares."""
+    name, reg = registration
+    suffixes = reg.model_cls.checkpoint_suffixes
+    assert suffixes and all(s.startswith(".") for s in suffixes), (
+        f"'{name}' declares no checkpoint_suffixes, so load_model cannot load it"
+    )
+
+
 def test_supports_out_of_sample_is_a_bool(registration):
     """cross_validate branches on this; a non-bool would silently pass the check."""
     name, reg = registration
@@ -188,6 +197,9 @@ class DummyModel(MultiOmicModel):
     model behind this API.
     """
 
+    # Shares .ckpt with MOSA, so ownership is decided by the embedded name.
+    checkpoint_suffixes = (".ckpt",)
+
     def __init__(self, data_cfg: DataConfig, model_cfg: DummyConfig):
         self.data_cfg = data_cfg
         self.model_cfg = model_cfg
@@ -232,8 +244,8 @@ class DummyModel(MultiOmicModel):
         self._check_fitted()
         import torch
 
-        # The dispatch contract from registry.load_model: a checkpoint carries
-        # the registered name it was written by.
+        # The checkpoint carries the registered name it was written by, which
+        # owns_checkpoint reads back.
         torch.save(
             {
                 "hyper_parameters": {"model_type_name": self.registered_name},
@@ -252,6 +264,15 @@ class DummyModel(MultiOmicModel):
         model = cls(state["data_cfg"], state["model_cfg"])
         model._means = state["means"]
         return model
+
+    @classmethod
+    def owns_checkpoint(cls, path) -> bool:
+        import torch
+
+        if not super().owns_checkpoint(path):
+            return False
+        state = torch.load(str(path), map_location="cpu", weights_only=False)
+        return state["hyper_parameters"]["model_type_name"] == cls.registered_name
 
 
 class TransductiveDummyModel(DummyModel):
@@ -383,3 +404,106 @@ def test_unregistered_config_subclass_is_rejected_with_its_type_name(dummy_regis
 
     with pytest.raises(TypeError, match="UnregisteredVariantConfig"):
         model_class_for(UnregisteredVariantConfig())
+
+
+class SuffixDummyModel(DummyModel):
+    checkpoint_suffixes = (".dummy",)
+
+
+@dataclass
+class SuffixDummyConfig(DummyConfig):
+    pass
+
+
+def test_new_suffix_loads_without_registry_changes(
+    dummy_registered, sample_dataset, tmp_path
+):
+    register_model("suffix_dummy", SuffixDummyConfig)(SuffixDummyModel)
+    data_cfg = DataConfig(path="unused", views=list(sample_dataset.view_names))
+    model = SuffixDummyModel(data_cfg, SuffixDummyConfig(output_dir=str(tmp_path)))
+    model.fit(sample_dataset)
+    model.save(tmp_path / "model.dummy")
+    assert isinstance(load_model(tmp_path / "model.dummy"), SuffixDummyModel)
+
+
+def test_registry_names_no_registered_model():
+    """Adding a model must not need a registry edit, so the registry may not
+    special-case any model by name."""
+    import mosa.models.registry as registry
+
+    source = inspect.getsource(registry)
+    named = [name for name, _ in REGISTERED if f'"{name}"' in source]
+    assert named == [], f"registry.py special-cases {named}"
+
+
+class Hdf5DummyModel(DummyModel):
+    """Writes .hdf5 like MOFA; tells its files apart by an attribute."""
+
+    checkpoint_suffixes = (".hdf5",)
+
+    def save(self, path) -> None:
+        import h5py
+
+        with h5py.File(path, "w") as f:
+            f.attrs["model"] = self.registered_name
+
+    @classmethod
+    def owns_checkpoint(cls, path) -> bool:
+        import h5py
+
+        with h5py.File(path, "r") as f:
+            return f.attrs.get("model") == cls.registered_name
+
+    @classmethod
+    def load(cls, path, **kwargs):
+        return cls(DataConfig(path="unused", views=["v"]), Hdf5DummyConfig())
+
+
+@dataclass
+class Hdf5DummyConfig(DummyConfig):
+    pass
+
+
+def test_a_second_hdf5_model_loads_without_changing_mofa(
+    dummy_registered, sample_dataset, tmp_path
+):
+    """MOFA also writes .hdf5; it must not claim another model's file."""
+    register_model("hdf5_dummy", Hdf5DummyConfig)(Hdf5DummyModel)
+    data_cfg = DataConfig(path="unused", views=list(sample_dataset.view_names))
+    model = Hdf5DummyModel(data_cfg, Hdf5DummyConfig())
+    model.fit(sample_dataset)
+    model.save(tmp_path / "model.hdf5")
+    assert isinstance(load_model(tmp_path / "model.hdf5"), Hdf5DummyModel)
+
+
+def test_load_model_rejects_a_file_no_model_owns(tmp_path):
+    from mosa.errors import DataError
+
+    path = tmp_path / "model.xyz"
+    path.write_text("")
+    with pytest.raises(DataError, match="claimed by no model"):
+        load_model(path)
+
+
+def test_load_model_rejects_a_file_two_models_own(
+    dummy_registered, sample_dataset, tmp_path
+):
+    from mosa.errors import DataError
+
+    class Greedy(SuffixDummyModel):
+        @classmethod
+        def owns_checkpoint(cls, path) -> bool:
+            return True
+
+    @dataclass
+    class GreedyConfig(DummyConfig):
+        pass
+
+    register_model("suffix_dummy", SuffixDummyConfig)(SuffixDummyModel)
+    register_model("greedy", GreedyConfig)(Greedy)
+    data_cfg = DataConfig(path="unused", views=list(sample_dataset.view_names))
+    model = SuffixDummyModel(data_cfg, SuffixDummyConfig(output_dir=str(tmp_path)))
+    model.fit(sample_dataset)
+    model.save(tmp_path / "model.dummy")
+    with pytest.raises(DataError, match="suffix_dummy.*greedy|greedy.*suffix_dummy"):
+        load_model(tmp_path / "model.dummy")

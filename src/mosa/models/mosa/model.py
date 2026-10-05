@@ -22,6 +22,10 @@ from mosa.utils import ensure_dir
 
 logger = logging.getLogger(__name__)
 
+# MOSAConfig fields that were removed but still sit in older checkpoints'
+# saved model_cfg; dropped on load so those checkpoints stay loadable.
+_REMOVED_MODEL_CFG_KEYS = ("log_every_n_steps",)
+
 
 class _EpochHistoryCallback(pl.Callback):
     """Record per-epoch train/val loss so callers can plot learning curves.
@@ -75,6 +79,8 @@ class MOSAModel(MultiOmicModel):
     orchestration behind the standard MultiOmicModel interface.
     """
 
+    checkpoint_suffixes = (".ckpt", ".pt")
+
     def __init__(self, data_cfg: DataConfig, model_cfg: MOSAConfig):
         self.data_cfg = data_cfg
         self.model_cfg = model_cfg
@@ -105,6 +111,8 @@ class MOSAModel(MultiOmicModel):
             n_batches=self._datamodule.n_batches,
             data_cfg=self.data_cfg,
         )
+        # Stamped before training so ModelCheckpoint's files carry it too.
+        self._model.hparams["model_type_name"] = self.registered_name
 
         if self._datamodule.class_weights is not None:
             self._model.class_weights = torch.tensor(
@@ -129,8 +137,14 @@ class MOSAModel(MultiOmicModel):
             if mc.checkpoint_top_k != 0:
                 callbacks.append(
                     _LoggingModelCheckpoint(
-                        dirpath=mc.output_dir,
-                        filename="mosa-{epoch:03d}-{val/loss:.4f}",
+                        # Kept apart from the run root, where lightning_logs/
+                        # already exists, so Lightning's "directory not empty"
+                        # warning only fires when a run reuses an old folder.
+                        dirpath=Path(mc.output_dir) / "checkpoints",
+                        # auto_insert_metric_name would write "val/loss=",
+                        # and the slash turns into a subdirectory.
+                        filename="mosa-epoch={epoch:03d}-val_loss={val/loss:.4f}",
+                        auto_insert_metric_name=False,
                         monitor="val/loss",
                         mode="min",
                         save_top_k=mc.checkpoint_top_k,
@@ -149,7 +163,9 @@ class MOSAModel(MultiOmicModel):
             # gradient_clip_val is applied manually in VAE.training_step;
             # Lightning forbids it on the Trainer under manual optimization.
             accumulate_grad_batches=mc.accumulate_grad_batches,
-            log_every_n_steps=mc.log_every_n_steps,
+            # Every metric is epoch-level, so the step interval only drives
+            # Lightning's "fewer batches than the logging interval" warning.
+            log_every_n_steps=1,
             sync_batchnorm=use_multi_gpu,
         )
         if use_multi_gpu:
@@ -321,13 +337,40 @@ class MOSAModel(MultiOmicModel):
         """
         if self._trainer is None:
             raise RuntimeError("Model must be fit before saving")
+        self.require_checkpoint_suffix(path)
 
         # Embed the registered model-type name in the module's hyperparameters
-        # before writing, so registry.load_model can dispatch polymorphically
-        # and the checkpoint is serialized in a single pass.
+        # before writing, so owns_checkpoint can tell this file apart from
+        # another torch-based model's, and the checkpoint is serialized in a
+        # single pass.
         assert self._model is not None
         self._model.hparams["model_type_name"] = self.registered_name
         self._trainer.save_checkpoint(str(path))
+
+    @classmethod
+    def owns_checkpoint(cls, path: str | Path) -> bool:
+        """A .ckpt/.pt file naming this model, or an unnamed one written by MOSA's VAE.
+
+        Checkpoints Lightning's ModelCheckpoint wrote before fit() stamped the
+        name carry none; view_input_dims, in every VAE's hyperparameters since
+        May 2026, marks those as MOSA's rather than another Lightning model's.
+        """
+        if not super().owns_checkpoint(path):
+            return False
+        # mmap reads only the pickled metadata here, not every tensor; load()
+        # reads the file in full afterwards. Legacy (non-zip) torch files
+        # cannot be memory-mapped and are read in full.
+        try:
+            checkpoint = torch.load(
+                str(path), map_location="cpu", weights_only=False, mmap=True
+            )
+        except RuntimeError:
+            checkpoint = torch.load(str(path), map_location="cpu", weights_only=False)
+        hp = checkpoint.get("hyper_parameters", {})
+        name = hp.get("model_type_name")
+        if name is None:
+            return "view_input_dims" in hp
+        return name == cls.registered_name
 
     @classmethod
     def load(cls, path: str | Path, **kwargs) -> MOSAModel:
@@ -352,6 +395,8 @@ class MOSAModel(MultiOmicModel):
         data_cfg = DataConfig(**hp["data_cfg"])
 
         mcfg_raw = dict(hp["model_cfg"])
+        for key in _REMOVED_MODEL_CFG_KEYS:
+            mcfg_raw.pop(key, None)
         mcfg_raw["views"] = {
             n: OmicViewConfig(**v) for n, v in mcfg_raw["views"].items()
         }

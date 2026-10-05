@@ -12,6 +12,7 @@ from torch.utils.data import ConcatDataset, DataLoader, Dataset, WeightedRandomS
 from mosa.config import DataConfig
 from mosa.data.dataset import MultiOmicDataset
 from mosa.data.io import _zarr_view_mask_key, _zarr_view_x_key
+from mosa.errors import DataError
 from mosa.models.mosa.config import MOSAConfig
 
 logger = logging.getLogger(__name__)
@@ -407,6 +408,17 @@ class MOSADataModule(pl.LightningDataModule):
             raise NotImplementedError(
                 "Inference setup for lazy zarr data is not implemented"
             )
+
+        assert self.train_data is not None
+        # Scalers and weights are positional: a reordered or renamed feature
+        # would silently be treated as the training feature in its place.
+        for view_name, trained in source.feature_names.items():
+            given = self.train_data.feature_names.get(view_name)
+            if given is not None and list(given) != list(trained):
+                raise DataError(
+                    f"View '{view_name}' features do not match the ones the "
+                    f"model was trained on, in names or in order."
+                )
 
         self.scalers = source.scalers
         self.group_centering = source.group_centering
@@ -997,21 +1009,22 @@ class MOSADataModule(pl.LightningDataModule):
         else:
             tissue_labels = np.zeros((len(obs_df), 1), dtype=np.float32)
 
+        # Checked before building the Categorical: pandas is deprecating the
+        # silent -1 code for values outside the categories in favour of its own
+        # error, which would replace this message.
+        seen = obs_df["model_type"].isin(self.batch_categories)
+        if not seen.all():
+            unseen = sorted(set(obs_df["model_type"][~seen]))
+            raise ValueError(
+                f"model_type value(s) {unseen} not seen during fit; known "
+                f"categories: {self.batch_categories}"
+            )
         model_type_cats = pd.Categorical(
             obs_df["model_type"],
             categories=self.batch_categories,
             ordered=True,
         )
         label_codes = np.asarray(model_type_cats.codes, dtype=np.intp)
-        # code -1 marks a model_type absent from the training categories; left
-        # unchecked it would negative-index class_weights (wrapping to the last
-        # class) and misalign the conditional block. Fail clearly instead.
-        if (label_codes < 0).any():
-            unseen = sorted(set(obs_df["model_type"][label_codes < 0]))
-            raise ValueError(
-                f"model_type value(s) {unseen} not seen during fit; known "
-                f"categories: {self.batch_categories}"
-            )
         if self.class_weights is not None:
             sample_weights = self.class_weights[label_codes].astype(np.float32)
         else:

@@ -310,7 +310,7 @@ class VAE(pl.LightningModule):
         opt_vae.step()
 
         # Logging: epoch-reduced (on_step=False, on_epoch=True) so metrics are
-        # written once per epoch regardless of log_every_n_steps, with an
+        # written once per epoch regardless of the Trainer's step interval, with an
         # explicit batch_size so the epoch mean is weighted correctly across a
         # ragged last batch. sync_dist mirrors validation_step for DDP parity.
         bs = batch["conditionals"].shape[0]
