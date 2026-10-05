@@ -34,9 +34,8 @@ def _feature_mean(X: np.ndarray, masks: np.ndarray) -> np.ndarray:
 
 def _feature_std(X: np.ndarray, masks: np.ndarray, mean: np.ndarray) -> np.ndarray:
     """Compute per-feature standard deviation using only observed values."""
-    observed = np.where(masks, X, 0.0)
     counts = masks.sum(axis=0).astype(np.float32)
-    centered = observed - mean
+    centered = np.where(masks, X - mean, 0.0)
     sq_sums = np.square(centered).sum(axis=0)
     var = np.zeros(X.shape[1], dtype=np.float32)
     valid = counts > 0

@@ -10,7 +10,11 @@ from mosa.config import DataConfig
 from mosa.data.dataset import MultiOmicDataset
 from mosa.data.io import _dearrow_mudata, load_mudata
 from mosa.models.mosa.config import MOSAConfig, OmicViewConfig
-from mosa.models.mosa.datamodule import MOSADataModule
+from mosa.models.mosa.datamodule import (
+    MOSADataModule,
+    _apply_standardization,
+    _fit_standardization,
+)
 
 # Helpers
 
@@ -754,3 +758,60 @@ def test_datamodule_mutation_column_missing_at_inference_zero_filled(tmp_path):
     result = dm._process_obs_readonly(infer_obs)
     mutation_block = result["conditionals"][:, -len(dm.mutation_columns) :]
     np.testing.assert_array_equal(mutation_block, np.array([[1, 0]], dtype=np.float32))
+
+
+@pytest.mark.parametrize("placeholder", [np.nan, 0.0, 999.0])
+def test_standardization_ignores_masked_values(placeholder):
+    X = np.array(
+        [
+            [2.0, 7.0, placeholder, 2.0],
+            [4.0, 7.0, placeholder, 4.0],
+            [placeholder, placeholder, placeholder, 6.0],
+        ],
+        dtype=np.float32,
+    )
+    mask = np.array(
+        [
+            [True, True, False, True],
+            [True, True, False, True],
+            [False, False, False, True],
+        ]
+    )
+    stats = _fit_standardization(X, mask)
+    np.testing.assert_allclose(stats["mean"], [3.0, 7.0, 0.0, 4.0])
+    np.testing.assert_allclose(stats["scale"], [1.0, 1.0, 1.0, np.sqrt(8.0 / 3.0)])
+    transformed = _apply_standardization(X, mask, stats)
+    np.testing.assert_allclose(transformed[:2, 0], [-1.0, 1.0])
+    np.testing.assert_array_equal(transformed[~mask], 0.0)
+    np.testing.assert_array_equal(transformed[:, 1:3], 0.0)
+    restored = transformed * stats["scale"] + stats["mean"]
+    np.testing.assert_allclose(restored[mask], X[mask], atol=1e-6)
+
+
+def test_datamodule_standardization_missing_train_values(tmp_path):
+    view_specs = {"view_a": 2}
+    train = _make_dataset(3, view_specs)
+    train.views["view_a"] = np.array(
+        [[2.0, 7.0], [4.0, 7.0], [np.nan, np.nan]], dtype=np.float32
+    )
+    train.masks["view_a"] = ~np.isnan(train.views["view_a"])
+    val = _make_dataset(2, view_specs)
+    val.views["view_a"] = np.array([[13.0, 9.0], [np.nan, 7.0]], dtype=np.float32)
+    val.masks["view_a"] = ~np.isnan(val.views["view_a"])
+    dm = _make_datamodule(
+        train, val, tmp_path, view_specs, preprocessing_mode="standardize"
+    )
+    dm.setup()
+    np.testing.assert_allclose(dm.scalers["view_a"]["mean"], [3.0, 7.0])
+    np.testing.assert_allclose(dm.scalers["view_a"]["scale"], [1.0, 1.0])
+    np.testing.assert_allclose(
+        dm.train_dataset.omics["view_a"].numpy(), [[-1.0, 0.0], [1.0, 0.0], [0.0, 0.0]]
+    )
+    np.testing.assert_allclose(
+        dm.val_dataset.omics["view_a"].numpy(), [[10.0, 2.0], [0.0, 0.0]]
+    )
+    restored = dm.inverse_transform_view(
+        "view_a", dm.train_dataset.omics["view_a"].numpy()
+    )
+    mask = train.masks["view_a"]
+    np.testing.assert_allclose(restored[mask], train.views["view_a"][mask])
