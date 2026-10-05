@@ -194,6 +194,25 @@ def test_mofa_default():
     cfg = MOFAConfig()
     assert cfg.n_factors == 50
     assert cfg.convergence_mode == "fast"
+    assert cfg.gpu_mode is False
+    assert cfg.gpu_device is None
+
+
+@pytest.mark.parametrize("device", [-1, 1.5, True, "0"])
+def test_mofa_invalid_gpu_device(device):
+    with pytest.raises(ValueError, match="gpu_device"):
+        MOFAConfig(gpu_device=device)
+
+
+def test_mofa_gpu_options():
+    cfg = MOFAConfig(gpu_mode=True, gpu_device=0)
+    assert cfg.gpu_mode is True
+    assert cfg.gpu_device == 0
+
+
+def test_mofa_invalid_gpu_mode():
+    with pytest.raises(ValueError, match="gpu_mode"):
+        MOFAConfig(gpu_mode="true")
 
 
 def test_mofa_invalid_n_factors():

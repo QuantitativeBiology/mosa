@@ -167,6 +167,8 @@ MOFA is included to allow benchmarking against identical data. It requires the o
 | `scale_groups` | `bool` | `false` | Scales groups to unit variance before fitting. |
 | `convergence_mode` | `str` | `fast` | Convergence tolerance. Options are `fast`, `medium`, or `slow`. |
 | `iterations` | `int` | `1000` | Maximum number of training updates. Must be positive. `train` warns when a run stops at this cap without converging. |
+| `gpu_mode` | `bool` | `false` | Enables GPU training through CuPy. Requires an NVIDIA GPU and a CuPy installation compatible with the server's CUDA version. mofapy2 falls back to CPU if CuPy cannot be imported. |
+| `gpu_device` | `int` or `null` | `null` | CUDA device index (non-negative), used when `gpu_mode: true`. `null` uses CuPy's current device. |
 
 MOFA supports held-out reconstruction, cross-validation, and optimization for Gaussian views and groups present during training. It projects unseen samples by joint minimum-norm least squares over observed features, using the training group means and scaling factors. Masked views contribute no observations, but every trained view and its exact feature order must remain in the input. Samples with no observed features, unknown groups, and non-Gaussian projection are rejected. Fitted sample IDs retain their learned factors and changed fitted values are rejected; use new IDs for new observations. Projection is a deterministic estimate from learned weights, not MOFA posterior inference. Validation data does not drive MOFA fitting or early stopping. Inference works after `fit()` and after loading a MOSA artifact containing preprocessing metadata; plain mofapy2 artifacts cannot project. MOFA treats `-2147483648` (R's integer missing-value code) as missing, like a masked entry.
 

@@ -1067,8 +1067,9 @@ def test_mofa_projection_reuses_training_preprocessing(tmp_path):
 
 @skip_mofa
 def test_mofa_projection_rejects_non_gaussian_and_legacy_artifacts(tmp_path):
-    import h5py
     import shutil
+
+    import h5py
 
     from mosa.errors import UnsupportedError
 

@@ -18,9 +18,19 @@ class MOFAConfig(ModelConfig):
     scale_groups: bool = False
     convergence_mode: str = "fast"
     iterations: int = 1000
+    gpu_mode: bool = False
+    gpu_device: int | None = None
 
     def __post_init__(self):
         super().__post_init__()
+        if not isinstance(self.gpu_mode, bool):
+            raise ValueError("gpu_mode must be a boolean")
+        if self.gpu_device is not None and (
+            isinstance(self.gpu_device, bool)
+            or not isinstance(self.gpu_device, int)
+            or self.gpu_device < 0
+        ):
+            raise ValueError("gpu_device must be a non-negative integer or null")
         if self.n_factors <= 0:
             raise ValueError(f"n_factors must be positive, got {self.n_factors}")
         if self.iterations <= 0:

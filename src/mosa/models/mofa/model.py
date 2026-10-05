@@ -211,6 +211,8 @@ class MOFAModel(MultiOmicModel):
             iter=mc.iterations + 1,
             seed=mc.random_seed,
             convergence_mode=mc.convergence_mode,
+            gpu_mode=mc.gpu_mode,
+            gpu_device=mc.gpu_device,
         )
         ent.build()
         try:
