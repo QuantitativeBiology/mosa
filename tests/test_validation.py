@@ -308,7 +308,7 @@ def test_load_time_structure_error_unchanged(tmp_path):
         load_mudata(str(path), ["view_a", "view_missing"])
 
 
-# MOFAConfig.validate_against_data: only the inert-holdout check.
+# MOFAConfig.validate_against_data: held-out projection is supported.
 
 
 def test_mofa_validate_against_data_returns_empty(tmp_path):
@@ -324,7 +324,7 @@ def test_mofa_validate_against_data_returns_empty(tmp_path):
     assert warnings == []
 
 
-def test_mofa_warns_when_test_size_nonzero(tmp_path):
+def test_mofa_allows_heldout_samples(tmp_path):
     path = _write_h5mu(tmp_path, {"view_a": 10})
     data_cfg = DataConfig(path=str(path), views=["view_a"])
     cfg = Config(
@@ -334,5 +334,4 @@ def test_mofa_warns_when_test_size_nonzero(tmp_path):
     )
 
     warnings = validate_config_against_data(cfg)
-    assert len(warnings) == 1
-    assert "MOFA ignores validation data" in warnings[0]
+    assert warnings == []

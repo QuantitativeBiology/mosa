@@ -6,6 +6,7 @@ import importlib.util
 import json
 import logging
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -43,12 +44,12 @@ class MOFAModel(MultiOmicModel):
     """MultiOmicModel implementation using MOFA+ (mofapy2 / mofax).
 
     Training uses Automatic Relevance Determination (ARD) for regularization;
-    validation data is therefore not used. transform() only looks up the
-    factors learned for training samples, so it rejects unseen samples and
-    training samples whose values changed.
+    validation data does not drive fitting. Unseen samples are projected by
+    joint least squares over observed Gaussian features in training coordinates.
+    Unchanged fitted samples retain their learned factors.
     """
 
-    supports_out_of_sample = False
+    supports_out_of_sample = True
     checkpoint_suffixes = (".hdf5",)
 
     @classmethod
@@ -82,6 +83,7 @@ class MOFAModel(MultiOmicModel):
         self._train_features: dict[str, list[str]] = {}
         self._train_fingerprints: dict[str, np.ndarray] = {}
         self._scales: dict[str, tuple[float, dict[str, float]]] = {}
+        self._inference_dir: tempfile.TemporaryDirectory[str] | None = None
 
     @staticmethod
     def _require_ascii_names(data: MultiOmicDataset) -> None:
@@ -274,7 +276,7 @@ class MOFAModel(MultiOmicModel):
         if missing:
             raise DataError(
                 f"Input is missing view(s) {missing} the model was trained on; "
-                f"the training values of those views cannot be checked."
+                f"keep the view with all entries masked when it is unavailable."
             )
         for view_name in data.view_names:
             if view_name not in trained:
@@ -308,30 +310,94 @@ class MOFAModel(MultiOmicModel):
             shown = sorted(str(s) for s in changed)
             more = f" and {len(shown) - 5} more" if len(shown) > 5 else ""
             raise DataError(
-                f"MOFA cannot project new data: the values of {len(shown)} "
+                f"The values of {len(shown)} fitted "
                 f"sample(s) differ from training, in values or feature order: "
-                f"{shown[:5]}{more}. It only returns the factors it learned for "
-                f"its training samples."
+                f"{shown[:5]}{more}. Use new sample IDs to project new observations."
             )
+
+    def _ensure_reader(self) -> None:
+        """Materialize an inference artifact without writing to the output directory."""
+        if self._model is None:
+            if self._ent is None:
+                raise RuntimeError("Model must be fit before calling transform()")
+            self._inference_dir = tempfile.TemporaryDirectory(prefix="mosa_mofa_")
+            self._write_model(Path(self._inference_dir.name))
+
+    def _input_groups(self, data: MultiOmicDataset) -> np.ndarray:
+        groups = self._group_labels(data)
+        stored = self._model.samples_metadata["group"]
+        for i, sample in enumerate(data.sample_names):
+            if sample in stored.index:
+                groups[i] = stored.loc[sample]
+        unknown = sorted(set(groups) - set(self._model.groups))
+        if unknown:
+            raise UnsupportedError(
+                f"MOFA projection requires training groups; unknown groups: {unknown}."
+            )
+        return groups
+
+    def _project(self, data: MultiOmicDataset) -> np.ndarray:
+        """Minimum-norm joint least squares using only observed features.
+
+        Each view is centered and scaled with training statistics. This is a
+        deterministic weight-based projection, not MOFA posterior inference.
+        """
+        f = self._model.model
+        if "mosa" not in f or "intercepts" not in f:
+            raise UnsupportedError(
+                "MOFA projection requires saved training preprocessing. Retrain with MOSA."
+            )
+        groups = self._input_groups(data)
+        likelihoods = self._likelihoods()
+        matrices, weights = [], []
+        for view in data.view_names:
+            if likelihoods[view] != "gaussian":
+                raise UnsupportedError(
+                    f"MOFA projection supports Gaussian views only; '{view}' is {likelihoods[view]}."
+                )
+            x = self._observed(data, view)
+            offsets = np.stack([f["intercepts"][view][g][:] for g in groups])
+            scales = np.array(
+                [
+                    f["mosa/group_scale"][view][g][()] * f["mosa/view_scale"][view][()]
+                    for g in groups
+                ]
+            )
+            if (
+                not np.isfinite(offsets).all()
+                or not np.isfinite(scales).all()
+                or np.any(scales <= 0)
+            ):
+                raise DataError(f"View '{view}' has undefined training preprocessing statistics.")
+            matrices.append((x - offsets) / scales[:, None])
+            weights.append(self._model.get_weights(views=view, df=True).values)
+        x = np.concatenate(matrices, axis=1)
+        w = np.concatenate(weights, axis=0)
+        result = np.empty((data.n_samples, w.shape[1]))
+        for i, row in enumerate(x):
+            observed = ~np.isnan(row)
+            if not observed.any():
+                raise DataError(f"Sample '{data.sample_names[i]}' has no observed features to project.")
+            if not np.isfinite(row[observed]).all():
+                raise DataError(f"Sample '{data.sample_names[i]}' contains infinite observed values.")
+            result[i] = np.linalg.lstsq(w[observed], row[observed], rcond=None)[0]
+        return result
 
     def transform(self, data: MultiOmicDataset) -> np.ndarray:
-        """Latent factors for training samples. Raises for unseen samples or changed values."""
-        if self._model is None:
-            raise RuntimeError(
-                "Model must be fit and save_outputs() called before calling transform()"
-            )
-
-        factors_df = self._model.get_factors(df=True)
-        missing = [s for s in data.sample_names if s not in factors_df.index]
-        if missing:
-            raise UnsupportedError(
-                f"MOFA does not support out-of-sample projection. "
-                f"Unseen samples: {missing[:5]}{'...' if len(missing) > 5 else ''}"
-            )
+        """Retrieve fitted factors and project unseen samples, preserving input order."""
+        self._ensure_reader()
+        data.validate()
         self._check_features(data)
-        self._check_training_values(data)
-
-        return factors_df.loc[data.sample_names].values
+        factors = self._model.get_factors(df=True)
+        known = np.array([s in factors.index for s in data.sample_names], dtype=bool)
+        result = np.empty((data.n_samples, factors.shape[1]))
+        if known.any():
+            fitted = data.subset(np.flatnonzero(known))
+            self._check_training_values(fitted)
+            result[known] = factors.loc[fitted.sample_names].values
+        if (~known).any():
+            result[~known] = self._project(data.subset(np.flatnonzero(~known)))
+        return result
 
     def _likelihoods(self) -> dict[str, str]:
         """Likelihood mofapy2 fit each view with, keyed by view name."""
@@ -366,8 +432,7 @@ class MOFAModel(MultiOmicModel):
 
     def reconstruct(self, data: MultiOmicDataset) -> dict[str, np.ndarray]:
         """Reconstruct omic views on the original scale."""
-        if self._model is None:
-            raise RuntimeError("Model must be fit before calling reconstruct()")
+        self._ensure_reader()
         # Without the mosa group the file's centering and scaling are unknown:
         # written by mofapy2 directly, or by MOSA before it recorded them.
         if "mosa" not in self._model.model:
@@ -378,9 +443,8 @@ class MOFAModel(MultiOmicModel):
             )
 
         Z = self.transform(data)
-        # Groups come from the model, not data.metadata: relabeling model_type
-        # in the input must not shift the offsets.
-        groups = self._model.samples_metadata["group"].loc[data.sample_names].values
+        # Preserve stored groups for fitted samples; new samples supply their group.
+        groups = self._input_groups(data)
         return {v: self._reconstruct_view(v, Z, groups) for v in data.view_names}
 
     def save_outputs(self, output_dir: str | Path | None = None) -> None:
@@ -388,15 +452,44 @@ class MOFAModel(MultiOmicModel):
 
         Writes mofa_model.hdf5 and full/latent.parquet, full/recon_<view>.parquet
         to output_dir, or model_cfg.output_dir when output_dir is None. Also
-        constructs the mofax reader used by transform()/reconstruct(); those
-        methods raise until this has been called at least once after fit().
+        constructs the mofax reader used by transform()/reconstruct(). Inference
+        can also create a temporary artifact lazily after fit().
         """
         if self._ent is None or self._train_samples is None:
             raise RuntimeError("Model must be fit before calling save_outputs()")
 
         out_dir = ensure_dir(output_dir or self.model_cfg.output_dir)
-        save_path = str(out_dir / "mofa_model.hdf5")
         logger.info("Saving outputs to %s", out_dir)
+        self._write_model(out_dir)
+
+        samples = self._train_samples
+        split_dir = ensure_dir(out_dir / "full")
+        # A previous run into this directory may have written views this one
+        # skips or no longer has.
+        for stale in split_dir.glob("recon_*.parquet"):
+            stale.unlink()
+        Z = self._model.get_factors(df=True).loc[samples].values
+        pd.DataFrame(Z, index=samples).to_parquet(split_dir / "latent.parquet")
+
+        groups = self._model.samples_metadata["group"].loc[samples].values
+        likelihoods = self._likelihoods()
+        for view_name, features in self._train_features.items():
+            if likelihoods[view_name] != "gaussian":
+                logger.warning(
+                    "Skipping recon_%s.parquet: MOFA fit this view with a %s "
+                    "likelihood, whose reconstructions are not on the data scale.",
+                    view_name,
+                    likelihoods[view_name],
+                )
+                continue
+            recon = self._reconstruct_view(view_name, Z, groups)
+            pd.DataFrame(recon, index=samples, columns=features).to_parquet(
+                split_dir / f"recon_{view_name}.parquet"
+            )
+
+    def _write_model(self, out_dir: Path) -> None:
+        """Persist the inference artifact without exporting sample tables."""
+        save_path = str(out_dir / "mofa_model.hdf5")
 
         # h5py cannot truncate a file it still holds open.
         if self._model is not None:
@@ -432,31 +525,6 @@ class MOFAModel(MultiOmicModel):
         import mofax as mfx
 
         self._model = mfx.mofa_model(save_path)
-
-        samples = self._train_samples
-        split_dir = ensure_dir(out_dir / "full")
-        # A previous run into this directory may have written views this one
-        # skips or no longer has.
-        for stale in split_dir.glob("recon_*.parquet"):
-            stale.unlink()
-        Z = self._model.get_factors(df=True).loc[samples].values
-        pd.DataFrame(Z, index=samples).to_parquet(split_dir / "latent.parquet")
-
-        groups = self._model.samples_metadata["group"].loc[samples].values
-        likelihoods = self._likelihoods()
-        for view_name, features in self._train_features.items():
-            if likelihoods[view_name] != "gaussian":
-                logger.warning(
-                    "Skipping recon_%s.parquet: MOFA fit this view with a %s "
-                    "likelihood, whose reconstructions are not on the data scale.",
-                    view_name,
-                    likelihoods[view_name],
-                )
-                continue
-            recon = self._reconstruct_view(view_name, Z, groups)
-            pd.DataFrame(recon, index=samples, columns=features).to_parquet(
-                split_dir / f"recon_{view_name}.parquet"
-            )
 
     def save(self, path: str | Path) -> None:
         """Copy the HDF5 model file to path."""

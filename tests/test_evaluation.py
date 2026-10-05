@@ -244,8 +244,8 @@ def test_cross_validate_transductive_model_raises_clear_error(
         cross_validate(dataset, data_cfg, model_cfg, EvaluationConfig(n_folds=3))
 
 
-def test_mofa_declares_no_out_of_sample_support():
+def test_mofa_declares_out_of_sample_support():
     pytest.importorskip("mofapy2")
     from mosa.models.mofa.model import MOFAModel
 
-    assert MOFAModel.supports_out_of_sample is False
+    assert MOFAModel.supports_out_of_sample is True

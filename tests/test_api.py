@@ -660,9 +660,7 @@ def test_mofa_interrupt_is_not_swallowed(
 
 
 @skip_mofa
-def test_mofa_unseen_data_raises(make_multi_omic_dataset, tmp_path):
-    from mosa.errors import UnsupportedError
-
+def test_mofa_unseen_data_projects(make_multi_omic_dataset, tmp_path):
     dataset = make_multi_omic_dataset(n_samples=20)
     train, _ = _split(dataset)
     model = _fit_mofa(train, tmp_path)
@@ -671,8 +669,10 @@ def test_mofa_unseen_data_raises(make_multi_omic_dataset, tmp_path):
     other = make_multi_omic_dataset(n_samples=20, seed=99)
     other.metadata.index = [f"other_{i:03d}" for i in range(other.n_samples)]
 
-    with pytest.raises(UnsupportedError, match="out-of-sample"):
-        model.transform(other)
+    z = model.transform(other)
+    assert z.shape[0] == other.n_samples
+    assert np.isfinite(z).all()
+    assert all(np.isfinite(x).all() for x in model.reconstruct(other).values())
 
 
 @skip_mofa
@@ -984,3 +984,104 @@ def test_reconstruct_returns_original_scale(
     # (~1), orders of magnitude below the raw input's ~5000 scale.
     assert recon_scale > 0
     assert 0.1 * raw_scale < recon_scale < 10 * raw_scale
+
+
+@skip_mofa
+@pytest.mark.parametrize("scale_views,scale_groups", [(False, False), (True, False), (False, True), (True, True)])
+def test_mofa_heldout_projection_roundtrip(tmp_path, scale_views, scale_groups):
+    dataset = _planted_dataset(80)
+    train = dataset.subset(np.arange(60))
+    heldout = dataset.subset(np.arange(60, 80))
+    model = _fit_mofa(train, tmp_path, scale_views=scale_views, scale_groups=scale_groups)
+    # Inference works before explicit output export, as required by cross-validation.
+    z = model.transform(heldout)
+    recon = model.reconstruct(heldout)
+    for view, predicted in recon.items():
+        observed = heldout.masks[view]
+        mse = np.mean((predicted[observed] - heldout.views[view][observed]) ** 2)
+        assert mse / np.var(heldout.views[view][observed]) < 0.05
+    model.save_outputs()
+    loaded = MOFAModel.load(tmp_path / "mofa_model.hdf5")
+    np.testing.assert_allclose(loaded.transform(heldout), z)
+    for view in recon:
+        np.testing.assert_allclose(loaded.reconstruct(heldout)[view], recon[view])
+    # A completely masked view contributes no values to the projection.
+    heldout.masks["view_b"][:] = False
+    projected = loaded.transform(heldout)
+    heldout.views["view_b"][:] = 1e9
+    np.testing.assert_array_equal(loaded.transform(heldout), projected)
+    assert np.isfinite(loaded.reconstruct(heldout)["view_b"]).all()
+
+
+@skip_mofa
+def test_mofa_projection_errors_and_mixed_order(tmp_path):
+    from mosa.errors import DataError, UnsupportedError
+
+    dataset = _planted_dataset()
+    model = _fit_mofa(dataset.subset(np.arange(30)), tmp_path)
+    mixed = dataset.subset(np.array([31, 2, 32, 4]))
+    combined = model.transform(mixed)
+    for i in range(mixed.n_samples):
+        np.testing.assert_allclose(combined[i:i+1], model.transform(mixed.subset(np.array([i]))))
+    unseen = dataset.subset(np.array([31]))
+    unseen.metadata["model_type"] = "unknown"
+    with pytest.raises(UnsupportedError, match="unknown groups"):
+        model.transform(unseen)
+    unseen.metadata["model_type"] = "TypeB"
+    for mask in unseen.masks.values():
+        mask[:] = False
+    with pytest.raises(DataError, match="no observed features"):
+        model.transform(unseen)
+
+
+@skip_mofa
+def test_mofa_cross_validation_projects_heldout(tmp_path):
+    from mosa.config import EvaluationConfig
+    from mosa.models.evaluation import cross_validate
+
+    dataset = _planted_dataset()
+    result = cross_validate(
+        dataset, _mofa_data_cfg(dataset),
+        MOFAConfig(n_factors=5, iterations=30, drop_r2=None, output_dir=str(tmp_path)),
+        EvaluationConfig(n_folds=2),
+    )
+    for view, values in result["reconstructions"].items():
+        assert values.shape == dataset.views[view].shape
+        assert np.isfinite(values).all()
+
+
+@skip_mofa
+def test_mofa_projection_reuses_training_preprocessing(tmp_path):
+    dataset = _planted_dataset()
+    model = _fit_mofa(dataset.subset(np.arange(30)), tmp_path, scale_views=True, scale_groups=True)
+    heldout = dataset.subset(np.arange(30, 40))
+    before = model.transform(heldout)
+    for view in heldout.views:
+        heldout.views[view] += 100.0
+    assert np.abs(model.transform(heldout) - before).mean() > 0.1
+    # Transforming a batch or its individual rows uses the same fitted statistics.
+    after = model.transform(heldout)
+    for i in range(heldout.n_samples):
+        np.testing.assert_allclose(after[i:i+1], model.transform(heldout.subset(np.array([i]))))
+
+
+@skip_mofa
+def test_mofa_projection_rejects_non_gaussian_and_legacy_artifacts(tmp_path):
+    import h5py
+    import shutil
+
+    from mosa.errors import UnsupportedError
+
+    dataset = _planted_dataset()
+    dataset.views["view_b"] = (dataset.views["view_b"] > 0).astype(np.float32)
+    model = _fit_mofa(dataset.subset(np.arange(30)), tmp_path)
+    with pytest.raises(UnsupportedError, match="Gaussian views only"):
+        model.transform(dataset.subset(np.arange(30, 40)))
+    model.save_outputs()
+    plain = tmp_path / "plain.hdf5"
+    shutil.copy2(tmp_path / "mofa_model.hdf5", plain)
+    with h5py.File(plain, "a") as f:
+        del f["mosa"]
+    loaded = MOFAModel.load(plain)
+    with pytest.raises(UnsupportedError, match="training preprocessing"):
+        loaded.transform(dataset.subset(np.arange(30, 40)))

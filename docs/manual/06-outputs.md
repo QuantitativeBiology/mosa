@@ -31,7 +31,7 @@ A MOFA run writes a smaller set of files to the same `output_dir`:
     └── recon_<view>.parquet
 ```
 
-MOFA ignores validation data, so there are no `train/`, `val/` or `inference/` directories. With `evaluation.test_size` above 0, `full/` holds only the samples the model was trained on. MOFA picks a likelihood per view from its values: `bernoulli` when every value is 0 or 1, `poisson` when every value is an integer, `gaussian` otherwise. Only `gaussian` views can be returned to the original scale, so the run skips `recon_<view>.parquet` for the others and logs a warning. The model file also records how MOFA centered and scaled the data. Files without that record, written by mofapy2 directly or by an earlier MOSA version, still work with `transform` but not with `--reconstruct`; retrain them.
+MOFA ignores validation data, so there are no `train/`, `val/` or `inference/` directories. With `evaluation.test_size` above 0, `full/` holds only the samples the model was trained on. MOFA picks a likelihood per view from its values: `bernoulli` when every value is 0 or 1, `poisson` when every value is an integer, `gaussian` otherwise. Only `gaussian` views can be returned to the original scale, so the run skips `recon_<view>.parquet` for the others and logs a warning. The model file also records how MOFA centered and scaled the data. Files without that record, written by mofapy2 directly or by an earlier MOSA version, still allow retrieval of fitted factors with `transform`, but cannot project unseen samples or use `--reconstruct`; retrain them.
 
 ## Parquet outputs
 

@@ -12,7 +12,7 @@ The encoders and decoders strictly use MLP architectures. You can configure thei
 
 The model applies no special distributional treatment to discrete views. It calculates their reconstruction loss using the exact same squared error function applied to continuous views.
 
-The MOFA implementation is transductive. It cannot project data it did not observe during training, so it exists purely for same-data benchmarking via the `train` command. The [Configuration](03-configuration.md#model-for-type-mofa) page lists the practical consequences of this limitation.
+MOFA projects unseen samples using observed Gaussian features and training-derived preprocessing. Projection is restricted to known groups and uses minimum-norm least squares rather than posterior inference. Non-Gaussian projection and samples with no observed features are unsupported. See [Configuration](03-configuration.md#model-for-type-mofa) for the input requirements.
 
 ## Evaluation
 

@@ -80,17 +80,17 @@ You passed an unsupported file format, such as an Excel spreadsheet. You must co
 
 ## Models and commands
 
-### `Cross-validation is not supported for the 'mofa' model: it has no out-of-sample projection.`
+### `MOFA projection requires training groups; unknown groups: [...]`
 
-The MOFA implementation cannot project samples it did not fit on, making k-fold scoring mathematically impossible. The tool raises this error before any training starts. `mosa optimize` raises the same error, starting with `Hyperparameter search is not supported`, before its first trial.
+New samples must belong to a group represented during fitting, so its fitted centering and scaling can be reused. Correct the group label or fit a model including that group.
 
-### `MOFA does not support out-of-sample projection. Unseen samples: [...]`
+### `MOFA projection supports Gaussian views only`
 
-`transform` with a MOFA model only accepts samples the model was trained on. Train a new model that includes the new samples.
+The current weight-based projection supports continuous Gaussian views. Bernoulli and Poisson views require a likelihood-specific inference procedure.
 
-### `MOFA cannot project new data: the values of <n> sample(s) differ from training, in values or feature order: [...]`
+### `The values of <n> fitted sample(s) differ from training`
 
-The input reuses training sample IDs but holds different values, or the same values with features in a different order. MOFA would return the training factors for them, not factors for the new values. Pass the data the model was trained on, or train a new model.
+The input reuses fitted sample IDs with changed observations. Those IDs retrieve learned factors. Use new sample IDs to project new observations, and preserve the training feature order.
 
 ### `Input <path> is missing view(s) ['meth'] required by the checkpoint. Checkpoint was trained on ['gexp', 'meth']; input has ['gexp'].`
 
