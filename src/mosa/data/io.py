@@ -130,6 +130,7 @@ def _load_h5mu(
 
     for view_name in view_names:
         tv = time.perf_counter()
+        logger.debug("Loading matrix and mask for view '%s'", view_name)
         adata = mdata.mod[view_name]
         # MuData does not guarantee a modality's row order matches the global
         # .obs; pairing X rows with obs positionally would silently mislabel
@@ -904,14 +905,19 @@ def csv_to_mudata(
 
     # Pre-flight validation
     _check_format_extension(output_path, format)
+    logger.info("Reading sample metadata from %s", conditionals_path)
     conditionals = _validate_conditionals(conditionals_path)
+    logger.debug("Metadata contains %d samples", len(conditionals))
     if metadata_filters:
         conditionals = _filter_metadata(
             conditionals, metadata_filters, conditionals_path
         )
     conditionals_ids = set(conditionals.index)
 
+    if id_map_path:
+        logger.info("Reading sample ID map from %s", id_map_path)
     id_map = _load_id_map(id_map_path) if id_map_path else {}
+    logger.debug("Sample ID map contains %d mappings", len(id_map))
     # A source ID mapping into the metadata is a known sample pre-mapping too.
     orientation_ids = conditionals_ids | {
         src for src, dst in id_map.items() if dst in conditionals_ids
@@ -926,6 +932,7 @@ def csv_to_mudata(
     view_frames: dict[str, list[pd.DataFrame]] = {}
     for view_name, csv_path in view_specs:
         _require_exists(csv_path, what=f"View '{view_name}': file")
+        logger.info("Reading view '%s' from %s", view_name, csv_path)
         try:
             df_raw = _read_table(csv_path)
         except Exception as e:
@@ -939,6 +946,7 @@ def csv_to_mudata(
         # two share memory and this just drops the name.
         del df_raw
         if id_map:
+            logger.debug("View '%s': mapping sample IDs before alignment", view_name)
             df = df.rename(index=id_map)  # unmapped IDs pass through unchanged
         view_frames.setdefault(view_name, []).append(df)
         logger.debug(
@@ -948,6 +956,11 @@ def csv_to_mudata(
             *df.shape,
         )
 
+    logger.info(
+        "Merging input files into %d views (on_collision=%s)",
+        len(view_frames),
+        on_collision,
+    )
     omics = {
         name: _combine_view_files(frames, name, on_collision)
         for name, frames in view_frames.items()
@@ -960,6 +973,11 @@ def csv_to_mudata(
         union_pre |= set(df.index)
     n_matched = len(union_pre & metadata_ids_pre)
 
+    logger.info(
+        "Aligning views with metadata (min_views=%d, shared_features=%s)",
+        min_views,
+        shared_features,
+    )
     omics, conditionals, presence = align_views(
         omics, conditionals, min_views, shared_features
     )
@@ -976,6 +994,7 @@ def csv_to_mudata(
 
     mutations_df = None
     if mutations_path:
+        logger.info("Reading mutation metadata from %s", mutations_path)
         try:
             mutations_df = _read_table(mutations_path).T
         except Exception as e:
@@ -983,7 +1002,7 @@ def csv_to_mudata(
         mutations_df = mutations_df.reindex(sample_axis).fillna(0)
 
     # Build AnnData objects
-    logger.debug("Creating AnnData objects")
+    logger.info("Building view matrices and missing-value masks")
     adatas = {}
     for view_name, df in omics.items():
         X = df.values.astype(np.float32)
@@ -1038,6 +1057,7 @@ def inspect_mudata(path: str) -> None:
     import mudata
 
     _require_exists(path, what="File")
+    logger.info("Reading dataset for inspection: %s", path)
 
     with mudata_set_options(pull_on_update=False):
         mdata = mudata.read_zarr(path) if is_zarr_path(path) else mudata.read(path)
@@ -1050,6 +1070,12 @@ def inspect_mudata(path: str) -> None:
 
     print("\nModalities:")
     for mod_name, adata in mdata.mod.items():
+        logger.info(
+            "Inspecting view '%s': %d samples x %d features",
+            mod_name,
+            adata.n_obs,
+            adata.n_vars,
+        )
         n_feat = adata.n_vars
 
         if "mask" in adata.layers:

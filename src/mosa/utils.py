@@ -49,6 +49,7 @@ def load_config(yaml_path: str | Path) -> Config:
     """
     from mosa.models.registry import model_config_classes
 
+    logger.info("Loading configuration from %s", yaml_path)
     raw = read_yaml(yaml_path)
 
     if "data" not in raw or "model" not in raw:
@@ -73,6 +74,13 @@ def load_config(yaml_path: str | Path) -> Config:
     check_unknown_keys(EvaluationConfig, evaluation_raw, "evaluation:")
     evaluation = EvaluationConfig(**evaluation_raw)
 
+    logger.debug(
+        "Configuration: model=%s, views=%s, output=%s, seed=%d",
+        mtype,
+        data.views,
+        model_cfg.output_dir,
+        model_cfg.random_seed,
+    )
     return Config(data=data, model=model_cfg, evaluation=evaluation)
 
 
@@ -87,10 +95,15 @@ def validate_config_against_data(cfg: Config) -> list[str]:
     """
     from mosa.data.io import summarize_structure
 
+    logger.info("Checking configuration against %s", cfg.data.path)
+    logger.debug("Checking data path and reading dataset structure")
     cfg.data.validate_paths()
     summary = summarize_structure(cfg.data.path)
+    logger.debug("Checking view names, masks and required metadata")
     warnings = cfg.data.validate_against_data(summary)
+    logger.debug("Checking %s constraints", type(cfg.model).__name__)
     warnings += cfg.model.validate_against_data(cfg.data, cfg.evaluation, summary)
+    logger.info("Compatibility checks passed (%d warnings)", len(warnings))
     return warnings
 
 

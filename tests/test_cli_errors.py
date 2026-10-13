@@ -53,7 +53,8 @@ def assert_guided_failure(capsys, argv, expected):
 
     assert code == 1, f"expected exit 1, got {code}. stderr:\n{err}"
     assert expected in err, f"expected {expected!r} in stderr, got:\n{err}"
-    assert err.startswith("Error: "), f"stderr should lead with 'Error: ', got:\n{err}"
+    assert any(line.startswith("Error: ") for line in err.splitlines()), err
+    assert "completed in" not in err, "a failed command reported success"
     assert "Traceback" not in err + out, f"traceback leaked to the user:\n{err}{out}"
 
 

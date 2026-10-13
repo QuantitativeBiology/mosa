@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 import numpy as np
@@ -18,14 +19,35 @@ def _iter_files(root):
 
 
 def test_cross_validate_returns_per_fold_and_summary(
-    make_multi_omic_dataset, make_mosa_config, tmp_path
+    make_multi_omic_dataset, make_mosa_config, tmp_path, caplog
 ):
     dataset = make_multi_omic_dataset(n_samples=30, n_groups=2)
     data_cfg, model_cfg = make_mosa_config(
         dataset, num_epochs=1, output_dir=str(tmp_path)
     )
 
-    results = cross_validate(dataset, data_cfg, model_cfg, EvaluationConfig(n_folds=3))
+    with caplog.at_level(logging.INFO, logger="mosa.models.evaluation"):
+        results = cross_validate(
+            dataset, data_cfg, model_cfg, EvaluationConfig(n_folds=3)
+        )
+    messages = [r.message for r in caplog.records if r.name == "mosa.models.evaluation"]
+    for fold in range(1, 4):
+        start = next(
+            i for i, m in enumerate(messages) if m.startswith(f"Fold {fold}/3: fitting")
+        )
+        recon = next(
+            i
+            for i, m in enumerate(messages)
+            if m.startswith(f"Fold {fold}/3: reconstructing")
+        )
+        end = next(
+            i
+            for i, m in enumerate(messages)
+            if m.startswith(f"Fold {fold}/3 completed")
+        )
+        assert start < recon < end
+        if fold < 3:
+            assert messages[end + 1].startswith(f"Fold {fold + 1}/3: fitting")
 
     assert len(results["per_fold"]) == 3
     for fold in results["per_fold"]:

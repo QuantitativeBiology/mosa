@@ -4,6 +4,7 @@ import argparse
 import logging
 import os
 import sys
+import time
 import traceback
 import warnings
 
@@ -18,7 +19,7 @@ from mosa.errors import (
 logger = logging.getLogger(__name__)
 
 
-def _setup_logging(debug: bool):
+def _setup_logging(debug: bool) -> logging.Handler:
     """Configure logging: debug enables detailed logs, suppresses noisy third-party loggers."""
     warnings.filterwarnings(
         "ignore", message="Cannot join columns with the same name", module="mudata"
@@ -30,29 +31,46 @@ def _setup_logging(debug: bool):
         "ignore", message=".*tensorboardX.*", module="pytorch_lightning"
     )
 
-    if debug:
-        logging.basicConfig(
-            level=logging.DEBUG,
-            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    # Replace only our handler: repeated main() calls may use a new stderr,
+    # while test runners and embedding applications own their own handlers.
+    root = logging.getLogger()
+    for handler in root.handlers[:]:
+        if handler.name == "mosa.cli":
+            root.removeHandler(handler)
+            handler.close()
+    handler = logging.StreamHandler(sys.stderr)
+    handler.name = "mosa.cli"
+    handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+            if debug
+            else "[%(levelname)s] %(message)s",
             datefmt="%H:%M:%S",
         )
-        logging.getLogger("pytorch_lightning").setLevel(logging.INFO)
-        logging.getLogger("torch").setLevel(logging.WARNING)
-        logging.getLogger("matplotlib").setLevel(logging.WARNING)
-        logging.getLogger("numba").setLevel(logging.WARNING)
-        logging.getLogger("fsspec").setLevel(logging.WARNING)
-        logging.getLogger("numcodecs").setLevel(logging.WARNING)
-        logging.getLogger("h5py").setLevel(logging.WARNING)
-        logging.getLogger("zarr").setLevel(logging.WARNING)
-        logging.getLogger("asyncio").setLevel(logging.WARNING)
-        logger.debug("Debug logging enabled")
-    else:
-        logging.basicConfig(
-            level=logging.WARNING,
-            format="[%(levelname)s] %(message)s",
-        )
-        logging.getLogger("mosa").setLevel(logging.INFO)
-        logging.getLogger("pytorch_lightning").setLevel(logging.WARNING)
+    )
+    root.addHandler(handler)
+    root.setLevel(logging.WARNING)
+    level = logging.DEBUG if debug else logging.INFO
+    if int(os.environ.get("LOCAL_RANK", 0)) != 0:
+        level = logging.WARNING
+    logging.getLogger("mosa").setLevel(level)
+    logging.getLogger("pytorch_lightning").setLevel(
+        logging.INFO if debug else logging.WARNING
+    )
+    for name in (
+        "torch",
+        "matplotlib",
+        "numba",
+        "fsspec",
+        "numcodecs",
+        "h5py",
+        "zarr",
+        "asyncio",
+        "optuna",
+    ):
+        logging.getLogger(name).setLevel(logging.WARNING)
+    logger.debug("Debug logging enabled")
+    return handler
 
 
 def _load_config_and_data(config_path):
@@ -79,9 +97,6 @@ def _train(args):
 
     torch.set_float32_matmul_precision("high")
     torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(False)
-
-    if int(os.environ.get("LOCAL_RANK", 0)) != 0:
-        logging.getLogger("mosa").setLevel(logging.WARNING)
 
     cfg, dataset = _load_config_and_data(args.config)
     seed_everything(cfg.model.random_seed)
@@ -112,12 +127,20 @@ def _train(args):
         train_data = dataset.subset(train_idx)
         val_data = dataset.subset(val_idx)
 
+    logger.info(
+        "Split: %d training samples, %d validation samples%s",
+        train_data.n_samples,
+        val_data.n_samples if val_data is not None else 0,
+        " (stratified by model_type)"
+        if val_data is not None
+        else " (using all samples)",
+    )
     model = build_model(cfg.data, cfg.model)
+    logger.info("Selected model: %s", model.registered_name)
     model.fit(train_data, val_data, resume_from=args.resume)
 
     if int(os.environ.get("LOCAL_RANK", 0)) == 0:
         model.save_outputs()
-        logger.debug("Training complete")
 
 
 def _transform(args):
@@ -135,7 +158,9 @@ def _transform(args):
         if not (p.is_file() or p.is_dir()):
             raise MissingFileError(f"{label} not found: {path}")
 
+    logger.info("Loading saved model from %s", args.checkpoint)
     model = load_model(args.checkpoint)
+    logger.info("Checking input views against the saved model")
 
     # Name the mismatch here: load_mudata would report only the first missing
     # view, without saying what the checkpoint was trained on.
@@ -156,9 +181,15 @@ def _transform(args):
 
     # Compute everything first: a failed run must leave a previous run's
     # outputs untouched.
+    logger.info("Projecting %d samples into the latent space", dataset.n_samples)
     z = model.transform(dataset)
+    if args.reconstruct:
+        logger.info("Reconstructing %d views", len(dataset.view_names))
     recon = model.reconstruct(dataset) if args.reconstruct else {}
 
+    logger.info(
+        "Writing outputs to %s (replacing existing projection files)", args.output
+    )
     out_dir = ensure_dir(args.output)
     # A previous transform into this directory may have written views this
     # model does not have, or reconstructions this run does not ask for.
@@ -187,6 +218,8 @@ def _eval_cfg_from_args(cfg, args):
         overrides["strategy"] = args.strategy
     if args.no_shuffle:
         overrides["shuffle"] = False
+    if overrides:
+        logger.debug("Evaluation overrides from CLI: %s", overrides)
     return dataclasses.replace(cfg.evaluation, **overrides)
 
 
@@ -204,6 +237,9 @@ def _save_cv_outputs(results, dataset, output_dir):
     from mosa.utils import ensure_dir
 
     output_dir = ensure_dir(output_dir)
+    logger.info(
+        "Writing cross-validation history and reconstructions to %s", output_dir
+    )
 
     history_rows = [
         {"fold": fold_idx, **epoch_entry}
@@ -280,6 +316,7 @@ def _optimize(args):
     torch.set_float32_matmul_precision("high")
 
     # A bad search space should not cost a full MuData load to discover.
+    logger.info("Loading search space from %s", args.search_space)
     search_space = load_search_space(args.search_space)
 
     cfg, dataset = _load_config_and_data(args.config)
@@ -312,7 +349,7 @@ def _plot(args):
 
     cfg = load_config(args.config)
     output_dir = args.output_dir or cfg.model.output_dir
-    logger.debug("Generating plots from %s", output_dir)
+    logger.info("Generating plots from %s", output_dir)
 
     plots_dir = generate_all_plots(output_dir, cfg.data, cfg.model)
     print(f"Plots saved to {plots_dir}")
@@ -342,8 +379,14 @@ def _convert(args):
         column, values = spec.split("=", 1)
         metadata_filters[column] = [v.strip() for v in values.split(",") if v.strip()]
 
-    logger.debug("Converting CSV dataset to MuData format")
-    logger.debug("Output file: %s", args.output)
+    logger.debug(
+        "Conversion settings: format=%s, min_views=%d, shared_features=%s, on_collision=%s, filters=%s",
+        args.format,
+        args.min_views,
+        args.shared_features,
+        args.on_collision,
+        metadata_filters,
+    )
 
     csv_to_mudata(
         conditionals_path=args.conditionals,
@@ -375,7 +418,7 @@ def _validate(args):
     data_warnings = validate_config_against_data(cfg)
 
     for w in data_warnings:
-        print(f"Warning: {w}")
+        logger.warning(w)
 
     print("Config OK")
     print(f"  data:    {cfg.data.path}")
@@ -410,42 +453,56 @@ def _add_eval_args(parser):
         "--folds",
         type=int,
         default=None,
-        help="Number of folds, per trial for optimize (overrides evaluation.n_folds)",
+        metavar="N",
+        help="Number of held-out folds per evaluation (default: "
+        "evaluation.n_folds in YAML)",
     )
     parser.add_argument(
         "-s",
         "--strategy",
         choices=CV_STRATEGIES,
         default=None,
-        help="Fold assignment: stratified balances model_type, kfold ignores it "
-        "(overrides evaluation.strategy)",
+        help="Fold assignment: stratified preserves model_type source "
+        "proportions; kfold ignores source labels (overrides "
+        "evaluation.strategy)",
     )
     parser.add_argument(
         "-N",
         "--no-shuffle",
         action="store_true",
-        help="Assign folds as contiguous blocks of sample order instead of shuffling",
+        help="Keep input order for fold assignment (overrides "
+        "evaluation.shuffle); stratified folds still balance model_type",
     )
 
 
 def _add_config_arg(parser):
-    parser.add_argument(
-        "-c", "--config", required=True, help="Path to YAML config file"
+    parser.add_argument_group("required inputs").add_argument(
+        "-c",
+        "--config",
+        required=True,
+        metavar="PATH",
+        help="Experiment YAML; file paths are relative to the working directory",
     )
 
 
 def _add_debug_arg(parser):
     parser.add_argument(
-        "-d", "--debug", action="store_true", help="Enable verbose debug logging"
+        "-d",
+        "--debug",
+        action="store_true",
+        help="Include effective settings, preprocessing details, timings, and "
+        "error tracebacks",
     )
 
 
-def _add_command(subparsers, name, summary, description, example):
-    """Add a subcommand whose -h opens with what it does and an example."""
+def _add_command(subparsers, name, summary, description, example, doc_page):
+    """Add concise command help with an example and its documentation page."""
     return subparsers.add_parser(
         name,
         help=summary,
-        description=f"{description}\n\nexample:\n  {example}",
+        description=description,
+        epilog=f"example:\n  {example}\n\nDocumentation:\n"
+        f"  docs/reference/commands/{doc_page}",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
@@ -454,19 +511,29 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the mosa argument parser with every subcommand."""
     parser = argparse.ArgumentParser(
         prog="mosa",
-        description="MOSA: integrate multi-omic views into a shared latent space.",
-        epilog="Typical run: convert, inspect, validate, train, then transform or "
-        "plot. Run 'mosa <command> -h' for what a command does and its flags.",
+        description="MOSA is a Python library for multi-omics integration, with commands for\n"
+        "preparing datasets, training and evaluating models, optimizing hyperparameters,\n"
+        "and analysing results.\n\n"
+        "Its main model, the MOSA VAE, is a conditional multiview variational\n"
+        "autoencoder for bulk multi-omics data, with optional adversarial training.\n"
+        "Select it, the optional MOFA integration, or registered custom models with\n"
+        "model.type in a YAML configuration.",
+        epilog="Run 'mosa <command> -h' for command details and options.\n\n"
+        "Documentation:\n  docs/index.md",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     train_parser = _add_command(
         subparsers,
         "train",
-        "Train a model from a config",
-        "Fit the model described in a config on its data. Writes the checkpoint,\n"
-        "latent representations and reconstructions to model.output_dir.",
+        "Train a model and save its results",
+        "Fit the model selected by model.type to the configured dataset, using\n"
+        "evaluation.test_size to reserve validation samples. Save model outputs to\n"
+        "model.output_dir. The selected model determines its preprocessing, use of\n"
+        "validation, and saved-model format.",
         "mosa train -c config.yaml",
+        "train.md",
     )
     _add_config_arg(train_parser)
     train_parser.add_argument(
@@ -474,50 +541,61 @@ def build_parser() -> argparse.ArgumentParser:
         "--resume",
         default=None,
         metavar="CKPT",
-        help="Resume training from a Lightning checkpoint (.ckpt)",
+        help="Continue MOSA VAE training from a Lightning checkpoint (.ckpt)",
     )
     _add_debug_arg(train_parser)
 
     transform_parser = _add_command(
         subparsers,
         "transform",
-        "Project data into the latent space using a saved model",
-        "Project samples through a trained model. Scaling uses the statistics\n"
-        "from training, never refit on the new data. Writes latent.parquet, and\n"
-        "per-view reconstructions with -r.",
-        "mosa transform -m run/model.ckpt -i data.h5mu -o projected/",
+        "Project samples with a saved model",
+        "Apply a saved model to new samples to obtain coordinates in its learned\n"
+        "latent space, with --reconstruct to estimate omic profiles. Reuse fitted\n"
+        "preprocessing without updating the model; views and feature order must match\n"
+        "training. Write predictions to --output.",
+        "mosa transform -m run/checkpoints/last.ckpt -i data.h5mu -o projected/ -r",
+        "transform.md",
     )
-    transform_parser.add_argument(
+    transform_inputs = transform_parser.add_argument_group("required inputs")
+    transform_inputs.add_argument(
         "-m",
         "--checkpoint",
         required=True,
-        help="Path to saved model checkpoint (.ckpt)",
+        metavar="PATH",
+        help="Saved model file, such as VAE .ckpt/.pt or MOFA .hdf5",
     )
-    transform_parser.add_argument(
-        "-i", "--input", required=True, help="Path to .h5mu or .zarr input data"
+    transform_inputs.add_argument(
+        "-i",
+        "--input",
+        required=True,
+        metavar="PATH",
+        help="Prepared MuData dataset (.h5mu file or .zarr directory)",
     )
-    transform_parser.add_argument(
+    transform_inputs.add_argument(
         "-o",
         "--output",
         required=True,
-        help="Directory to write latent.parquet (and reconstructions)",
+        metavar="DIR",
+        help="Directory for latent.parquet and optional reconstruction files",
     )
     transform_parser.add_argument(
         "-r",
         "--reconstruct",
         action="store_true",
-        help="Also write per-omic reconstruction parquets",
+        help="Also save predicted measurements for each view as recon_<view>.parquet",
     )
     _add_debug_arg(transform_parser)
 
     cv_parser = _add_command(
         subparsers,
         "cross-validate",
-        "Run k-fold cross-validation",
-        "Score a config without a full run: train on k-1 folds, reconstruct the\n"
-        "held-out fold, and report reconstruction error per view. Use it to\n"
-        "compare configs.",
+        "Evaluate reconstruction on held-out samples",
+        "Compare configurations by reconstructing samples excluded from fitting.\n"
+        "Train a fresh model per fold and report observed-entry normalized mean\n"
+        "squared error (NMSE), where lower is better. Save held-out reconstructions\n"
+        "and available epoch histories to model.output_dir; fold models are temporary.",
         "mosa cross-validate -c config.yaml -k 5",
+        "cross-validate.md",
     )
     _add_config_arg(cv_parser)
     _add_eval_args(cv_parser)
@@ -526,24 +604,31 @@ def build_parser() -> argparse.ArgumentParser:
     optimize_parser = _add_command(
         subparsers,
         "optimize",
-        "Run Optuna hyperparameter search over a config",
-        "Search hyperparameters with Optuna. Each trial samples values from the\n"
-        "search space and is scored by cross-validation. Prints the best values.",
+        "Optimize model parameters by cross-validation",
+        "Use Optuna to sample model parameters from a search-space YAML file.\n"
+        "Evaluate each combination by cross-validation and print the best parameters\n"
+        "and pooled aggregate NMSE. Apply the selected values to your configuration,\n"
+        "then run mosa train to save a fitted model.",
         "mosa optimize -c config.yaml -p search_space.yaml -n 50",
+        "optimize.md",
     )
     _add_config_arg(optimize_parser)
-    optimize_parser.add_argument(
+    optimize_parser.add_argument_group("search input").add_argument(
         "-p",
         "--search-space",
         required=True,
-        help="Path to search-space YAML (see configs/search_space.yaml)",
+        metavar="PATH",
+        help="YAML distributions for direct model fields (e.g. "
+        "configs/search_space.yaml)",
     )
     optimize_parser.add_argument(
         "-n",
         "--trials",
         type=int,
         default=20,
-        help="Number of Optuna trials (default: 20)",
+        metavar="N",
+        help="Parameter combinations to evaluate; each runs cross-validation "
+        "(default: 20)",
     )
     _add_eval_args(optimize_parser)
     _add_debug_arg(optimize_parser)
@@ -551,64 +636,80 @@ def build_parser() -> argparse.ArgumentParser:
     plot_parser = _add_command(
         subparsers,
         "plot",
-        "Generate diagnostic plots from training outputs",
-        "Draw diagnostic figures from a finished training run: latent UMAPs,\n"
-        "loss curves and reconstruction quality. Writes them to <output_dir>/plots.",
+        "Plot sample representations, reconstruction, and training losses",
+        "Examine a completed run's sample representations, reconstruction, and\n"
+        "training behaviour. Read the configured dataset and saved outputs, then\n"
+        "write figures to plots/ and label-separation scores to metrics/ within the\n"
+        "run directory. Requires tissue metadata; available figures depend on the\n"
+        "saved outputs and logs.",
         "mosa plot -c config.yaml",
+        "plot.md",
     )
     _add_config_arg(plot_parser)
     plot_parser.add_argument(
         "-o",
         "--output-dir",
         default=None,
-        help="Path to training output directory (defaults to model.output_dir in config)",
+        metavar="DIR",
+        help="Run directory to read outputs from and save plots to (default: "
+        "model.output_dir)",
     )
     _add_debug_arg(plot_parser)
 
     convert_parser = _add_command(
         subparsers,
         "convert",
-        "Convert CSV files to MuData (.h5mu or .zarr)",
-        "Build the MuData file MOSA trains on from per-view tables and a sample\n"
-        "metadata table. Aligns samples across views; never scales, imputes or\n"
-        "filters values.",
+        "Align omic tables and sample metadata into a dataset",
+        "Prepare a dataset from omic tables and sample metadata by aligning sample\n"
+        "identifiers and recording missing measurements. Each view table has features\n"
+        "as rows and samples as columns. Write MuData to --output; supplied values\n"
+        "are preserved without normalization, scaling, or imputation.",
         "mosa convert -m meta.csv -v gexp:gexp.csv -v meth:meth.csv -o data.h5mu",
+        "convert.md",
     )
-    convert_parser.add_argument(
+    convert_inputs = convert_parser.add_argument_group("required inputs and output")
+    convert_inputs.add_argument(
         "-m",
         "--conditionals",
         required=True,
-        help="Path to conditionals CSV (required columns: model_id, model_type; optional: tissue)",
+        metavar="PATH",
+        help="Sample metadata table with model_id and model_type columns; "
+        "tissue is optional",
     )
-    convert_parser.add_argument(
+    convert_inputs.add_argument(
         "-v",
         "--view",
         required=True,
         action="append",
-        help="View spec as 'name:path' (e.g. 'gexp:data/gexp.parquet'). Repeat for each "
-        "modality. Repeating the same name assembles that omic from several files: "
-        "samples concatenate, features union. Formats: .csv, .tsv, .txt, .parquet "
-        "(delimited ones may be .gz).",
+        metavar="NAME:PATH",
+        help="Omic table as name:path (e.g. gexp:data/gexp.csv). Repeat for "
+        "each view. Repeating a name combines samples and retains the "
+        "union of features. Formats: .csv, .tsv, .txt, .tab, .parquet, "
+        ".pq; delimited files may be compressed.",
     )
     convert_parser.add_argument(
         "-M",
         "--mutations",
         default=None,
-        help="Path to mutations CSV (features x samples, binary). Columns become mutation_* in .obs.",
+        metavar="PATH",
+        help="Binary mutation table (features x samples); rows become "
+        "mutation_* metadata columns",
     )
     convert_parser.add_argument(
         "-I",
         "--id-map",
         default=None,
-        help="Sample-ID crosswalk table (columns: source_id, model_id) applied to every "
-        "view before alignment. Use it when providers name the same sample differently.",
+        metavar="PATH",
+        help="Table mapping source_id to model_id in omic tables before "
+        "alignment; metadata must already use model_id identifiers",
     )
     convert_parser.add_argument(
         "-x",
         "--on-collision",
         choices=["error", "first"],
         default="error",
-        help="What to do when two columns resolve to one sample ID (default: error).",
+        help="Duplicate sample IDs within a view: reject them or keep the first"
+        " occurrence (default: error)",
     )
     convert_parser.add_argument(
         "-n",
@@ -616,7 +717,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         metavar="N",
-        help="Keep only samples with data in at least N views (default: 1, keep all).",
+        help="For N > 1, require observed measurements in at least N views; 1 "
+        "keeps all matched samples (default: 1)",
     )
     convert_parser.add_argument(
         "-F",
@@ -624,18 +726,23 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=None,
         metavar="COLUMN=VAL[,VAL...]",
-        help="Restrict samples to metadata rows whose COLUMN is one of the listed values "
-        "(e.g. 'model_type=Cell_Line,Organoid'). Repeat for several columns.",
+        help="Keep samples whose metadata matches COLUMN=VAL[,VAL...] (e.g. "
+        "tissue=Lung,Breast). Filters on different columns combine with "
+        "AND; repeating a column replaces its earlier filter.",
     )
     convert_parser.add_argument(
         "-s",
         "--shared-features",
         action="store_true",
-        help="Reduce every view to the features they all share. Only valid when all "
-        "views use one identifier namespace (e.g. every omic at gene level).",
+        help="Keep feature identifiers present in every view; requires a shared"
+        " identifier namespace, such as genes",
     )
-    convert_parser.add_argument(
-        "-o", "--output", required=True, help="Output file path (.h5mu or .zarr)"
+    convert_inputs.add_argument(
+        "-o",
+        "--output",
+        required=True,
+        metavar="PATH",
+        help="Destination .h5mu file or .zarr directory; use --format zarr for Zarr",
     )
     convert_parser.add_argument(
         "-f",
@@ -649,24 +756,32 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_parser = _add_command(
         subparsers,
         "inspect",
-        "Print a summary of a MuData file (.h5mu or .zarr)",
-        "Summarise a MuData file: samples, features and missingness per view,\n"
-        "value ranges and metadata columns. Run it after convert, before training.",
+        "Inspect dataset dimensions, metadata, and missingness",
+        "Check a prepared MuData dataset before configuring a model. Print sample\n"
+        "and feature counts, value ranges, missingness, and metadata so you can\n"
+        "compare the saved dataset with your input tables. The input is not modified.",
         "mosa inspect -i data.h5mu",
+        "inspect.md",
     )
-    inspect_parser.add_argument(
-        "-i", "--input", required=True, help="Path to .h5mu or .zarr file"
+    inspect_parser.add_argument_group("required inputs").add_argument(
+        "-i",
+        "--input",
+        required=True,
+        metavar="PATH",
+        help="Prepared MuData dataset (.h5mu file or .zarr directory)",
     )
     _add_debug_arg(inspect_parser)
 
     validate_parser = _add_command(
         subparsers,
         "validate",
-        "Validate a YAML config without training",
-        "Check a config against the data it points to, without training. Catches\n"
-        "unknown keys, mismatched view names and missing metadata columns in\n"
-        "seconds.",
+        "Check configuration and dataset compatibility",
+        "Check a YAML configuration against its dataset before fitting. Validate\n"
+        "paths, view names, observed-value masks, metadata, and model-specific\n"
+        "requirements. Print a configuration summary and warnings, or report an\n"
+        "error with exit status 1, without training or writing model outputs.",
         "mosa validate -c config.yaml",
+        "validate.md",
     )
     _add_config_arg(validate_parser)
     _add_debug_arg(validate_parser)
@@ -678,7 +793,7 @@ def main(argv=None):
     """CLI entry point. argv defaults to sys.argv[1:]; tests pass it explicitly."""
     parser = build_parser()
     args = parser.parse_args(argv)
-    _setup_logging(args.debug)
+    handler = _setup_logging(args.debug)
 
     handlers = {
         "train": _train,
@@ -692,6 +807,8 @@ def main(argv=None):
     }
 
     try:
+        started = time.perf_counter()
+        logger.info("Starting %s", args.command)
         handlers[args.command](args)
     except MosaError as e:
         # Anything not deriving from MosaError is a bug: let it traceback.
@@ -707,6 +824,13 @@ def main(argv=None):
         # SystemExit(1) itself, which passes straight through here.
         print("Interrupted.", file=sys.stderr)
         sys.exit(130)
+    else:
+        logger.info(
+            "%s completed in %.1fs", args.command, time.perf_counter() - started
+        )
+    finally:
+        logging.getLogger().removeHandler(handler)
+        handler.close()
 
 
 if __name__ == "__main__":

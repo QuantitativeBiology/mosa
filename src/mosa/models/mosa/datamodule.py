@@ -518,16 +518,31 @@ class MOSADataModule(pl.LightningDataModule):
         t0 = time.perf_counter()
         mode = self.model_cfg.preprocessing_mode
 
+        logger.info(
+            "Preparing inputs: preprocessing=%s; fitting statistics on training samples only",
+            mode,
+        )
         omics_train = {}
         for view_name, X in train.views.items():
+            logger.info(
+                "Preparing view '%s': %d samples x %d features", view_name, *X.shape
+            )
             tv = time.perf_counter()
             mask = train.masks[view_name]
             if view_name in self.data_cfg.discrete_views:
+                logger.debug(
+                    "View '%s': discrete input, replacing missing values with zero",
+                    view_name,
+                )
                 X = np.nan_to_num(X, nan=0.0)
                 self.scalers[view_name] = None
                 self.group_centering[view_name] = None
                 self.impute_means[view_name] = None
             elif mode == "center":
+                logger.debug(
+                    "View '%s': fitting group centering and group-mean imputation",
+                    view_name,
+                )
                 centering = _fit_group_centering(
                     X, mask, meta["source_ids"], len(self.batch_categories)
                 )
@@ -536,6 +551,10 @@ class MOSADataModule(pl.LightningDataModule):
                 self.impute_means[view_name] = None
                 X = _apply_group_centering(X, mask, meta["source_ids"], centering)
             elif mode == "none":
+                logger.debug(
+                    "View '%s': keeping observed values, fitting group-mean imputation",
+                    view_name,
+                )
                 means = _fit_group_centering(
                     X, mask, meta["source_ids"], len(self.batch_categories)
                 )
@@ -544,6 +563,9 @@ class MOSADataModule(pl.LightningDataModule):
                 self.group_centering[view_name] = None
                 X = _apply_group_mean_imputation(X, mask, meta["source_ids"], means)
             else:
+                logger.debug(
+                    "View '%s': fitting standardization and mean imputation", view_name
+                )
                 stats = _fit_standardization(X, mask)
                 self.scalers[view_name] = stats
                 self.group_centering[view_name] = None
@@ -585,6 +607,11 @@ class MOSADataModule(pl.LightningDataModule):
         """Set up LazyZarrDataset for large zarr stores."""
         rng = np.random.RandomState(self.model_cfg.random_seed)
         frac = self.model_cfg.scaler_sample_frac
+        logger.info(
+            "Preparing lazy Zarr inputs: preprocessing=%s, scaler_sample_frac=%s",
+            self.model_cfg.preprocessing_mode,
+            frac,
+        )
         store = zarr.open_group(self.zarr_path, mode="r")
         mode = self.model_cfg.preprocessing_mode
 
@@ -594,6 +621,9 @@ class MOSADataModule(pl.LightningDataModule):
 
         for view_name in self.data_cfg.views:
             if view_name in self.data_cfg.discrete_views:
+                logger.debug(
+                    "Zarr view '%s': discrete input; skipping fitted scaling", view_name
+                )
                 self.scalers[view_name] = None
                 self.group_centering[view_name] = None
                 self.impute_means[view_name] = None
@@ -609,6 +639,11 @@ class MOSADataModule(pl.LightningDataModule):
             else:
                 sub_idx = sorted(all_train_idx)
 
+            logger.info(
+                "Preparing Zarr view '%s': fitting statistics on %d training samples",
+                view_name,
+                len(sub_idx),
+            )
             X_sub = np.asarray(X_zarr[sub_idx]).astype(np.float32)
             M_sub = np.asarray(mask_zarr[sub_idx]).astype(bool)
 
@@ -705,6 +740,9 @@ class MOSADataModule(pl.LightningDataModule):
 
     def _loader_kwargs(self) -> dict:
         nw = self.model_cfg.num_workers
+        logger.debug(
+            "DataLoader: batch_size=%d, workers=%d", self.model_cfg.batch_size, nw
+        )
         accelerator = self.model_cfg.accelerator
         # pin_memory only speeds up host->GPU transfer; on CPU it's a no-op
         # that still pays for pinned allocation, so skip it there.

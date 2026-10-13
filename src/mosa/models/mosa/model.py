@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
 import torch
-from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
+from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint, TQDMProgressBar
 from pytorch_lightning.strategies import DDPStrategy
 
 from mosa.config import DataConfig
@@ -53,6 +54,42 @@ class _EpochHistoryCallback(pl.Callback):
         if "val/loss" in metrics:
             entry["val_loss"] = float(metrics["val/loss"])
         self.history.append(entry)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Epoch %d/%d: %s",
+                trainer.current_epoch + 1,
+                trainer.max_epochs,
+                " | ".join(
+                    f"{key}={float(value):.4f}"
+                    for key, value in metrics.items()
+                    if key.startswith(("train/", "val/"))
+                ),
+            )
+
+    def on_train_start(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ) -> None:
+        if trainer.is_global_zero:
+            logger.info(
+                "Training on %s; precision=%s, maximum %d epochs",
+                trainer.strategy.root_device,
+                trainer.precision,
+                trainer.max_epochs,
+            )
+
+    def on_train_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        if trainer.is_global_zero:
+            reason = (
+                "early stopping"
+                if any(
+                    isinstance(cb, EarlyStopping) and cb.stopped_epoch > 0
+                    for cb in trainer.callbacks
+                )
+                else "epoch limit reached"
+            )
+            logger.info(
+                "Training finished after %d epochs: %s", trainer.current_epoch, reason
+            )
 
 
 class _LoggingModelCheckpoint(ModelCheckpoint):
@@ -96,6 +133,8 @@ class MOSAModel(MultiOmicModel):
         resume_from: str | Path | None = None,
     ) -> None:
         """Train the model on the provided data."""
+        logger.info("Preparing VAE inputs before training starts")
+        started = time.perf_counter()
         self._datamodule = MOSADataModule(
             train_data=train,
             val_data=val,
@@ -104,6 +143,12 @@ class MOSAModel(MultiOmicModel):
         )
         self._datamodule.setup()
 
+        logger.debug(
+            "Building VAE: fusion=%s, latent_dim=%d, input_dims=%s",
+            self.model_cfg.fusion_method,
+            self.model_cfg.joint_latent_dim,
+            self._datamodule.view_input_dims,
+        )
         self._model = VAE(
             config=self.model_cfg,
             view_input_dims=self._datamodule.view_input_dims,
@@ -123,10 +168,10 @@ class MOSAModel(MultiOmicModel):
 
         mc = self.model_cfg
         has_val = val is not None
-        callbacks = []
-        history_cb = _EpochHistoryCallback() if has_val else None
+        history_cb = _EpochHistoryCallback()
+        # Explicit tqdm keeps the familiar epoch/batch bar even if Rich is installed.
+        callbacks = [history_cb, TQDMProgressBar()]
         if has_val:
-            callbacks.append(history_cb)
             callbacks.append(
                 EarlyStopping(
                     monitor="val/loss",
@@ -173,14 +218,31 @@ class MOSAModel(MultiOmicModel):
         if not has_val:
             trainer_kwargs["limit_val_batches"] = 0
             trainer_kwargs["num_sanity_val_steps"] = 0
+            logger.info(
+                "Validation disabled: no early stopping or monitored VAE checkpoints"
+            )
+        if has_val and mc.checkpoint_top_k == 0:
+            logger.debug("Monitored checkpoints disabled by checkpoint_top_k=0")
 
+        logger.debug(
+            "Trainer settings: accelerator=%s, devices=%s, batch_size=%d, seed=%d",
+            mc.accelerator,
+            mc.devices,
+            mc.batch_size,
+            mc.random_seed,
+        )
         self._trainer = pl.Trainer(**trainer_kwargs)
+        if resume_from:
+            logger.info("Resuming training from %s", resume_from)
         self._trainer.fit(
             self._model,
             self._datamodule,
             ckpt_path=str(resume_from) if resume_from else None,
         )
-        self.epoch_history = history_cb.history if history_cb is not None else []
+        if self._trainer.interrupted:
+            raise KeyboardInterrupt
+        self.epoch_history = history_cb.history
+        logger.info("VAE fit completed in %.1fs", time.perf_counter() - started)
 
     def save_outputs(self, output_dir: str | Path | None = None) -> None:
         """Save latent representations and reconstructions for all splits."""
@@ -243,6 +305,7 @@ class MOSAModel(MultiOmicModel):
         assert self._model is not None
 
         ensure_dir(out_dir)
+        logger.info("Writing latent representations and reconstructions to %s", out_dir)
         n_batches = (
             len(self._datamodule.batch_categories)
             if force_source_id is not None
@@ -301,6 +364,10 @@ class MOSAModel(MultiOmicModel):
             model_cfg=self.model_cfg,
         )
         inf_dm.setup_inference(self._datamodule)
+        logger.debug(
+            "Projecting with saved preprocessing statistics (%d samples)",
+            data.n_samples,
+        )
 
         loader = inf_dm.train_eval_dataloader()
         results = self._model.predict(loader)
@@ -318,6 +385,10 @@ class MOSAModel(MultiOmicModel):
             model_cfg=self.model_cfg,
         )
         inf_dm.setup_inference(self._datamodule)
+        logger.debug(
+            "Reconstructing with saved preprocessing statistics (%d samples)",
+            data.n_samples,
+        )
 
         loader = inf_dm.train_eval_dataloader()
         results = self._model.predict(loader)

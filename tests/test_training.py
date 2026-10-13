@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 
 import numpy as np
 import pytest
@@ -8,10 +9,54 @@ import pytorch_lightning as pl
 import torch
 
 from mosa.models.mosa.datamodule import MOSADataModule
+from mosa.models.mosa.model import MOSAModel
 from mosa.models.mosa.vae.losses import adversarial_loss
 from mosa.models.mosa.vae.vae_module import VAE
 
 # Helpers
+
+
+@pytest.mark.parametrize("with_validation", [False, True])
+def test_model_reports_completed_epochs_and_keeps_progress_bar(
+    make_multi_omic_dataset, make_mosa_config, tmp_path, caplog, capsys, with_validation
+):
+    from pytorch_lightning.callbacks import TQDMProgressBar
+
+    dataset = make_multi_omic_dataset(
+        n_samples=16, view_dims={"view_a": 4, "view_b": 3}
+    )
+    data_cfg, model_cfg = make_mosa_config(
+        dataset, num_epochs=2, output_dir=str(tmp_path)
+    )
+    train = dataset.subset(np.arange(12)) if with_validation else dataset
+    val = dataset.subset(np.arange(12, 16)) if with_validation else None
+    model = MOSAModel(data_cfg, model_cfg)
+    with caplog.at_level(logging.DEBUG, logger="mosa.models.mosa.model"):
+        model.fit(train, val)
+
+    summaries = [r.message for r in caplog.records if r.message.startswith("Epoch ")]
+    assert len(summaries) == 2  # No extra summary for the sanity validation loop.
+    for index, (summary, epoch) in enumerate(
+        zip(summaries, model.epoch_history, strict=True)
+    ):
+        assert f"Epoch {index + 1}/2:" in summary
+        assert f"train/loss={epoch['train_loss']:.4f}" in summary
+        assert ("val/loss=" in summary) == with_validation
+        if with_validation:
+            assert f"val/loss={epoch['val_loss']:.4f}" in summary
+    assert isinstance(model._trainer.progress_bar_callback, TQDMProgressBar)
+    assert "Epoch 1:" in capsys.readouterr().out
+    assert "epoch limit reached" in caplog.text
+
+
+def test_epoch_reporting_skips_other_ranks():
+    from types import SimpleNamespace
+
+    from mosa.models.mosa.model import _EpochHistoryCallback
+
+    callback = _EpochHistoryCallback()
+    callback.on_train_epoch_end(SimpleNamespace(is_global_zero=False), None)
+    assert callback.history == []
 
 
 def _make_vae_and_dm(

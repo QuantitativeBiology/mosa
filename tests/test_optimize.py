@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import optuna
 import pytest
 
@@ -9,7 +11,7 @@ from mosa.models.optimize import optimize
 
 
 def test_optimize_returns_best_params_and_value(
-    make_multi_omic_dataset, make_mosa_config, tmp_path
+    make_multi_omic_dataset, make_mosa_config, tmp_path, caplog
 ):
     dataset = make_multi_omic_dataset(n_samples=20, n_groups=2)
     data_cfg, model_cfg = make_mosa_config(
@@ -21,14 +23,19 @@ def test_optimize_returns_best_params_and_value(
         "joint_latent_dim": {"dist": "categorical", "choices": [8, 16]},
     }
 
-    results = optimize(
-        dataset,
-        data_cfg,
-        model_cfg,
-        search_space,
-        n_trials=3,
-        eval_cfg=EvaluationConfig(n_folds=2),
-    )
+    with caplog.at_level(logging.DEBUG, logger="mosa.models.optimize"):
+        results = optimize(
+            dataset,
+            data_cfg,
+            model_cfg,
+            search_space,
+            n_trials=3,
+            eval_cfg=EvaluationConfig(n_folds=2),
+        )
+    for trial in range(1, 4):
+        assert f"Trial {trial}/3: starting" in caplog.text
+        assert f"Trial {trial}/3 completed: NMSE=" in caplog.text
+        assert f"Trial {trial}/3 parameters:" in caplog.text
 
     assert "best_params" in results and "best_value" in results and "study" in results
     assert isinstance(results["best_value"], float)

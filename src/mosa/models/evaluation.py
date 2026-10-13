@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import tempfile
+import time
 from typing import Any
 
 import numpy as np
@@ -147,6 +148,18 @@ def cross_validate(
     _check_folds_fit_data(dataset, labels, eval_cfg)
 
     splitter = _build_splitter(eval_cfg, getattr(model_cfg, "random_seed", 42))
+    logger.info(
+        "Cross-validation: %d folds, strategy=%s, shuffle=%s",
+        eval_cfg.n_folds,
+        eval_cfg.strategy,
+        eval_cfg.shuffle,
+    )
+    logger.debug(
+        "Fold seed=%d; samples=%d; views=%s",
+        getattr(model_cfg, "random_seed", 42),
+        dataset.n_samples,
+        dataset.view_names,
+    )
 
     # Out-of-sample reconstruction per view, assembled fold by fold. Folds
     # partition the dataset, so once every fold has run this covers every
@@ -161,6 +174,14 @@ def cross_validate(
     for fold_idx, (train_idx, val_idx) in enumerate(
         splitter.split(np.arange(dataset.n_samples), labels)
     ):
+        started = time.perf_counter()
+        logger.info(
+            "Fold %d/%d: fitting on %d samples, holding out %d",
+            fold_idx + 1,
+            eval_cfg.n_folds,
+            len(train_idx),
+            len(val_idx),
+        )
         train = dataset.subset(train_idx)
         val = dataset.subset(val_idx)
 
@@ -172,7 +193,17 @@ def cross_validate(
 
             model = build_model(data_cfg, fold_model_cfg)
             model.fit(train, val)
+            logger.info(
+                "Fold %d/%d: reconstructing held-out samples",
+                fold_idx + 1,
+                eval_cfg.n_folds,
+            )
             recon = model.reconstruct(val)
+            logger.debug(
+                "Fold %d/%d: scoring observed entries only",
+                fold_idx + 1,
+                eval_cfg.n_folds,
+            )
             totals = _score_fold(recon, val)
             fold_histories.append(list(model.epoch_history))
 
@@ -182,14 +213,22 @@ def cross_validate(
         unobserved = [v for v in dataset.view_names if totals[v]["n_obs"] == 0]
         if unobserved:
             logger.warning(
-                "Fold %d has no observed entries for view(s) %s; this split "
+                "Fold %d/%d has no observed entries for view(s) %s; this split "
                 "cannot assess %s. Consider strategy='stratified' or shuffle=True.",
-                fold_idx,
+                fold_idx + 1,
+                eval_cfg.n_folds,
                 unobserved,
                 "them" if len(unobserved) > 1 else "it",
             )
         fold_totals.append(totals)
+        logger.info(
+            "Fold %d/%d completed in %.1fs",
+            fold_idx + 1,
+            eval_cfg.n_folds,
+            time.perf_counter() - started,
+        )
 
+    logger.info("Pooling reconstruction errors across folds")
     variances = {v: _observed_variance(dataset, v) for v in dataset.view_names}
 
     pooled = {}
@@ -234,13 +273,15 @@ def cross_validate(
             }
         )
         logger.debug(
-            "Fold %d: aggregate=%.4f over %d/%d views",
-            fold_idx,
+            "Fold %d/%d: aggregate=%.4f over %d/%d views",
+            fold_idx + 1,
+            eval_cfg.n_folds,
             per_fold[-1]["aggregate"],
             len(covered),
             len(dataset.view_names),
         )
 
+    logger.info("Cross-validation pooled NMSE: %.4f (lower is better)", aggregate)
     return {
         "per_fold": per_fold,
         "per_view": pooled,

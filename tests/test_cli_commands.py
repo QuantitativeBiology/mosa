@@ -14,7 +14,9 @@ cli._convert passed every test in the suite.
 from __future__ import annotations
 
 import argparse
+import logging
 import re
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -712,11 +714,195 @@ def test_every_flag_has_a_short_form(command):
 
 @pytest.mark.parametrize("command", sorted(COVERED_COMMANDS))
 def test_help_describes_the_command_with_an_example(command):
-    """-h opens with what the command does, not only the flag list."""
-    help_text = _subcommand_parsers()[command].format_help()
-    description, _, example = help_text.partition("example:")
-    assert len(description.split("\n\n", 1)[-1].split()) >= 10, help_text
+    """-h gives a short purpose, an example and a matching documentation page."""
+    sub = _subcommand_parsers()[command]
+    help_text = sub.format_help()
+    _, _, example = help_text.partition("example:")
+    assert 10 <= len(sub.description.split()) <= 50, help_text
     assert f"mosa {command} " in example, help_text
+    assert "required inputs" in help_text, help_text
+    doc_path = help_text.partition("Documentation:\n")[2].strip()
+    assert doc_path.startswith("docs/reference/commands/"), help_text
+    assert doc_path == f"docs/reference/commands/{command}.md", help_text
+    assert (Path(__file__).resolve().parents[1] / doc_path).is_file()
+
+
+@pytest.mark.parametrize("command", [None, *sorted(COVERED_COMMANDS)])
+@pytest.mark.parametrize("flag", ["-h", "--help"])
+def test_help_needs_no_inputs(command, flag, capsys):
+    with pytest.raises(SystemExit) as exc:
+        main([command, flag] if command else [flag])
+    assert exc.value.code == 0
+    captured = capsys.readouterr()
+    assert "usage: mosa" in captured.out
+    assert captured.err == ""
+    if command is None:
+        for text in (
+            "Python library",
+            "MOSA VAE",
+            "MOFA",
+            "custom models",
+            "model.type",
+            "Documentation:\n  docs/index.md",
+        ):
+            assert text in captured.out
+
+
+@pytest.mark.parametrize(
+    ("short", "long"),
+    [
+        (
+            ["train", "-c", "c.yaml", "-r", "last.ckpt", "-d"],
+            ["train", "--config", "c.yaml", "--resume", "last.ckpt", "--debug"],
+        ),
+        (
+            ["transform", "-m", "m.ckpt", "-i", "d.h5mu", "-o", "out", "-r"],
+            [
+                "transform",
+                "--checkpoint",
+                "m.ckpt",
+                "--input",
+                "d.h5mu",
+                "--output",
+                "out",
+                "--reconstruct",
+            ],
+        ),
+        (
+            ["cross-validate", "-c", "c.yaml", "-k", "3", "-s", "kfold", "-N"],
+            [
+                "cross-validate",
+                "--config",
+                "c.yaml",
+                "--folds",
+                "3",
+                "--strategy",
+                "kfold",
+                "--no-shuffle",
+            ],
+        ),
+        (
+            ["optimize", "-c", "c.yaml", "-p", "s.yaml", "-n", "2", "-k", "3"],
+            [
+                "optimize",
+                "--config",
+                "c.yaml",
+                "--search-space",
+                "s.yaml",
+                "--trials",
+                "2",
+                "--folds",
+                "3",
+            ],
+        ),
+        (
+            ["plot", "-c", "c.yaml", "-o", "out"],
+            ["plot", "--config", "c.yaml", "--output-dir", "out"],
+        ),
+        (
+            [
+                "convert",
+                "-m",
+                "meta.csv",
+                "-v",
+                "a:a.csv",
+                "-v",
+                "b:b.csv",
+                "-o",
+                "d.zarr",
+                "-f",
+                "zarr",
+                "-M",
+                "mut.csv",
+                "-I",
+                "ids.csv",
+                "-x",
+                "first",
+                "-n",
+                "2",
+                "-F",
+                "tissue=Lung",
+                "-s",
+            ],
+            [
+                "convert",
+                "--conditionals",
+                "meta.csv",
+                "--view",
+                "a:a.csv",
+                "--view",
+                "b:b.csv",
+                "--output",
+                "d.zarr",
+                "--format",
+                "zarr",
+                "--mutations",
+                "mut.csv",
+                "--id-map",
+                "ids.csv",
+                "--on-collision",
+                "first",
+                "--min-views",
+                "2",
+                "--filter",
+                "tissue=Lung",
+                "--shared-features",
+            ],
+        ),
+        (["inspect", "-i", "d.h5mu"], ["inspect", "--input", "d.h5mu"]),
+        (["validate", "-c", "c.yaml"], ["validate", "--config", "c.yaml"]),
+    ],
+)
+def test_short_and_long_flags_are_equivalent(short, long):
+    parser = build_parser()
+    assert parser.parse_args(short) == parser.parse_args(long)
+
+
+def test_logging_resets_between_invocations(monkeypatch, capsys):
+    import mosa.cli as cli
+
+    log = logging.getLogger("mosa.cli")
+
+    def inspect(args):
+        log.info("Inspecting test data")
+        log.debug("Diagnostic details")
+        print("Inspection result")
+
+    monkeypatch.setattr(cli, "_inspect", inspect)
+    for debug in (False, True, False):
+        main(["inspect", "-i", "unused", *(["-d"] if debug else [])])
+        captured = capsys.readouterr()
+        assert captured.out == "Inspection result\n"
+        assert captured.err.count("Inspecting test data") == 1
+        assert ("Diagnostic details" in captured.err) == debug
+        assert "inspect completed in" in captured.err
+    assert not any(h.name == "mosa.cli" for h in logging.getLogger().handlers)
+
+
+def test_convert_announces_read_before_loading(
+    monkeypatch, make_csv_dataset, tmp_path, capsys
+):
+    from mosa.data import io
+
+    csvs = make_csv_dataset(tmp_path)
+    read_table = io._read_table
+
+    def read_with_progress(path, *args, **kwargs):
+        captured = capsys.readouterr()
+        assert str(path) in captured.err
+        return read_table(path, *args, **kwargs)
+
+    monkeypatch.setattr(io, "_read_table", read_with_progress)
+    main(
+        [
+            "convert",
+            "-m",
+            str(csvs["conditionals"]),
+            *_view_args(csvs),
+            "-o",
+            str(tmp_path / "converted.h5mu"),
+        ]
+    )
 
 
 # Completeness

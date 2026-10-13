@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import time
 from pathlib import Path
 
 from mosa.config import DataConfig, EvaluationConfig, ModelConfig
@@ -126,6 +127,13 @@ def optimize(
     # Every trial scores through cross_validate, which would reject the model
     # per trial and only fail once all of them were pruned.
     require_out_of_sample(base_model_cfg, "Hyperparameter search")
+    evaluation = eval_cfg or EvaluationConfig()
+    logger.info(
+        "Searching %d trials x %d folds; minimizing pooled NMSE",
+        n_trials,
+        evaluation.n_folds,
+    )
+    logger.debug("Search fields: %s", list(search_space))
 
     # Every trial failure becomes TrialPruned so one bad combo cannot abort the
     # study. Keep the first reason: if nothing completes, it is the only thing
@@ -133,13 +141,20 @@ def optimize(
     first_failure: list[str] = []
 
     def objective(trial: optuna.Trial) -> float:
+        started = time.perf_counter()
+        logger.info(
+            "Trial %d/%d: starting cross-validation", trial.number + 1, n_trials
+        )
         sampled = {
             name: _suggest(trial, name, spec) for name, spec in search_space.items()
         }
+        logger.debug("Trial %d/%d parameters: %s", trial.number + 1, n_trials, sampled)
         try:
             trial_model_cfg = dataclasses.replace(base_model_cfg, **sampled)
         except (ValueError, TypeError) as e:
-            logger.debug("Trial %d pruned: invalid config (%s)", trial.number, e)
+            logger.info(
+                "Trial %d/%d pruned: invalid config (%s)", trial.number + 1, n_trials, e
+            )
             if not first_failure:
                 first_failure.append(f"invalid config ({type(e).__name__}: {e})")
             raise optuna.TrialPruned(str(e)) from e
@@ -149,11 +164,24 @@ def optimize(
         except Exception as e:
             # Traceback only under --debug; a pruned trial is not itself an
             # error, and the study still reports the cause if none complete.
-            logger.warning("Trial %d failed: %s", trial.number, e)
-            logger.debug("Trial %d traceback", trial.number, exc_info=True)
+            logger.warning(
+                "Trial %d/%d pruned after evaluation failed: %s",
+                trial.number + 1,
+                n_trials,
+                e,
+            )
+            logger.debug(
+                "Trial %d/%d traceback", trial.number + 1, n_trials, exc_info=True
+            )
             if not first_failure:
                 first_failure.append(f"{type(e).__name__}: {e}")
             raise optuna.TrialPruned(f"trial {trial.number} failed: {e}") from e
+        logger.debug(
+            "Trial %d/%d evaluation took %.1fs",
+            trial.number + 1,
+            n_trials,
+            time.perf_counter() - started,
+        )
         return result["mean"]
 
     # Seed the sampler from the config so a search is reproducible run to run.
@@ -161,7 +189,18 @@ def optimize(
     study = optuna.create_study(
         direction="minimize", sampler=optuna.samplers.TPESampler(seed=seed)
     )
-    study.optimize(objective, n_trials=n_trials)
+
+    def report_trial(study, trial):
+        if trial.state == optuna.trial.TrialState.COMPLETE:
+            logger.info(
+                "Trial %d/%d completed: NMSE=%.4f; best=%.4f",
+                trial.number + 1,
+                n_trials,
+                trial.value,
+                study.best_value,
+            )
+
+    study.optimize(objective, n_trials=n_trials, callbacks=[report_trial])
 
     if not any(t.state == optuna.trial.TrialState.COMPLETE for t in study.trials):
         reason = (

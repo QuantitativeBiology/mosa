@@ -6,6 +6,7 @@ and clustering quality metrics from training outputs.
 
 import colorsys
 import logging
+import time
 import warnings
 import zlib
 from pathlib import Path
@@ -546,6 +547,9 @@ def _generate_loss_plots(output_dir, views, plots_dir):
     """Generate loss curve plots from Lightning metrics."""
     metrics = _load_lightning_metrics(output_dir)
     if not metrics:
+        logger.info(
+            "Skipping loss plots: no Lightning metrics found under %s", output_dir
+        )
         return
 
     cmap = plt.get_cmap("tab20")
@@ -625,6 +629,11 @@ def _generate_reconstruction_plots(data, views, plots_dir):
 
         for recon_key, suffix in recon_variants:
             if "input" not in omic_data or recon_key not in omic_data:
+                logger.debug(
+                    "Skipping %s reconstruction plot for '%s': input or reconstruction missing",
+                    recon_key,
+                    name,
+                )
                 continue
 
             input_df = omic_data["input"]
@@ -632,6 +641,10 @@ def _generate_reconstruction_plots(data, views, plots_dir):
 
             common = input_df.index.intersection(recon_df.index)
             if common.empty:
+                logger.info(
+                    "Skipping reconstruction plot for '%s': no matching sample IDs",
+                    name,
+                )
                 continue
             inp, rec = input_df.loc[common], recon_df.loc[common]
 
@@ -810,13 +823,15 @@ def _load_data_files(output_dir, views, data_path):
 
 def _make_umap_plot(df, conditionals, palette, title, out_path, pca_components):
     """Compute UMAP and save scatter plot."""
-    logger.debug("Computing UMAP: %s (%d samples x %d features)", title, *df.shape)
+    started = time.perf_counter()
+    logger.info("Computing UMAP: %s (%d samples x %d features)", title, *df.shape)
     df, conditionals = _align_to_conditionals(df, conditionals)
     pca_comp = pca_components if df.shape[1] > pca_components else None
     embedding = compute_umap_embedding(df, pca_components=pca_comp)
     plot_df = pd.concat([embedding, conditionals], axis=1)
     fig, _ = plot_umap(plot_df, palette, title=title)
     _save_fig(fig, out_path)
+    logger.debug("UMAP '%s' completed in %.1fs", title, time.perf_counter() - started)
 
 
 def _generate_umap_plots(data, views, plots_dir, palette, pca_components):
@@ -887,7 +902,7 @@ def generate_all_plots(
 
     views = list(data_cfg.views)
 
-    logger.debug("Loading data files")
+    logger.info("Loading training artifacts and data for plots")
     data = _load_data_files(output_dir, views, data_cfg.path)
 
     # 'tissue' is optional everywhere else (training warns and carries on), but
@@ -903,18 +918,22 @@ def generate_all_plots(
     tissues = conditionals["tissue"].dropna().unique()
     palette = build_palette(tissues, base_palette=palette)
 
-    logger.debug("Generating UMAP plots")
+    logger.info("Generating UMAP plots")
     _generate_umap_plots(data, views, plots_dir, palette, pca_components)
-    logger.debug("Generating loss plots")
+    logger.info("Generating loss plots")
     _generate_loss_plots(output_dir, views, plots_dir)
-    logger.debug("Generating reconstruction plots")
+    logger.info("Generating reconstruction plots")
     _generate_reconstruction_plots(data, views, plots_dir)
 
+    logger.info("Computing clustering metrics")
     metrics_rows = _compute_all_clustering_metrics(data, views, data["conditionals"])
     if metrics_rows:
         metrics_out = ensure_dir(output_dir / "metrics")
         pd.DataFrame(metrics_rows).to_csv(
             metrics_out / "clustering_metrics.csv", index=False
+        )
+        logger.info(
+            "Wrote clustering metrics to %s", metrics_out / "clustering_metrics.csv"
         )
     else:
         warnings.warn(

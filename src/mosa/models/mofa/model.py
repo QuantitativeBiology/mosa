@@ -7,6 +7,7 @@ import json
 import logging
 import shutil
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -182,6 +183,27 @@ class MOFAModel(MultiOmicModel):
         from mofapy2.run.entry_point import entry_point
 
         mc = self.model_cfg
+        started = time.perf_counter()
+        logger.info(
+            "Preparing MOFA inputs: %d samples, %d views, %d factors",
+            train.n_samples,
+            len(train.view_names),
+            mc.n_factors,
+        )
+        logger.debug(
+            "MOFA settings: iterations=%d, gpu_mode=%s, scale_views=%s, scale_groups=%s, seed=%d",
+            mc.iterations,
+            mc.gpu_mode,
+            mc.scale_views,
+            mc.scale_groups,
+            mc.random_seed,
+        )
+        if val is not None:
+            logger.info(
+                "MOFA validation samples do not drive fitting or early stopping"
+            )
+        if resume_from:
+            logger.warning("MOFA does not support resume; fitting from scratch")
         ent = entry_point()
         ent.set_data_options(
             scale_views=mc.scale_views,
@@ -214,8 +236,14 @@ class MOFAModel(MultiOmicModel):
             gpu_mode=mc.gpu_mode,
             gpu_device=mc.gpu_device,
         )
+        logger.info("Building MOFA model")
         ent.build()
         try:
+            logger.info(
+                "Training MOFA for up to %d iterations on %s",
+                mc.iterations,
+                "GPU" if mc.gpu_mode else "CPU",
+            )
             ent.run()
         except SystemExit as e:
             # mofapy2 calls exit() instead of raising: when ARD drops every
@@ -253,6 +281,7 @@ class MOFAModel(MultiOmicModel):
         self._train_fingerprints = self._fingerprints(train)
         self._scales = self._scale_factors(train)
         self._model = None
+        logger.info("MOFA fit completed in %.1fs", time.perf_counter() - started)
 
     @staticmethod
     def _fingerprints(data: MultiOmicDataset) -> dict[str, np.ndarray]:
@@ -398,12 +427,21 @@ class MOFAModel(MultiOmicModel):
         self._check_features(data)
         factors = self._model.get_factors(df=True)
         known = np.array([s in factors.index for s in data.sample_names], dtype=bool)
+        logger.debug(
+            "MOFA projection: %d fitted samples, %d new samples",
+            int(known.sum()),
+            int((~known).sum()),
+        )
         result = np.empty((data.n_samples, factors.shape[1]))
         if known.any():
             fitted = data.subset(np.flatnonzero(known))
             self._check_training_values(fitted)
             result[known] = factors.loc[fitted.sample_names].values
         if (~known).any():
+            logger.info(
+                "Projecting %d new samples using observed Gaussian features",
+                int((~known).sum()),
+            )
             result[~known] = self._project(data.subset(np.flatnonzero(~known)))
         return result
 
@@ -472,6 +510,9 @@ class MOFAModel(MultiOmicModel):
 
         samples = self._train_samples
         split_dir = ensure_dir(out_dir / "full")
+        logger.info(
+            "Writing MOFA latent representations and reconstructions to %s", split_dir
+        )
         # A previous run into this directory may have written views this one
         # skips or no longer has.
         for stale in split_dir.glob("recon_*.parquet"):
@@ -494,10 +535,12 @@ class MOFAModel(MultiOmicModel):
             pd.DataFrame(recon, index=samples, columns=features).to_parquet(
                 split_dir / f"recon_{view_name}.parquet"
             )
+            logger.debug("Wrote %s", split_dir / f"recon_{view_name}.parquet")
 
     def _write_model(self, out_dir: Path) -> None:
         """Persist the inference artifact without exporting sample tables."""
         save_path = str(out_dir / "mofa_model.hdf5")
+        logger.info("Writing MOFA model to %s", save_path)
 
         # h5py cannot truncate a file it still holds open.
         if self._model is not None:
