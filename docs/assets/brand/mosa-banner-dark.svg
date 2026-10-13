@@ -14,7 +14,7 @@
   </g></g><g transform="translate(266 56)" fill="none" stroke="#EDF3F7" stroke-width="10" stroke-linecap="butt" stroke-linejoin="miter">
     <path d="M0 68V0h2l27 40L56 0h2v68"/>
     <rect x="84" y="0" width="54" height="68" rx="26"/>
-    <path d="M215 8C207 1 198-2 187-1c-15 1-23 8-23 19 0 12 10 16 25 19 16 3 26 8 26 20 0 10-10 17-25 17-12 0-22-4-29-11"/>
+    <path d="M215 8C207 2 198 0 187 0C172 0 164 6.7 164 16.7C164 27.4 174 31.4 189 34.4C205 37.4 215 42.1 215 51.8C215 60.8 205 66.5 190 66.5C178 66.5 168 62.5 161 56.5"/>
     <path d="M238 68l27-68h3l27 68 M246 48h41"/>
   </g></g><text x="600" y="278" text-anchor="middle" fill="#A9BAC8" font-family="Menlo, Consolas, monospace" font-size="19" letter-spacing="0">The Multi-Omic Synthetic Augmentation Library</text>
 </svg>
