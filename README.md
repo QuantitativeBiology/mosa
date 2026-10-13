@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="docs/assets/brand/mosa-banner.svg" alt="MOSA — The Multi-Omic Synthetic Augmentation Library" width="100%">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/mosa-banner-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/brand/mosa-banner.svg">
+    <img src="docs/assets/brand/mosa-banner.svg" alt="MOSA — The Multi-Omic Synthetic Augmentation Library" width="100%">
+  </picture>
 </p>
 
 <p align="center">
@@ -23,7 +27,11 @@ MOSA is a [Python](https://www.python.org/) library for multi-omics integration.
 The [MOSA VAE](https://www.nature.com/articles/s41467-024-54771-4) is a conditional multiview variational autoencoder for bulk multi-omics integration. It learns a shared representation across omics and estimates missing measurements, allowing samples with incomplete profiles to be analysed together. Batch, tissue, and mutation information can condition reconstructions, while optional adversarial training discourages batch-associated information in the representation. See the [model guide](https://quantitativebiology.github.io/mosa/models/mosa-vae/) for available settings and their interpretation.
 
 <p align="center">
-  <img src="docs/assets/brand/mosa-vae.svg" alt="MOSA VAE with one encoder and decoder per omic, a shared latent representation, decoder conditioning, and an optional source discriminator.">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/mosa-vae-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/brand/mosa-vae.svg">
+    <img src="docs/assets/brand/mosa-vae.svg" alt="MOSA VAE with one encoder and decoder per omic, a shared latent representation, decoder conditioning, and an optional source discriminator.">
+  </picture>
 </p>
 
 ## The library
@@ -31,7 +39,11 @@ The [MOSA VAE](https://www.nature.com/articles/s41467-024-54771-4) is a conditio
 The library provides command-line and [Python](https://www.python.org/) interfaces for running integration experiments from a configuration file. Prepare a dataset in [MuData](https://mudata.scverse.org/stable/), compare model settings through [cross-validation](https://quantitativebiology.github.io/mosa/guides/evaluation/) and [Optuna](https://optuna.org/) hyperparameter search, then use the fitted model to project new samples and analyse reconstructed profiles. Other integration methods can be added through the [model interface](https://quantitativebiology.github.io/mosa/development/adding-models/).
 
 <p align="center">
-  <img src="docs/assets/brand/mosa-workflow.svg" alt="Omic matrices and metadata enter a common data interface for the MOSA VAE or a custom model. Library operations include configuration validation, training, cross-validation, hyperparameter optimization, saving results, and analysis plotting.">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/mosa-workflow-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/brand/mosa-workflow.svg">
+    <img src="docs/assets/brand/mosa-workflow.svg" alt="Omic matrices and metadata enter a common data interface for the MOSA VAE or a custom model. Library operations include configuration validation, training, cross-validation, hyperparameter optimization, saving results, and analysis plotting.">
+  </picture>
 </p>
 
 ## Quick start
