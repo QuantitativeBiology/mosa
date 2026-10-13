@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="380" viewBox="0 0 1040 380" role="img" aria-labelledby="title desc">
+<title id="title">Models within the MOSA library</title>
+<desc id="desc">Two omic matrices and sample metadata are read through a common MuData interface. The MOSA VAE and other methods occupy the same model interface and return latent representations and reconstructions. The library handles configuration validation, model training, model cross-validation, hyperparameter optimization, saving model outputs, and analysis plotting.</desc>
+<rect width="1040" height="380" fill="#fff"/>
+<defs><marker id="arrow" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M1 1l4 2.5-4 2.5" fill="none" stroke="#172C3D" stroke-width="1.2"/></marker></defs>
+
+<text x="36" y="30" font-family="Menlo, Consolas, monospace" font-size="18" fill="#172C3D" text-anchor="start">Omic matrices</text>
+<text x="226" y="30" font-family="Menlo, Consolas, monospace" font-size="18" fill="#172C3D" text-anchor="start">Data interface</text>
+<text x="463" y="30" font-family="Menlo, Consolas, monospace" font-size="18" fill="#172C3D" text-anchor="start">Model</text>
+<text x="782" y="30" font-family="Menlo, Consolas, monospace" font-size="18" fill="#172C3D" text-anchor="start">Model outputs</text>
+<path d="M44 70h-5v48h5 M124 70h5v48h-5" fill="none" stroke="#172C3D" stroke-width="1.2"/>
+<path d="M51 79l6 -6" fill="none" stroke="#B6C4CC" stroke-width="0.8"/>
+<rect x="62" y="72" width="8" height="8" fill="#137F82" fill-opacity="0.75"/>
+<rect x="74" y="72" width="8" height="8" fill="#137F82" fill-opacity="0.51"/>
+<rect x="86" y="72" width="8" height="8" fill="#137F82" fill-opacity="0.27"/>
+<rect x="98" y="72" width="8" height="8" fill="#137F82" fill-opacity="0.87"/>
+<rect x="110" y="72" width="8" height="8" fill="#137F82" fill-opacity="0.63"/>
+<rect x="50" y="84" width="8" height="8" fill="#137F82" fill-opacity="0.51"/>
+<rect x="62" y="84" width="8" height="8" fill="#137F82" fill-opacity="0.27"/>
+<rect x="74" y="84" width="8" height="8" fill="#137F82" fill-opacity="0.87"/>
+<rect x="86" y="84" width="8" height="8" fill="#137F82" fill-opacity="0.63"/>
+<rect x="98" y="84" width="8" height="8" fill="#137F82" fill-opacity="0.39"/>
+<path d="M111 91l6 -6" fill="none" stroke="#B6C4CC" stroke-width="0.8"/>
+<rect x="50" y="96" width="8" height="8" fill="#137F82" fill-opacity="0.87"/>
+<rect x="62" y="96" width="8" height="8" fill="#137F82" fill-opacity="0.63"/>
+<rect x="74" y="96" width="8" height="8" fill="#137F82" fill-opacity="0.39"/>
+<path d="M87 103l6 -6" fill="none" stroke="#B6C4CC" stroke-width="0.8"/>
+<rect x="98" y="96" width="8" height="8" fill="#137F82" fill-opacity="0.75"/>
+<rect x="110" y="96" width="8" height="8" fill="#137F82" fill-opacity="0.51"/>
+<rect x="50" y="108" width="8" height="8" fill="#137F82" fill-opacity="0.39"/>
+<path d="M63 115l6 -6" fill="none" stroke="#B6C4CC" stroke-width="0.8"/>
+<rect x="74" y="108" width="8" height="8" fill="#137F82" fill-opacity="0.75"/>
+<rect x="86" y="108" width="8" height="8" fill="#137F82" fill-opacity="0.51"/>
+<rect x="98" y="108" width="8" height="8" fill="#137F82" fill-opacity="0.27"/>
+<rect x="110" y="108" width="8" height="8" fill="#137F82" fill-opacity="0.87"/>
+<path d="M44 166h-5v48h5 M100 166h5v48h-5" fill="none" stroke="#172C3D" stroke-width="1.2"/>
+<rect x="50" y="168" width="8" height="8" fill="#137F82" fill-opacity="0.39"/>
+<path d="M63 175l6 -6" fill="none" stroke="#B6C4CC" stroke-width="0.8"/>
+<rect x="74" y="168" width="8" height="8" fill="#137F82" fill-opacity="0.75"/>
+<rect x="86" y="168" width="8" height="8" fill="#137F82" fill-opacity="0.51"/>
+<rect x="50" y="180" width="8" height="8" fill="#137F82" fill-opacity="0.75"/>
+<rect x="62" y="180" width="8" height="8" fill="#137F82" fill-opacity="0.51"/>
+<rect x="74" y="180" width="8" height="8" fill="#137F82" fill-opacity="0.27"/>
+<rect x="86" y="180" width="8" height="8" fill="#137F82" fill-opacity="0.87"/>
+<rect x="50" y="192" width="8" height="8" fill="#137F82" fill-opacity="0.27"/>
+<rect x="62" y="192" width="8" height="8" fill="#137F82" fill-opacity="0.87"/>
+<rect x="74" y="192" width="8" height="8" fill="#137F82" fill-opacity="0.63"/>
+<rect x="86" y="192" width="8" height="8" fill="#137F82" fill-opacity="0.39"/>
+<rect x="50" y="204" width="8" height="8" fill="#137F82" fill-opacity="0.63"/>
+<rect x="62" y="204" width="8" height="8" fill="#137F82" fill-opacity="0.39"/>
+<path d="M75 211l6 -6" fill="none" stroke="#B6C4CC" stroke-width="0.8"/>
+<rect x="86" y="204" width="8" height="8" fill="#137F82" fill-opacity="0.75"/>
+<text x="140" y="101" font-family="Menlo, Consolas, monospace" font-size="22" fill="#172C3D" text-anchor="start">X₁</text>
+<text x="116" y="197" font-family="Menlo, Consolas, monospace" font-size="22" fill="#172C3D" text-anchor="start">X₂</text>
+<path d="M168 94h22v40h30" fill="none" stroke="#172C3D" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M145 190h45v-56" fill="none" stroke="#172C3D" stroke-width="1.2"/>
+<path d="M226 105h132v58H226z" fill="none" stroke="#172C3D" stroke-width="1.4"/>
+<text x="292" y="141" font-family="Menlo, Consolas, monospace" font-size="20" fill="#172C3D" text-anchor="middle">MuData</text>
+<text x="226" y="223" font-family="Menlo, Consolas, monospace" font-size="18" fill="#172C3D" text-anchor="start">Sample metadata</text>
+<path d="M292 202v-32" fill="none" stroke="#172C3D" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M358 134h41 M399 100v68 M399 100h45 M399 168h45" fill="none" stroke="#172C3D" stroke-width="1.2"/>
+<rect x="451" y="83" width="174" height="34" fill="#172C3D"/>
+<text x="538" y="106" font-family="Menlo, Consolas, monospace" font-size="19" fill="#FFFFFF" text-anchor="middle">MOSA VAE</text>
+<text x="538" y="174" font-family="Menlo, Consolas, monospace" font-size="19" fill="#172C3D" text-anchor="middle">Custom model</text>
+<path d="M632 100h38 M632 168h38 M670 100v68 M670 134h46" fill="none" stroke="#172C3D" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M724 92v94 M724 92h42 M724 186h42" fill="none" stroke="#172C3D" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M780 69h-5v48h5 M824 69h5v48h-5" fill="none" stroke="#172C3D" stroke-width="1.2"/>
+<rect x="786" y="71" width="8" height="8" fill="#137F82" fill-opacity="0.27"/>
+<rect x="798" y="71" width="8" height="8" fill="#137F82" fill-opacity="0.87"/>
+<rect x="810" y="71" width="8" height="8" fill="#137F82" fill-opacity="0.63"/>
+<rect x="786" y="83" width="8" height="8" fill="#137F82" fill-opacity="0.63"/>
+<rect x="798" y="83" width="8" height="8" fill="#137F82" fill-opacity="0.39"/>
+<rect x="810" y="83" width="8" height="8" fill="#137F82" fill-opacity="0.15"/>
+<rect x="786" y="95" width="8" height="8" fill="#137F82" fill-opacity="0.15"/>
+<rect x="798" y="95" width="8" height="8" fill="#137F82" fill-opacity="0.75"/>
+<rect x="810" y="95" width="8" height="8" fill="#137F82" fill-opacity="0.51"/>
+<rect x="786" y="107" width="8" height="8" fill="#137F82" fill-opacity="0.51"/>
+<rect x="798" y="107" width="8" height="8" fill="#137F82" fill-opacity="0.27"/>
+<rect x="810" y="107" width="8" height="8" fill="#137F82" fill-opacity="0.87"/>
+<text x="844" y="99" font-family="Menlo, Consolas, monospace" font-size="17" fill="#172C3D" text-anchor="start">Latent</text>
+<text x="844" y="122" font-family="Menlo, Consolas, monospace" font-size="17" fill="#172C3D" text-anchor="start">representation</text>
+<path d="M780 164h-5v48h5 M860 164h5v48h-5" fill="none" stroke="#172C3D" stroke-width="1.2"/>
+<rect x="786" y="166" width="8" height="8" fill="#137F82" fill-opacity="0.51"/>
+<rect x="798" y="166" width="8" height="8" fill="#137F82" fill-opacity="0.27"/>
+<rect x="810" y="166" width="8" height="8" fill="#137F82" fill-opacity="0.87"/>
+<rect x="822" y="166" width="8" height="8" fill="#137F82" fill-opacity="0.63"/>
+<rect x="834" y="166" width="8" height="8" fill="#137F82" fill-opacity="0.39"/>
+<rect x="846" y="166" width="8" height="8" fill="#137F82" fill-opacity="0.15"/>
+<rect x="786" y="178" width="8" height="8" fill="#137F82" fill-opacity="0.87"/>
+<rect x="798" y="178" width="8" height="8" fill="#137F82" fill-opacity="0.63"/>
+<rect x="810" y="178" width="8" height="8" fill="#137F82" fill-opacity="0.39"/>
+<rect x="822" y="178" width="8" height="8" fill="#137F82" fill-opacity="0.15"/>
+<rect x="834" y="178" width="8" height="8" fill="#137F82" fill-opacity="0.75"/>
+<rect x="846" y="178" width="8" height="8" fill="#137F82" fill-opacity="0.51"/>
+<rect x="786" y="190" width="8" height="8" fill="#137F82" fill-opacity="0.39"/>
+<rect x="798" y="190" width="8" height="8" fill="#137F82" fill-opacity="0.15"/>
+<rect x="810" y="190" width="8" height="8" fill="#137F82" fill-opacity="0.75"/>
+<rect x="822" y="190" width="8" height="8" fill="#137F82" fill-opacity="0.51"/>
+<rect x="834" y="190" width="8" height="8" fill="#137F82" fill-opacity="0.27"/>
+<rect x="846" y="190" width="8" height="8" fill="#137F82" fill-opacity="0.87"/>
+<rect x="786" y="202" width="8" height="8" fill="#137F82" fill-opacity="0.75"/>
+<rect x="798" y="202" width="8" height="8" fill="#137F82" fill-opacity="0.51"/>
+<rect x="810" y="202" width="8" height="8" fill="#137F82" fill-opacity="0.27"/>
+<rect x="822" y="202" width="8" height="8" fill="#137F82" fill-opacity="0.87"/>
+<rect x="834" y="202" width="8" height="8" fill="#137F82" fill-opacity="0.63"/>
+<rect x="846" y="202" width="8" height="8" fill="#137F82" fill-opacity="0.39"/>
+<text x="878" y="185" font-family="Menlo, Consolas, monospace" font-size="17" fill="#172C3D" text-anchor="start">Reconstructed</text>
+<text x="878" y="208" font-family="Menlo, Consolas, monospace" font-size="17" fill="#172C3D" text-anchor="start">profiles</text>
+<path d="M226 253v8h786v-8" fill="none" stroke="#536776" stroke-width="1.2"/>
+<text x="226" y="300" font-family="Menlo, Consolas, monospace" font-size="18" fill="#172C3D" text-anchor="start">MOSA library</text>
+<text x="415" y="300" font-family="Menlo, Consolas, monospace" font-size="16" fill="#172C3D" text-anchor="start">Configuration validation</text>
+<text x="740" y="300" font-family="Menlo, Consolas, monospace" font-size="16" fill="#172C3D" text-anchor="start">Model training</text>
+<text x="415" y="328" font-family="Menlo, Consolas, monospace" font-size="16" fill="#172C3D" text-anchor="start">Model cross-validation</text>
+<text x="740" y="328" font-family="Menlo, Consolas, monospace" font-size="16" fill="#172C3D" text-anchor="start">Hyperparameter optimization</text>
+<text x="415" y="356" font-family="Menlo, Consolas, monospace" font-size="16" fill="#172C3D" text-anchor="start">Saving model outputs</text>
+<text x="740" y="356" font-family="Menlo, Consolas, monospace" font-size="16" fill="#172C3D" text-anchor="start">Analysis plotting</text>
+</svg>

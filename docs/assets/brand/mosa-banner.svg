@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="340" viewBox="0 0 1200 340" role="img" aria-labelledby="title">
+  <title id="title">MOSA — The Multi-Omic Synthetic Augmentation Library</title>
+  <rect width="1200" height="340" fill="#F7F9FA"/>
+  <g transform="translate(300 60)"><g transform="translate(20 18)"><g fill="none" stroke="#172C3D" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Two matrix views, with different feature counts. -->
+    <path d="M10 28h36v24H10z M22 28v24 M34 28v24 M10 40h36"/>
+    <path d="M22 84h24v36H22z M34 84v36 M22 96h24 M22 108h24"/>
+    <!-- The input views converge at the model boundary. -->
+    <path d="M46 40h12l24 32h12 M46 102h12l24-30"/>
+    <!-- Open ports make the model frame read as a component. -->
+    <path d="M94 64V26a10 10 0 0 1 10-10h66a10 10 0 0 1 10 10v38 M180 80v38a10 10 0 0 1-10 10h-66a10 10 0 0 1-10-10V80 M180 72h20"/>
+    <!-- Encoder and decoder meet at a compact latent space. -->
+    <path d="M112 40l18 26v12l-18 26 M162 40l-18 26v12l18 26"/>
+    <path d="M137 67v10" stroke="#137F82" stroke-width="5"/>
+  </g></g><g transform="translate(266 56)" fill="none" stroke="#172C3D" stroke-width="10" stroke-linecap="butt" stroke-linejoin="miter">
+    <path d="M0 68V0h2l27 40L56 0h2v68"/>
+    <rect x="84" y="0" width="54" height="68" rx="26"/>
+    <path d="M215 8C207 1 198-2 187-1c-15 1-23 8-23 19 0 12 10 16 25 19 16 3 26 8 26 20 0 10-10 17-25 17-12 0-22-4-29-11"/>
+    <path d="M238 68l27-68h3l27 68 M246 48h41"/>
+  </g></g><text x="600" y="278" text-anchor="middle" fill="#536776" font-family="Menlo, Consolas, monospace" font-size="19" letter-spacing="0">The Multi-Omic Synthetic Augmentation Library</text>
+</svg>

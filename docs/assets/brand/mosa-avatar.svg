@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">MOSA avatar</title>
+  <rect width="256" height="256" fill="#F7F9FA"/>
+  <g transform="translate(18 48)"><g fill="none" stroke="#172C3D" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Two matrix views, with different feature counts. -->
+    <path d="M10 28h36v24H10z M22 28v24 M34 28v24 M10 40h36"/>
+    <path d="M22 84h24v36H22z M34 84v36 M22 96h24 M22 108h24"/>
+    <!-- The input views converge at the model boundary. -->
+    <path d="M46 40h12l24 32h12 M46 102h12l24-30"/>
+    <!-- Open ports make the model frame read as a component. -->
+    <path d="M94 64V26a10 10 0 0 1 10-10h66a10 10 0 0 1 10 10v38 M180 80v38a10 10 0 0 1-10 10h-66a10 10 0 0 1-10-10V80 M180 72h20"/>
+    <!-- Encoder and decoder meet at a compact latent space. -->
+    <path d="M112 40l18 26v12l-18 26 M162 40l-18 26v12l18 26"/>
+    <path d="M137 67v10" stroke="#137F82" stroke-width="5"/>
+  </g></g>
+</svg>
