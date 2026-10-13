@@ -1,0 +1,7 @@
+learning_rate:
+  dist: loguniform
+  low: 0.0001
+  high: 0.001
+joint_latent_dim:
+  dist: categorical
+  choices: [2, 4]

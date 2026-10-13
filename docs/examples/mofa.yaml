@@ -1,0 +1,15 @@
+data:
+  path: outputs/tutorial/data.h5mu
+  views: [gexp, meth]
+model:
+  type: mofa
+  output_dir: outputs/tutorial/mofa-run
+  random_seed: 42
+  n_factors: 3
+  iterations: 100
+  drop_r2: null
+evaluation:
+  test_size: 0
+  n_folds: 3
+  strategy: stratified
+  shuffle: true

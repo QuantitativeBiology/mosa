@@ -1,0 +1,10 @@
+data:
+  path: outputs/tutorial/data.h5mu
+  views: [gexp, meth]
+model:
+  type: example_pca
+  output_dir: outputs/tutorial/pca
+  n_components: 4
+evaluation:
+  test_size: 0
+  n_folds: 3

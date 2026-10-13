@@ -1,0 +1,3 @@
+n_factors:
+  dist: categorical
+  choices: [2, 3, 4]

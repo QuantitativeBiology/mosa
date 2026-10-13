@@ -1,0 +1,76 @@
+site_name: MOSA documentation
+site_description: Data preparation, training, evaluation, optimization, and model development in MOSA.
+site_url: https://quantitativebiology.github.io/mosa/
+repo_url: https://github.com/QuantitativeBiology/mosa
+repo_name: QuantitativeBiology/mosa
+edit_uri: edit/main/docs/
+copyright: MOSA contributors · BSD 3-Clause
+
+theme:
+  name: null
+  custom_dir: docs_theme
+  search_index_only: true
+  static_templates:
+    - 404.html
+
+watch:
+  - docs_theme
+
+plugins:
+  - search:
+      indexing: full
+
+markdown_extensions:
+  - tables
+  - fenced_code
+  - toc:
+      permalink: true
+
+hooks:
+  - docs_theme/hooks.py
+
+validation:
+  nav:
+    omitted_files: ignore
+  links:
+    not_found: warn
+    anchors: warn
+    unrecognized_links: warn
+
+nav:
+  - Documentation: index.md
+  - Getting started: getting-started.md
+  - Using MOSA:
+      - Preparing a dataset: guides/preparing-data.md
+      - Training and projection: guides/training.md
+      - Evaluation and optimization: guides/evaluation.md
+      - Analysing results: guides/analysis.md
+      - Library API for Notebooks and Experiments: guides/python.md
+  - Models:
+      - Available models: models/index.md
+      - MOSA VAE: models/mosa-vae.md
+      - MOFA integration: models/mofa.md
+  - Development:
+      - Architecture: development/architecture.md
+      - Adding a model: development/adding-models.md
+      - Modifying the VAE: development/modifying-vae.md
+      - Extending data handling: development/data-pipeline.md
+      - Documentation maintenance: development/documentation-site.md
+  - Reference:
+      - Configuration:
+          - Shared settings: reference/configuration/shared.md
+          - MOSA VAE settings: reference/configuration/mosa-vae.md
+          - MOFA settings: reference/configuration/mofa.md
+      - Commands:
+          - Overview: reference/commands/index.md
+          - convert: reference/commands/convert.md
+          - inspect: reference/commands/inspect.md
+          - validate: reference/commands/validate.md
+          - train: reference/commands/train.md
+          - transform: reference/commands/transform.md
+          - cross-validate: reference/commands/cross-validate.md
+          - optimize: reference/commands/optimize.md
+          - plot: reference/commands/plot.md
+      - Model interface: reference/model-interface.md
+      - Saved files: reference/saved-files.md
+      - Troubleshooting: reference/troubleshooting.md

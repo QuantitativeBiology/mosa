@@ -1,35 +1,33 @@
-# MOSA Documentation
+# MOSA documentation
 
-MOSA (Multi-Omic Synthetic Augmentation) is an extensible framework for integrating multiple omic data sources into a shared latent space. It includes a built-in, configurable VAE, and it allows you to register and train your own custom models.
+MOSA is a [Python](https://www.python.org/) library for multi-omics integration. Its command-line and [Python](https://www.python.org/) interfaces cover preparing datasets, training and evaluating models, optimizing hyperparameters, and analysing results, so an experiment can be configured and run within the same library.
 
-The manual pages are numbered in reading order. The first three cover everything needed to train a model. The rest serve as reference material.
+The MOSA VAE is the library’s main model: a conditional multiview variational autoencoder for bulk multi-omics integration. It learns a shared representation across a configurable number of omic datasets and estimates missing measurements. Batch, tissue, and mutation information can condition reconstructed profiles, while optional adversarial training discourages batch-associated information in the representation.
 
-1. [Getting started](manual/01-getting-started.md) — installation and the standard run
-2. [Preparing data](manual/02-preparing-data.md) — input formats, conversion, verification
-3. [Configuration](manual/03-configuration.md) — every config key, with defaults
-4. [Commands](#commands) — one page per command, listed below
-5. [Hyperparameter search](manual/05-hyperparameter-search.md) — the search-space format
-6. [Outputs](manual/06-outputs.md) — what a run writes to disk
-7. [Plots](manual/07-plots.md) — what each diagnostic figure shows
-8. [The MOSA VAE](manual/08-the-mosa-vae.md) — what the built-in model knobs mean
-9. [Troubleshooting](manual/09-troubleshooting.md) — error messages and their causes
-10. [Limitations](manual/10-limitations.md) — known rough edges
+For a first run, follow [Getting started](getting-started.md). It provides example data and a configuration, explains each step from installation to training, and shows how to read the saved results. Once that example runs, use the guides below to prepare your own data or continue with evaluation and projection.
 
-## Commands
+## Using MOSA
 
-Every command uses the format `mosa <command> [options]`, and every flag has a short form (`-c` for `--config`, `-o` for `--output`, and so on). Running `mosa <command> -h` explains what the command does, with an example, and lists the same flags documented in these pages.
+Start with data preparation if your measurements are still in separate tables. If you already have a compatible [MuData](https://mudata.scverse.org/stable/) file, continue with training. Evaluation compares reconstruction on held-out samples; analysis helps you examine the fitted model's outputs.
 
-1. [train](manual/04-commands/01-train.md) — fit a model from a config
-2. [transform](manual/04-commands/02-transform.md) — project data through a saved model
-3. [cross-validate](manual/04-commands/03-cross-validate.md) — k-fold reconstruction scoring
-4. [optimize](manual/04-commands/04-optimize.md) — Optuna hyperparameter search
-5. [plot](manual/04-commands/05-plot.md) — diagnostic figures from a finished run
-6. [convert](manual/04-commands/06-convert.md) — build a MuData file from tables
-7. [inspect](manual/04-commands/07-inspect.md) — summarise a MuData file
-8. [validate](manual/04-commands/08-validate.md) — check a config and its data
+| Task | Guide |
+|---|---|
+| Align omic tables and sample metadata into a dataset | [Preparing a dataset](guides/preparing-data.md) |
+| Train a model and apply it to new samples | [Training and projection](guides/training.md) |
+| Evaluate reconstruction and optimize model parameters | [Evaluation and optimization](guides/evaluation.md) |
+| Read model outputs and generate diagnostic plots | [Analysing results](guides/analysis.md) |
+| Use MOSA from a script or notebook | [Library API for Notebooks and Experiments](guides/python.md) |
 
-All eight commands accept the `-d`, `--debug` flag. The [Troubleshooting](manual/09-troubleshooting.md) section explains how failures are reported and what common error messages mean.
+## Models
 
-## Terminology
+The library manages data loading, sample splitting, and evaluation, while each model implements its own fitting and prediction. The [MOSA VAE guide](models/mosa-vae.md) explains its architecture, conditioning, and training objectives. For the optional external integration, see [MOFA fitting and projection](models/mofa.md). [Available models](models/index.md) compares their supported operations and restrictions.
 
-We use the term view to refer to a single omic data type, such as gene expression, methylation, or copy number. While the standard biological term is modality, MOSA uses view throughout the codebase, including the `--view` CLI flag and the `data.views` configuration key.
+## Development
+
+To change or extend MOSA, use the [architecture guide](development/architecture.md) to locate the relevant implementation. Follow [Adding a model](development/adding-models.md) to connect a different integration method to the library, or use the guides for [modifying the VAE](development/modifying-vae.md) and [extending data handling](development/data-pipeline.md) when changing those components. [Documentation maintenance](development/documentation-site.md) explains how to edit and preview this site.
+
+## Reference
+
+Use the reference pages alongside the guides when you need the exact [configuration fields](reference/configuration/shared.md), [command options](reference/commands/index.md), or [saved-file layouts](reference/saved-files.md). The [model interface](reference/model-interface.md) specifies what an adapter must implement. For help with a failed command, see [Troubleshooting](reference/troubleshooting.md).
+
+[Project README](../README.md) · [Contributing](../CONTRIBUTING.md) · [BSD 3-Clause License](../LICENSE)

@@ -19,3 +19,6 @@ notebooks/
 
 # Local scratch work
 dev/
+
+# Generated documentation site
+site/

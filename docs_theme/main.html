@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="{{ config.site_description | e }}">
+  <title>{% if page and page.toc %}{{ page.toc.items[0].title | striptags | e }} · {% endif %}MOSA documentation</title>
+  {% if page and page.canonical_url %}<link rel="canonical" href="{{ page.canonical_url | e }}">{% endif %}
+  <link rel="icon" href="{{ 'assets/brand/mosa-avatar.svg' | url }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ 'css/site.css' | url }}">
+  {% for path in config.extra_css %}<link rel="stylesheet" href="{{ path | url }}">{% endfor %}
+</head>
+<body data-search-index="{{ 'search/search_index.json' | url }}" data-site-root="{{ '.' | url }}">
+  <a class="skip-link" href="#content">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="{{ nav.homepage.url | url }}" aria-label="MOSA documentation home"><img src="{{ 'assets/brand/mosa-logo.svg' | url }}" width="153" height="48" alt="MOSA"></a>
+    <span class="header-label">Documentation</span>
+    <nav class="header-links" aria-label="Project">
+      <a href="{{ config.repo_url }}/blob/main/README.md">README</a>
+      <a href="{{ config.repo_url }}/blob/main/CONTRIBUTING.md">Contributing</a>
+      <a href="{{ config.repo_url }}">GitHub</a>
+    </nav>
+    <button class="search-button" type="button" aria-haspopup="dialog">Search <kbd>/</kbd></button>
+    <button class="menu-button" type="button" aria-expanded="false" aria-controls="sidebar">Menu</button>
+  </header>
+  <aside class="sidebar" id="sidebar" aria-label="Documentation navigation">
+    {% macro navigation(items, depth=0) %}
+      <ul class="nav-level-{{ depth }}">
+      {% for item in items %}
+        <li>
+        {% if item.children %}
+          {% if depth == 0 %}<div class="nav-section">{{ item.title | e }}</div>{{ navigation(item.children, depth + 1) }}
+          {% else %}<details{% if item.active %} open{% endif %}><summary>{{ item.title | e }}</summary>{{ navigation(item.children, depth + 1) }}</details>{% endif %}
+        {% else %}
+          <a href="{{ item.url | url }}"{% if item.active %} class="active" aria-current="page"{% endif %}>{{ item.title | e }}</a>
+        {% endif %}
+        </li>
+      {% endfor %}
+      </ul>
+    {% endmacro %}
+    {{ navigation(nav) }}
+  </aside>
+  <main class="main-content" id="content" tabindex="-1">
+    <div class="page">
+      {% block content %}
+      {% if page %}
+        <h1{% if page.toc %} id="{{ page.toc.items[0].id | e }}"{% endif %}>{{ page.toc.items[0].title if page.toc else page.title | e }}</h1>
+        {% if not page.is_homepage %}
+        <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="{{ nav.homepage.url | url }}">Documentation</a>{% for ancestor in page.ancestors | reverse %}<span>/</span>{{ ancestor.title | e }}{% endfor %}</nav>
+        {% endif %}
+        {% set sections = page.toc.items[0].children if page.toc and page.toc.items[0].children else page.toc.items %}
+        {% if sections | length > 2 %}<nav class="page-toc" aria-label="On this page"><span>On this page</span>{% for section in sections %}<a href="#{{ section.id | e }}">{{ section.title }}</a>{% endfor %}</nav>{% endif %}
+        <article>{{ page.content }}</article>
+        <nav class="page-pagination" aria-label="Adjacent pages">
+          {% if page.previous_page %}<a href="{{ page.previous_page.url | url }}" rel="prev"><span>Previous</span>{{ page.previous_page.title | e }}</a>{% endif %}
+          {% if page.next_page %}<a href="{{ page.next_page.url | url }}" rel="next"><span>Next</span>{{ page.next_page.title | e }}</a>{% endif %}
+        </nav>
+      {% endif %}
+      {% endblock %}
+      <footer class="page-footer"><span>{{ config.copyright | e }}</span>{% if page and page.edit_url %}<a href="{{ page.edit_url | e }}">Edit this page</a>{% endif %}</footer>
+    </div>
+  </main>
+  <dialog class="search-dialog" aria-labelledby="search-title">
+    <div class="search-heading"><h2 id="search-title">Search documentation</h2><button class="search-close" type="button" aria-label="Close search">Close</button></div>
+    <label for="search-input">Search terms</label>
+    <input id="search-input" type="search" autocomplete="off" placeholder="e.g. discriminator or cross-validation">
+    <p id="search-status" role="status" aria-live="polite">Enter a term to search the documentation.</p>
+    <ol id="search-results" aria-label="Search results"></ol>
+  </dialog>
+  <script src="{{ 'js/site.js' | url }}" defer></script>
+  {% for script in config.extra_javascript %}{{ script | script_tag }}{% endfor %}
+</body>
+</html>
