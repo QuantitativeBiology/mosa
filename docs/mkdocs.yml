@@ -6,15 +6,22 @@ repo_name: QuantitativeBiology/mosa
 edit_uri: edit/main/docs/
 copyright: MOSA contributors · BSD 3-Clause
 
+docs_dir: .
+site_dir: ../site
+exclude_docs: |
+  /mkdocs.yml
+  /requirements-docs.txt
+  /theme/
+
 theme:
   name: null
-  custom_dir: docs_theme
+  custom_dir: theme
   search_index_only: true
   static_templates:
     - 404.html
 
 watch:
-  - docs_theme
+  - theme
 
 plugins:
   - search:
@@ -27,7 +34,7 @@ markdown_extensions:
       permalink: true
 
 hooks:
-  - docs_theme/hooks.py
+  - theme/hooks.py
 
 validation:
   nav:

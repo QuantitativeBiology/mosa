@@ -2,23 +2,23 @@
 
 [Documentation](../index.md)
 
-The site is built from `docs/` using [MkDocs](https://www.mkdocs.org/) and the repository's custom theme. [GitHub](https://github.com/) continues to render the same Markdown files individually; [GitHub Pages](https://pages.github.com/) serves the website with its sidebar, search, and page navigation.
+The documentation content, `mkdocs.yml`, `requirements-docs.txt`, and custom theme (`theme/`) live under `docs/`. The build excludes these tooling files from the published site. The site is built using [MkDocs](https://www.mkdocs.org/) and the repository's custom theme. [GitHub](https://github.com/) continues to render the same Markdown files individually; [GitHub Pages](https://pages.github.com/) serves the website with its sidebar, search, and page navigation.
 
 ## Preview locally
 
-Install the documentation tools separately from the library:
+Run these commands from the repository root to install the documentation tools separately from the library:
 
 ```bash
 python -m venv /tmp/mosa-docs-env
 source /tmp/mosa-docs-env/bin/activate
-python -m pip install -r requirements-docs.txt
-mkdocs serve
+python -m pip install -r docs/requirements-docs.txt
+mkdocs serve -f docs/mkdocs.yml
 ```
 
-Open the address printed by [MkDocs](https://www.mkdocs.org/), usually `http://127.0.0.1:8000/mosa/`. Changes to Markdown, navigation, and theme files rebuild the preview automatically. Restart the server after editing `docs_theme/hooks.py`.
+Open the address printed by [MkDocs](https://www.mkdocs.org/), usually `http://127.0.0.1:8000/mosa/`. Changes to Markdown, navigation, and theme files rebuild the preview automatically. Restart the server after editing `docs/theme/hooks.py`.
 
 ```bash
-mkdocs build --strict
+mkdocs build --strict -f docs/mkdocs.yml
 ```
 
 A strict build checks the configuration, internal links, and heading anchors, then writes the static site to `site/`.
@@ -33,14 +33,14 @@ The workflow uploads the generated site as a Pages artifact rather than committi
 
 ## Edit content and navigation
 
-Edit Markdown under `docs/` and update `nav` in `mkdocs.yml` when adding or moving a page. Link command names in prose to their command-reference pages; keep commands inside code blocks as plain text for copying. Link external project names to their official documentation or project website. Use relative links so pages remain readable on [GitHub](https://github.com/); a build hook converts links to repository code and root files into [GitHub](https://github.com/) URLs.
+Edit Markdown under `docs/` and update `nav` in `docs/mkdocs.yml` when adding or moving a page. Link command names in prose to their command-reference pages; keep commands inside code blocks as plain text for copying. Link external project names to their official documentation or project website. Use relative links so pages remain readable on [GitHub](https://github.com/); a build hook converts links to repository code and root files into [GitHub](https://github.com/) URLs.
 
 Explain operations and constraints directly, keeping defaults in reference tables and procedures in guides. Specify which behaviour belongs to the library or a particular model, and keep important restrictions beside the relevant operation. Remove repeated introductions and commentary that adds no technical information.
 
 
 ## Theme
 
-`docs_theme/main.html` defines the page structure; `css/site.css` and `js/site.js` define styling, mobile navigation, and search. Fonts use the system sans-serif stack for prose and Menlo with monospace fallbacks for code and navigation labels. Search uses the locally generated [MkDocs](https://www.mkdocs.org/) index without an external service.
+`docs/theme/main.html` defines the page structure; `css/site.css` and `js/site.js` define styling, mobile navigation, and search. Fonts use the system sans-serif stack for prose and Menlo with monospace fallbacks for code and navigation labels. Search uses the locally generated [MkDocs](https://www.mkdocs.org/) index without an external service.
 
 See [MkDocs configuration](https://www.mkdocs.org/user-guide/configuration/) and [GitHub Pages workflows](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages) for the build and hosting settings.
 

@@ -37,7 +37,7 @@ mypy
 pytest -q -m "not behavioral"
 ```
 
-If your change affects learning behavior, also run `pytest -q` to include the behavioral tests. For documentation changes, install `requirements-docs.txt` and run `mkdocs build --strict`. Use `mkdocs serve` to inspect the site; see [Documentation site](docs/development/documentation-site.md) for preview and publication instructions.
+If your change affects learning behavior, also run `pytest -q` to include the behavioral tests. For documentation changes, install `docs/requirements-docs.txt` and run `mkdocs build --strict -f docs/mkdocs.yml`. Use `mkdocs serve -f docs/mkdocs.yml` to inspect the site; see [Documentation site](docs/development/documentation-site.md) for preview and publication instructions.
 
 Keep changes focused and add or update tests when behavior changes. Update the relevant documentation when changing a command or configuration option.
 
