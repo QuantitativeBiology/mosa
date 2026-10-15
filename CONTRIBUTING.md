@@ -1,4 +1,4 @@
-# Contributing to MOSA
+Contributing to MOSA
 
 Contributions can include bug fixes, clearer documentation, tests, and new integration methods.
 
@@ -55,19 +55,17 @@ Explain the problem, what changes for users, and how you verified the result. Li
 ## Publish a release
 
 The `.github/workflows/pypi-publish.yaml` workflow publishes `mosalib` to PyPI
-using Trusted Publishing. PyPI must have a publisher configured for
-`QuantitativeBiology/mosa` and the exact workflow filename `pypi-publish.yaml`.
-No API token or manual approval gate is used.
+using Trusted Publishing.
 
 Set the same stable `X.Y.Z` version in `pyproject.toml` and
 `src/mosa/__init__.py`, then merge the change and release workflow into `main`.
-For the initial `0.1.0` release:
+For example, for the `0.1.0` release:
 
 ```bash
-git switch main
-git pull --ff-only
-git tag v0.1.0
-git push origin v0.1.0
+git switch main      # use main as the branch to tag
+git pull --ff-only   # update
+git tag v0.1.0       # tag the branch. must start with 'v'
+git push origin v0.1.0 # upon push, the tagged version will be puslished to PyPI
 ```
 
 Pushing the tag triggers source/version checks, the existing CI tests, lint and
@@ -82,11 +80,8 @@ in `main`. A manual run on a branch validates and builds without publishing;
 a manual run on a release tag can publish. PyPI does not allow overwriting
 previously uploaded files: use a new version for a correction. If only the
 GitHub Release job fails after upload, rerun that failed job rather than the
-successful publishing job.
-
-GitHub Actions used by the release workflow and its reused CI are pinned to
-commit SHAs. Updating these pins is a deliberate maintenance change; there is
-no Dependabot configuration. Repository administrators should also use a tag
-ruleset to restrict creation and prevent updates or deletion of `v*` tags.
+successful publishing job. GitHub Actions used by the release workflow and its
+reused CI are pinned to commit SHAs.
 
 Return to the [README](README.md) or browse the [documentation](docs/index.md).
+
