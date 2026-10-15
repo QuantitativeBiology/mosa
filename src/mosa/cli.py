@@ -502,7 +502,7 @@ def _add_command(subparsers, name, summary, description, example, doc_page):
         help=summary,
         description=description,
         epilog=f"example:\n  {example}\n\nDocumentation:\n"
-        f"  docs/reference/commands/{doc_page}",
+        f"  https://quantitativebiology.github.io/mosa/reference/commands/{doc_page.removesuffix('.md')}/",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
@@ -519,7 +519,7 @@ def build_parser() -> argparse.ArgumentParser:
         "Select it, the optional MOFA integration, or registered custom models with\n"
         "model.type in a YAML configuration.",
         epilog="Run 'mosa <command> -h' for command details and options.\n\n"
-        "Documentation:\n  docs/index.md",
+        "Documentation:\n  https://quantitativebiology.github.io/mosa/",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="command", required=True)

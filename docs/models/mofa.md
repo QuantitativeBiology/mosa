@@ -6,7 +6,13 @@ This page explains how to fit [MOFA+](https://biofam.github.io/MOFA2/) through M
 
 ## Install the optional dependencies
 
-From the repository root, with the MOSA environment active, install the optional dependency group:
+With the MOSA environment active, install the optional dependency group for the PyPI package:
+
+```bash
+python -m pip install "mosalib[mofa]"
+```
+
+For an editable source installation, run this from the repository root instead:
 
 ```bash
 python -m pip install -e ".[mofa]"

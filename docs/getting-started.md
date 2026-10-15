@@ -4,7 +4,24 @@ This page covers MOSA installation and a complete training example, from prepari
 
 ## Install MOSA
 
-MOSA requires [Python](https://www.python.org/) 3.11 or newer. Clone the repository and create a virtual environment to keep its dependencies separate from other [Python](https://www.python.org/) projects:
+MOSA requires [Python](https://www.python.org/) 3.11 or newer. Choose either installation method below; both create a virtual environment to keep MOSA's dependencies separate from other projects.
+
+### From PyPI
+
+Install the package from PyPI to use MOSA with your own data and configuration files. Create and activate the environment, install MOSA and its dependencies, then display the available commands:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install mosalib
+mosa --help
+```
+
+The package installs as `mosalib` and provides the `mosa` command and `import mosa` in Python. The help output confirms that the command-line interface is available in the active environment.
+
+### From source
+
+To work from a local copy of MOSA, clone the repository and install it in editable mode:
 
 ```bash
 git clone https://github.com/QuantitativeBiology/mosa.git
@@ -15,9 +32,15 @@ python -m pip install -e .
 mosa --help
 ```
 
-On Windows, replace the activation command with `.venv\Scripts\activate`. The final command should display MOSA's available commands, confirming that the command-line interface is installed.
+The editable installation uses the Python code in this checkout, so source changes take effect without reinstalling. The checkout also includes the tutorial files used below.
 
-Keep this environment active and run the remaining commands from the `mosa` directory. The example uses paths relative to that directory, including paths written inside the configuration file.
+On Windows, replace the activation command with `.venv\Scripts\activate`. Keep the environment active when running MOSA. For optional MOFA support, see the [MOFA installation instructions](models/mofa.md#install-the-optional-dependencies).
+
+## Get the tutorial files
+
+The tutorial uses a data generator and configuration files under `docs/examples/`. If you installed from PyPI, download and extract **Source code (zip)** from the [GitHub release](https://github.com/QuantitativeBiology/mosa/releases) matching your installed version. Source installations already include these files.
+
+Run the tutorial and subsequent guides from the repository or extracted archive directory, where `docs/examples/` is located. All example paths are relative to that directory.
 
 ## Prepare the example data
 

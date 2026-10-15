@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "mosalib"
 version = "0.1.0"
 description = "Generative Multi-Omics Data Integration"
+readme = "README.md"
 license = {file = "LICENSE"}
 requires-python = ">=3.11"
 dependencies = [
@@ -27,6 +28,11 @@ dependencies = [
     "umap-learn==0.5.11",
     "optuna>=3.0",
 ]
+
+[project.urls]
+Documentation = "https://quantitativebiology.github.io/mosa/"
+Repository = "https://github.com/QuantitativeBiology/mosa"
+Issues = "https://github.com/QuantitativeBiology/mosa/issues"
 
 [project.optional-dependencies]
 mofa = [

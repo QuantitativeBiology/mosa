@@ -31,8 +31,9 @@ On Windows, use `.venv\Scripts\activate` to activate the environment. The `mofa`
 Run the same core checks used by CI:
 
 ```bash
-ruff check src tests
-ruff format --check src tests
+ruff check src tests .github/scripts
+ruff format --check src tests .github/scripts
+python -m unittest discover -s .github/scripts -p 'test_*.py' -v
 mypy
 pytest -q -m "not behavioral"
 ```
@@ -50,5 +51,42 @@ Document the method's supported operations and restrictions alongside its config
 ## Submit a pull request
 
 Explain the problem, what changes for users, and how you verified the result. Link related issues and include example output or screenshots where they help reviewers assess the change.
+
+## Publish a release
+
+The `.github/workflows/pypi-publish.yaml` workflow publishes `mosalib` to PyPI
+using Trusted Publishing. PyPI must have a publisher configured for
+`QuantitativeBiology/mosa` and the exact workflow filename `pypi-publish.yaml`.
+No API token or manual approval gate is used.
+
+Set the same stable `X.Y.Z` version in `pyproject.toml` and
+`src/mosa/__init__.py`, then merge the change and release workflow into `main`.
+For the initial `0.1.0` release:
+
+```bash
+git switch main
+git pull --ff-only
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Pushing the tag triggers source/version checks, the existing CI tests, lint and
+type checks, then a build. The workflow checks both distribution versions and
+metadata, installs the wheel in a clean environment, checks dependencies, and
+smoke tests the import and CLI outside the checkout. Only those validated
+artifacts are uploaded to PyPI and attached to a GitHub Release. Behavioral
+tests retain their nightly schedule and do not gate releases.
+
+Release tags must use `vX.Y.Z`, match both source versions, and point to a commit
+in `main`. A manual run on a branch validates and builds without publishing;
+a manual run on a release tag can publish. PyPI does not allow overwriting
+previously uploaded files: use a new version for a correction. If only the
+GitHub Release job fails after upload, rerun that failed job rather than the
+successful publishing job.
+
+GitHub Actions used by the release workflow and its reused CI are pinned to
+commit SHAs. Updating these pins is a deliberate maintenance change; there is
+no Dependabot configuration. Repository administrators should also use a tag
+ruleset to restrict creation and prevent updates or deletion of `v*` tags.
 
 Return to the [README](README.md) or browse the [documentation](docs/index.md).

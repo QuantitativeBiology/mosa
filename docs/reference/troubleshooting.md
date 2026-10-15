@@ -4,6 +4,12 @@
 
 Expected configuration, path, and data errors are printed to stderr with `Error:` and exit status 1. Add `--debug` after the command name for a traceback; report unexpected tracebacks without that flag as bugs.
 
+## Installation
+
+### `mosa: command not found`
+
+Activate the environment where you installed `mosalib`, then run `mosa --help` again. If MOSA is not installed in that environment, follow [Install MOSA](../getting-started.md#install-mosa).
+
 ## Help and progress
 
 Use `mosa -h` to choose a command and `mosa <command> -h` for its purpose,

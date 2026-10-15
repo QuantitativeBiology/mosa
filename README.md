@@ -50,7 +50,24 @@ The library provides command-line and [Python](https://www.python.org/) interfac
 
 ### Install
 
-Use [Python](https://www.python.org/) 3.11 or newer. Create a virtual environment before installing MOSA to keep its dependencies separate from other projects:
+Use [Python](https://www.python.org/) 3.11 or newer. Create a virtual environment to keep MOSA's dependencies separate from other projects.
+
+#### From PyPI
+
+Install MOSA and its dependencies from PyPI, then check that the command-line interface is available:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install mosalib
+mosa --help
+```
+
+The final command lists MOSA's available commands. The package installs as `mosalib`; use `mosa` in the terminal or `import mosa` in Python.
+
+#### From source
+
+To work from a local copy of the code, clone the repository and install it in editable mode:
 
 ```bash
 git clone https://github.com/QuantitativeBiology/mosa.git
@@ -58,9 +75,12 @@ cd mosa
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
+mosa --help
 ```
 
-On Windows, replace the activation command with `.venv\Scripts\activate`. Keep the environment active and run the following commands from the repository root.
+An editable installation uses the code in this checkout, so changes to the Python source are available without reinstalling the package.
+
+On Windows, replace the activation command with `.venv\Scripts\activate`. Keep the environment active when running MOSA.
 
 ### Prepare and run
 

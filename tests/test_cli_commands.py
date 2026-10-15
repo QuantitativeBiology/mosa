@@ -721,9 +721,11 @@ def test_help_describes_the_command_with_an_example(command):
     assert 10 <= len(sub.description.split()) <= 50, help_text
     assert f"mosa {command} " in example, help_text
     assert "required inputs" in help_text, help_text
-    doc_path = help_text.partition("Documentation:\n")[2].strip()
-    assert doc_path.startswith("docs/reference/commands/"), help_text
-    assert doc_path == f"docs/reference/commands/{command}.md", help_text
+    doc_url = help_text.partition("Documentation:\n")[2].strip()
+    assert doc_url == (
+        f"https://quantitativebiology.github.io/mosa/reference/commands/{command}/"
+    ), help_text
+    doc_path = f"docs/reference/commands/{command}.md"
     assert (Path(__file__).resolve().parents[1] / doc_path).is_file()
 
 
@@ -743,7 +745,7 @@ def test_help_needs_no_inputs(command, flag, capsys):
             "MOFA",
             "custom models",
             "model.type",
-            "Documentation:\n  docs/index.md",
+            "Documentation:\n  https://quantitativebiology.github.io/mosa/",
         ):
             assert text in captured.out
 
