@@ -7,6 +7,7 @@
 </p>
 
 <p align="center">
+  <a href="https://pypi.org/project/mosalib/"><img src="https://img.shields.io/pypi/v/mosalib?color=137F82" alt="PyPI version"></a>
   <a href="https://github.com/QuantitativeBiology/mosa/actions/workflows/python.yml"><img src="https://github.com/QuantitativeBiology/mosa/actions/workflows/python.yml/badge.svg?branch=main" alt="CI status on main"></a>
   <a href="https://github.com/QuantitativeBiology/mosa/actions/workflows/docs.yml"><img src="https://github.com/QuantitativeBiology/mosa/actions/workflows/docs.yml/badge.svg?branch=main" alt="Documentation checks on main"></a>
   <a href="https://github.com/QuantitativeBiology/mosa/blob/main/pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-137F82" alt="Python 3.11 or newer"></a>
@@ -52,7 +53,7 @@ The library provides command-line and [Python](https://www.python.org/) interfac
 
 Use [Python](https://www.python.org/) 3.11 or newer. Create a virtual environment to keep MOSA's dependencies separate from other projects.
 
-#### From PyPI
+#### From [PyPI](https://pypi.org/project/mosalib/)
 
 Install MOSA and its dependencies from PyPI, then check that the command-line interface is available:
 
