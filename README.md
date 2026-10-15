@@ -1,22 +1,22 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/mosa-banner-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="docs/assets/brand/mosa-banner.svg">
-    <img src="docs/assets/brand/mosa-banner.svg" alt="MOSA — The Multi-Omic Synthetic Augmentation Library" width="100%">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/QuantitativeBiology/mosa/main/docs/assets/brand/mosa-banner-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/QuantitativeBiology/mosa/main/docs/assets/brand/mosa-banner.svg">
+    <img src="https://raw.githubusercontent.com/QuantitativeBiology/mosa/main/docs/assets/brand/mosa-banner.svg" alt="MOSA — The Multi-Omic Synthetic Augmentation Library" width="100%">
   </picture>
 </p>
 
 <p align="center">
   <a href="https://github.com/QuantitativeBiology/mosa/actions/workflows/python.yml"><img src="https://github.com/QuantitativeBiology/mosa/actions/workflows/python.yml/badge.svg?branch=main" alt="CI status on main"></a>
   <a href="https://github.com/QuantitativeBiology/mosa/actions/workflows/docs.yml"><img src="https://github.com/QuantitativeBiology/mosa/actions/workflows/docs.yml/badge.svg?branch=main" alt="Documentation checks on main"></a>
-  <a href="pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-137F82" alt="Python 3.11 or newer"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-BSD--3--Clause-137F82" alt="License: BSD 3-Clause"></a>
+  <a href="https://github.com/QuantitativeBiology/mosa/blob/main/pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-137F82" alt="Python 3.11 or newer"></a>
+  <a href="https://github.com/QuantitativeBiology/mosa/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-BSD--3--Clause-137F82" alt="License: BSD 3-Clause"></a>
 </p>
 
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
   <a href="https://quantitativebiology.github.io/mosa/">Documentation</a> ·
-  <a href="CONTRIBUTING.md">Contributing</a> ·
+  <a href="https://github.com/QuantitativeBiology/mosa/blob/main/CONTRIBUTING.md">Contributing</a> ·
   <a href="https://github.com/QuantitativeBiology/mosa/issues">Issues</a>
 </p>
 
@@ -28,9 +28,9 @@ The [MOSA VAE](https://www.nature.com/articles/s41467-024-54771-4) is a conditio
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/mosa-vae-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="docs/assets/brand/mosa-vae.svg">
-    <img src="docs/assets/brand/mosa-vae.svg" alt="MOSA VAE with one encoder and decoder per omic, a shared latent representation, decoder conditioning, and an optional source discriminator.">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/QuantitativeBiology/mosa/main/docs/assets/brand/mosa-vae-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/QuantitativeBiology/mosa/main/docs/assets/brand/mosa-vae.svg">
+    <img src="https://raw.githubusercontent.com/QuantitativeBiology/mosa/main/docs/assets/brand/mosa-vae.svg" alt="MOSA VAE with one encoder and decoder per omic, a shared latent representation, decoder conditioning, and an optional source discriminator.">
   </picture>
 </p>
 
@@ -40,9 +40,9 @@ The library provides command-line and [Python](https://www.python.org/) interfac
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/mosa-workflow-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="docs/assets/brand/mosa-workflow.svg">
-    <img src="docs/assets/brand/mosa-workflow.svg" alt="Omic matrices and metadata enter a common data interface for the MOSA VAE or a custom model. Library operations include configuration validation, training, cross-validation, hyperparameter optimization, saving results, and analysis plotting.">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/QuantitativeBiology/mosa/main/docs/assets/brand/mosa-workflow-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/QuantitativeBiology/mosa/main/docs/assets/brand/mosa-workflow.svg">
+    <img src="https://raw.githubusercontent.com/QuantitativeBiology/mosa/main/docs/assets/brand/mosa-workflow.svg" alt="Omic matrices and metadata enter a common data interface for the MOSA VAE or a custom model. Library operations include configuration validation, training, cross-validation, hyperparameter optimization, saving results, and analysis plotting.">
   </picture>
 </p>
 
@@ -84,7 +84,7 @@ On Windows, replace the activation command with `.venv\Scripts\activate`. Keep t
 
 ### Prepare and run
 
-For a first run, follow [Getting started](https://quantitativebiology.github.io/mosa/getting-started/) using the supplied synthetic dataset. For your own data, follow [Preparing a dataset](https://quantitativebiology.github.io/mosa/guides/preparing-data/), then adapt the [example configuration](docs/examples/experiment.yaml) with your data path, view names, and output directory. Save it as `config.yaml` and run:
+For a first run, follow [Getting started](https://quantitativebiology.github.io/mosa/getting-started/) using the supplied synthetic dataset. For your own data, follow [Preparing a dataset](https://quantitativebiology.github.io/mosa/guides/preparing-data/), then adapt the [example configuration](https://github.com/QuantitativeBiology/mosa/blob/main/docs/examples/experiment.yaml) with your data path, view names, and output directory. Save it as `config.yaml` and run:
 
 ```bash
 mosa validate --config config.yaml
@@ -104,8 +104,8 @@ Use the [documentation](https://quantitativebiology.github.io/mosa/) to follow a
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, checks, and the model interface. Report bugs or discuss changes in [GitHub issues](https://github.com/QuantitativeBiology/mosa/issues).
+See [CONTRIBUTING.md](https://github.com/QuantitativeBiology/mosa/blob/main/CONTRIBUTING.md) for development setup, checks, and the model interface. Report bugs or discuss changes in [GitHub issues](https://github.com/QuantitativeBiology/mosa/issues).
 
 ## License
 
-MOSA is licensed under the [BSD 3-Clause License](LICENSE).
+MOSA is licensed under the [BSD 3-Clause License](https://github.com/QuantitativeBiology/mosa/blob/main/LICENSE).
